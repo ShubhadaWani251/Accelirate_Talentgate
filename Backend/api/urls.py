@@ -29,4 +29,13 @@ urlpatterns = [
     path('batches/<int:batch_id>/finalize/', views.BatchFinalizeView.as_view(), name='batch-finalize'),
     path('batches/<int:batch_id>/send-invites/', views.BatchSendInvitesView.as_view(),
          name='batch-send-invites'),
+
+    path('dashboard/', views.DashboardSummaryView.as_view(), name='dashboard-summary'),
+
+    path('candidates/', views.CandidateListView.as_view(), name='candidate-list'),
+    path('candidates/export/', views.CandidateExportView.as_view(), name='candidate-export'),
+    path('candidates/notify/', views.CandidateNotifyView.as_view(), name='candidate-notify'),
+    path('candidates/<int:candidate_id>/', views.CandidateDetailView.as_view(), name='candidate-detail'),
+    path('candidates/<int:candidate_id>/resend-invite/', views.CandidateResendInviteView.as_view(),
+         name='candidate-resend-invite'),
 ]

@@ -8,12 +8,13 @@ import ForgotPassword from '../features/auth/ForgotPassword';
 import OtpVerification from '../features/auth/OtpVerification';
 import ProtectedRoute from '../components/common/ProtectedRoute';
 import ProtectedLayout from '../components/layout/ProtectedLayout';
-import AdminDashboardPlaceholder from '../pages/admin/DashboardPlaceholder';
-import TaDashboardPlaceholder from '../pages/ta/DashboardPlaceholder';
+import Dashboard from '../pages/Dashboard';
 import Profile from '../pages/Profile';
 import BatchList from '../pages/batches/BatchList';
 import BatchDetail from '../pages/batches/BatchDetail';
 import BatchWizard from '../features/batches/BatchWizard';
+import AllCandidates from '../pages/candidates/AllCandidates';
+import CandidateDetail from '../pages/candidates/CandidateDetail';
 
 function RoleHome() {
   const roleCode = useSelector(selectRoleCode);
@@ -50,7 +51,7 @@ export default function AppRouter() {
             path="/admin/dashboard"
             element={
               <ProtectedRoute allowedRoles={['admin']}>
-                <AdminDashboardPlaceholder />
+                <Dashboard />
               </ProtectedRoute>
             }
           />
@@ -58,7 +59,7 @@ export default function AppRouter() {
             path="/ta/dashboard"
             element={
               <ProtectedRoute allowedRoles={['ta']}>
-                <TaDashboardPlaceholder />
+                <Dashboard />
               </ProtectedRoute>
             }
           />
@@ -68,6 +69,8 @@ export default function AppRouter() {
           <Route path="/batches" element={<BatchList />} />
           <Route path="/batches/new" element={<BatchWizard />} />
           <Route path="/batches/:id" element={<BatchDetail />} />
+          <Route path="/candidates" element={<AllCandidates />} />
+          <Route path="/candidates/:id" element={<CandidateDetail />} />
         </Route>
 
         <Route path="/" element={<RoleHome />} />

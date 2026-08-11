@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from api.models import Batch, Candidate, DuplicateCheck
+from api.serializers.common import mask_aadhaar
 
 
 SECTION_FIELDS = ['logical', 'quantitative', 'verbal', 'programming']
@@ -74,12 +75,6 @@ class BatchDefaultsSerializer(serializers.Serializer):
     programming_cutoff = serializers.DecimalField(max_digits=5, decimal_places=2, min_value=0, max_value=100)
 
 
-def _mask_aadhaar(value):
-    if not value or len(value) < 4:
-        return None
-    return f'XXXX-XXXX-{value[-4:]}'
-
-
 class CandidateStagingSerializer(serializers.ModelSerializer):
     """One row in the Upload Review table."""
     full_name = serializers.CharField(read_only=True)
@@ -98,7 +93,7 @@ class CandidateStagingSerializer(serializers.ModelSerializer):
         ]
 
     def get_aadhaar_masked(self, candidate):
-        return _mask_aadhaar(candidate.aadhaar_number)
+        return mask_aadhaar(candidate.aadhaar_number)
 
     def _latest_check(self, candidate):
         if not hasattr(candidate, '_latest_dup_check'):

@@ -21,6 +21,14 @@ from .batches import (
     BatchFinalizeView,
     BatchSendInvitesView,
 )
+from .candidates import (
+    CandidateListView,
+    CandidateDetailView,
+    CandidateResendInviteView,
+    CandidateNotifyView,
+    CandidateExportView,
+    DashboardSummaryView,
+)
 
 __all__ = [
     'health_check',
@@ -30,4 +38,6 @@ __all__ = [
     'BatchListCreateView', 'BatchDetailView', 'BatchDefaultsView', 'BatchTemplateDownloadView',
     'BatchUploadView', 'BatchCandidatesStagingView', 'BatchCandidateDeleteView',
     'BatchCandidateClearDuplicateView', 'BatchFinalizeView', 'BatchSendInvitesView',
+    'CandidateListView', 'CandidateDetailView', 'CandidateResendInviteView',
+    'CandidateNotifyView', 'CandidateExportView', 'DashboardSummaryView',
 ]

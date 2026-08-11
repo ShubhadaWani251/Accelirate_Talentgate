@@ -8,13 +8,13 @@ import * as authApi from '../../api/authApi';
 const NAV_LINKS = {
   admin: [
     { label: 'Dashboard', to: '/admin/dashboard' },
-    { label: 'All Candidates', to: null },
+    { label: 'All Candidates', to: '/candidates' },
     { label: 'Question Bank', to: null },
     { label: 'Users', to: null },
   ],
   ta: [
     { label: 'Dashboard', to: '/ta/dashboard' },
-    { label: 'All Candidates', to: null },
+    { label: 'All Candidates', to: '/candidates' },
   ],
 };
 

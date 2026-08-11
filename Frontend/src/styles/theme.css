@@ -136,12 +136,13 @@ h1, h2, h3, h4, .brand, .btn, .box-label {
 
 .field { margin-bottom: 15px; }
 .field label { display: block; font-size: 12.5px; font-weight: 500; color: #4a5160; margin-bottom: 5px; }
-.field input, .field select {
+.field input, .field select, .field textarea {
   width: 100%; border: 1px solid var(--line-soft); border-radius: 8px; padding: 10px 12px;
   font-size: 13px; color: var(--text); background: #fafbfc; font-family: inherit;
   transition: border-color .15s ease, box-shadow .15s ease;
 }
-.field input:focus, .field select:focus {
+.field textarea { resize: vertical; }
+.field input:focus, .field select:focus, .field textarea:focus {
   outline: none; border-color: var(--brand-blue); box-shadow: 0 0 0 3px var(--accent-soft); background: #fff;
 }
 .field input.has-error { border-color: var(--brand-red); }

@@ -33,6 +33,41 @@ def generate_template_workbook():
     return wb
 
 
+EXPORT_COLUMNS = [
+    'Name', 'Email', 'Batch Name', 'College', 'Degree', 'Stream', 'Percentage',
+    'Passing Out Year', 'Location', 'Status', 'Result', 'Overall Score',
+]
+
+
+def generate_candidates_workbook(candidates, latest_attempt_fn):
+    """Export for the All Candidates screen. latest_attempt_fn resolves a candidate's
+    latest ExamAttempt (or None) - passed in rather than imported, to avoid a serializers
+    -> services import cycle.
+    """
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Candidates'
+    ws.append(EXPORT_COLUMNS)
+    for candidate in candidates:
+        attempt = latest_attempt_fn(candidate)
+        overall_score = attempt.overall_score if attempt else candidate.overall_score
+        ws.append([
+            candidate.full_name,
+            candidate.email,
+            candidate.batch.batch_name,
+            candidate.college_name,
+            candidate.degree,
+            candidate.stream,
+            float(candidate.percentage) if candidate.percentage is not None else None,
+            candidate.passing_out_year,
+            candidate.location,
+            candidate.get_status_display(),
+            candidate.get_result_display(),
+            float(overall_score) if overall_score is not None else None,
+        ])
+    return wb
+
+
 def _normalize_header(value):
     return str(value).strip().lower() if value is not None else ''
 

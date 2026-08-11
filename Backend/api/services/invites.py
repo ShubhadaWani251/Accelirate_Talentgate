@@ -43,6 +43,22 @@ def create_invitations(batch, user):
     return invitations
 
 
+def create_single_reinvite(candidate, user):
+    """Issue one fresh Invitation for a candidate who's already been invited before
+    (e.g. "Send Invite Again" from All Candidates / Candidate Details). Unlike
+    create_invitations, this doesn't touch candidate.status - a re-invite doesn't change
+    where the candidate is in the pipeline, it just gives them a new link/token.
+    """
+    return Invitation.objects.create(
+        candidate=candidate,
+        batch=candidate.batch,
+        unique_link_token=_generate_token(),
+        link_expired_at=candidate.batch.link_valid_until,
+        is_re_invite=True,
+        sent_by=user,
+    )
+
+
 def send_invite_email(invitation, base_url):
     candidate = invitation.candidate
     batch = invitation.batch
@@ -84,6 +100,32 @@ def send_invites_async(invitations, base_url):
                     )
                     invitation.email_status = Invitation.EmailStatus.FAILED
                     invitation.save(update_fields=['email_status'])
+        finally:
+            connections.close_all()
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+
+def send_notification_emails(candidates, subject, message):
+    """Send an ad-hoc notification (e.g. 'On Hold', 'Shortlisted') to a shortlist of
+    candidates, on a single background thread - same fire-and-forget pattern as
+    send_invites_async, since these emails don't have a per-row status to track back.
+    """
+    def _worker():
+        try:
+            for candidate in candidates:
+                try:
+                    send_mail(
+                        subject=subject,
+                        message=message,
+                        from_email=settings.DEFAULT_FROM_EMAIL,
+                        recipient_list=[candidate.email],
+                        fail_silently=False,
+                    )
+                except AnymailError:
+                    logger.exception(
+                        'Failed to send notification email to candidate_id=%s', candidate.candidate_id
+                    )
         finally:
             connections.close_all()
 
