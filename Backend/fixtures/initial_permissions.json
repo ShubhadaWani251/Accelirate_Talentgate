@@ -1,0 +1,146 @@
+[
+  {
+    "model": "api.permission",
+    "pk": 1,
+    "fields": {
+      "permission_code": "user.view",
+      "module": "Users",
+      "description": "Can view users"
+    }
+  },
+  {
+    "model": "api.permission",
+    "pk": 2,
+    "fields": {
+      "permission_code": "user.create",
+      "module": "Users",
+      "description": "Can create users"
+    }
+  },
+  {
+    "model": "api.permission",
+    "pk": 3,
+    "fields": {
+      "permission_code": "user.edit",
+      "module": "Users",
+      "description": "Can edit users"
+    }
+  },
+  {
+    "model": "api.permission",
+    "pk": 4,
+    "fields": {
+      "permission_code": "user.delete",
+      "module": "Users",
+      "description": "Can delete users"
+    }
+  },
+  {
+    "model": "api.permission",
+    "pk": 5,
+    "fields": {
+      "permission_code": "batch.view",
+      "module": "Batches",
+      "description": "Can view batches"
+    }
+  },
+  {
+    "model": "api.permission",
+    "pk": 6,
+    "fields": {
+      "permission_code": "batch.create",
+      "module": "Batches",
+      "description": "Can create batches"
+    }
+  },
+  {
+    "model": "api.permission",
+    "pk": 7,
+    "fields": {
+      "permission_code": "batch.edit",
+      "module": "Batches",
+      "description": "Can edit batches"
+    }
+  },
+  {
+    "model": "api.permission",
+    "pk": 8,
+    "fields": {
+      "permission_code": "candidate.view",
+      "module": "Candidates",
+      "description": "Can view candidates"
+    }
+  },
+  {
+    "model": "api.permission",
+    "pk": 9,
+    "fields": {
+      "permission_code": "candidate.create",
+      "module": "Candidates",
+      "description": "Can create candidates"
+    }
+  },
+  {
+    "model": "api.permission",
+    "pk": 10,
+    "fields": {
+      "permission_code": "candidate.edit",
+      "module": "Candidates",
+      "description": "Can edit candidates"
+    }
+  },
+  {
+    "model": "api.permission",
+    "pk": 11,
+    "fields": {
+      "permission_code": "question.manage",
+      "module": "Questions",
+      "description": "Can manage questions"
+    }
+  },
+  {
+    "model": "api.permission",
+    "pk": 12,
+    "fields": {
+      "permission_code": "exam.view",
+      "module": "Exam",
+      "description": "Can view exam attempts"
+    }
+  },
+  {
+    "model": "api.permission",
+    "pk": 13,
+    "fields": {
+      "permission_code": "exam.terminate",
+      "module": "Exam",
+      "description": "Can terminate exam attempts"
+    }
+  },
+  {
+    "model": "api.permission",
+    "pk": 14,
+    "fields": {
+      "permission_code": "invitation.send",
+      "module": "Invitations",
+      "description": "Can send invitations"
+    }
+  },
+  {
+    "model": "api.permission",
+    "pk": 15,
+    "fields": {
+      "permission_code": "analytics.view",
+      "module": "Analytics",
+      "description": "Can view analytics"
+    }
+  },
+  {
+    "model": "api.permission",
+    "pk": 16,
+    "fields": {
+      "permission_code": "settings.manage",
+      "module": "Settings",
+      "description": "Can manage settings"
+    }
+  }
+]

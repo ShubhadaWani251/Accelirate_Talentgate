@@ -1,0 +1,19 @@
+# --- Backend (Django) ---
+Backend/venv/
+**/__pycache__/
+*.pyc
+Backend/db.sqlite3
+Backend/.env
+Backend/.admin_credentials.txt
+Backend/.gmail_test_admin_credentials.txt
+Backend/media/
+Backend/logs/
+Backend/staticfiles/
+*.log
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Claude Code local state ---
+.claude/settings.local.json

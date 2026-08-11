@@ -1,0 +1,30 @@
+[
+  {
+    "model": "api.role",
+    "pk": 1,
+    "fields": {
+      "role_name": "Administrator",
+      "role_code": "admin",
+      "description": "Full system access",
+      "priority": 100,
+      "is_system": true,
+      "is_active": true,
+      "created_at": "2026-08-06T00:00:00Z",
+      "updated_at": "2026-08-06T00:00:00Z"
+    }
+  },
+  {
+    "model": "api.role",
+    "pk": 2,
+    "fields": {
+      "role_name": "Staffing User",
+      "role_code": "ta",
+      "description": "Can manage batches and candidates",
+      "priority": 50,
+      "is_system": true,
+      "is_active": true,
+      "created_at": "2026-08-06T00:00:00Z",
+      "updated_at": "2026-08-06T00:00:00Z"
+    }
+  }
+]

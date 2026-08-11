@@ -1,0 +1,125 @@
+from rest_framework import serializers
+
+from api.models import Batch, Candidate, DuplicateCheck
+
+
+SECTION_FIELDS = ['logical', 'quantitative', 'verbal', 'programming']
+
+
+class BatchSerializer(serializers.ModelSerializer):
+    """Used for both create (Configure Batch step) and edit (Batch Details screen)."""
+    primary_ta_user_name = serializers.CharField(source='primary_ta_user.full_name', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    pass_count = serializers.SerializerMethodField()
+    fail_count = serializers.SerializerMethodField()
+    borderline_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Batch
+        fields = [
+            'batch_id', 'batch_name', 'college_name',
+            'link_valid_from', 'link_valid_until', 'exam_duration_minutes',
+            'logical_questions', 'quantitative_questions', 'verbal_questions', 'programming_questions',
+            'logical_cutoff', 'quantitative_cutoff', 'verbal_cutoff', 'programming_cutoff',
+            'status', 'status_display', 'total_candidates',
+            'primary_ta_user', 'primary_ta_user_name', 'created_at',
+            'pass_count', 'fail_count', 'borderline_count',
+        ]
+        read_only_fields = [
+            'batch_id', 'status', 'status_display', 'total_candidates',
+            'primary_ta_user', 'primary_ta_user_name', 'created_at',
+        ]
+
+    def get_pass_count(self, batch):
+        return batch.candidate_set.filter(result=Candidate.Result.PASS, is_deleted=False).count()
+
+    def get_fail_count(self, batch):
+        return batch.candidate_set.filter(result=Candidate.Result.FAIL, is_deleted=False).count()
+
+    def get_borderline_count(self, batch):
+        # No real exam scoring exists yet (that's Phase 4) - always 0 for now, kept here so
+        # the frontend table shape doesn't need to change once scoring lands.
+        return 0
+
+    def validate(self, attrs):
+        link_from = attrs.get('link_valid_from', getattr(self.instance, 'link_valid_from', None))
+        link_until = attrs.get('link_valid_until', getattr(self.instance, 'link_valid_until', None))
+        if link_from and link_until and link_until <= link_from:
+            raise serializers.ValidationError(
+                {'link_valid_until': 'Must be after Link Valid From.'}
+            )
+        for section in SECTION_FIELDS:
+            count_field = f'{section}_questions'
+            cutoff_field = f'{section}_cutoff'
+            if count_field in attrs and attrs[count_field] <= 0:
+                raise serializers.ValidationError({count_field: 'Must be at least 1.'})
+            if cutoff_field in attrs and not (0 <= attrs[cutoff_field] <= 100):
+                raise serializers.ValidationError({cutoff_field: 'Must be between 0 and 100.'})
+        return attrs
+
+
+class BatchDefaultsSerializer(serializers.Serializer):
+    """Org-wide default exam config, backed by the Setting key/value table (setting_group='exam_config').
+    Saving these only affects batches created AFTER the save - each Batch snapshots its own
+    copy of these values at creation time.
+    """
+    exam_duration_minutes = serializers.IntegerField(min_value=1)
+    logical_questions = serializers.IntegerField(min_value=1)
+    quantitative_questions = serializers.IntegerField(min_value=1)
+    verbal_questions = serializers.IntegerField(min_value=1)
+    programming_questions = serializers.IntegerField(min_value=1)
+    logical_cutoff = serializers.DecimalField(max_digits=5, decimal_places=2, min_value=0, max_value=100)
+    quantitative_cutoff = serializers.DecimalField(max_digits=5, decimal_places=2, min_value=0, max_value=100)
+    verbal_cutoff = serializers.DecimalField(max_digits=5, decimal_places=2, min_value=0, max_value=100)
+    programming_cutoff = serializers.DecimalField(max_digits=5, decimal_places=2, min_value=0, max_value=100)
+
+
+def _mask_aadhaar(value):
+    if not value or len(value) < 4:
+        return None
+    return f'XXXX-XXXX-{value[-4:]}'
+
+
+class CandidateStagingSerializer(serializers.ModelSerializer):
+    """One row in the Upload Review table."""
+    full_name = serializers.CharField(read_only=True)
+    aadhaar_masked = serializers.SerializerMethodField()
+    validation_status_display = serializers.CharField(source='get_validation_status_display', read_only=True)
+    duplicate_status = serializers.SerializerMethodField()
+    duplicate_status_display = serializers.SerializerMethodField()
+    last_attempt = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Candidate
+        fields = [
+            'candidate_id', 'upload_row_number', 'full_name', 'email', 'aadhaar_masked',
+            'validation_status', 'validation_status_display',
+            'duplicate_status', 'duplicate_status_display', 'last_attempt',
+        ]
+
+    def get_aadhaar_masked(self, candidate):
+        return _mask_aadhaar(candidate.aadhaar_number)
+
+    def _latest_check(self, candidate):
+        if not hasattr(candidate, '_latest_dup_check'):
+            candidate._latest_dup_check = (
+                candidate.duplicate_checks.order_by('-checked_at').first()
+            )
+        return candidate._latest_dup_check
+
+    def get_duplicate_status(self, candidate):
+        check = self._latest_check(candidate)
+        return check.check_status if check else None
+
+    def get_duplicate_status_display(self, candidate):
+        check = self._latest_check(candidate)
+        return check.get_check_status_display() if check else None
+
+    def get_last_attempt(self, candidate):
+        check = self._latest_check(candidate)
+        if not check or not check.existing_candidate:
+            return None
+        return {
+            'batch_name': check.existing_candidate.batch.batch_name,
+            'date': check.existing_attempt_date,
+        }
