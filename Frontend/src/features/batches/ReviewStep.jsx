@@ -27,6 +27,8 @@ export default function ReviewStep({ batch, onFinalized }) {
     setLoading(true);
     try {
       setCandidates(await batchApi.getStagingCandidates(batch.batch_id));
+    } catch (err) {
+      toast.error(extractErrorMessage(err));
     } finally {
       setLoading(false);
     }

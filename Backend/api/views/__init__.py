@@ -27,8 +27,9 @@ from .candidates import (
     CandidateResendInviteView,
     CandidateNotifyView,
     CandidateExportView,
-    DashboardSummaryView,
+    CandidateEvidenceZipView,
 )
+from .dashboard import DashboardSummaryView
 
 __all__ = [
     'health_check',
@@ -39,5 +40,5 @@ __all__ = [
     'BatchUploadView', 'BatchCandidatesStagingView', 'BatchCandidateDeleteView',
     'BatchCandidateClearDuplicateView', 'BatchFinalizeView', 'BatchSendInvitesView',
     'CandidateListView', 'CandidateDetailView', 'CandidateResendInviteView',
-    'CandidateNotifyView', 'CandidateExportView', 'DashboardSummaryView',
+    'CandidateNotifyView', 'CandidateExportView', 'CandidateEvidenceZipView', 'DashboardSummaryView',
 ]

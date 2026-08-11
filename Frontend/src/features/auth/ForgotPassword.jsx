@@ -7,8 +7,18 @@ import * as authApi from '../../api/authApi';
 import BrandHeader from '../../components/layout/BrandHeader';
 import BrandFooter from '../../components/layout/BrandFooter';
 
+// Catches obvious mistakes (wrong domain, typos) before hitting the network. Deliberately does
+// NOT check whether the email is actually registered - the backend (ForgotPasswordView) always
+// returns the same generic response either way, so an attacker can't use this form to find out
+// which corporate accounts exist. This is a UX improvement, not a security boundary.
 const schema = yup.object({
-  email: yup.string().email('Enter a valid email').required('Corporate email is required'),
+  email: yup
+    .string()
+    .email('Enter a valid email')
+    .required('Corporate email is required')
+    .test('corporate-domain', 'Must be an @accelirate.com email address', (value) =>
+      !value || value.toLowerCase().endsWith('@accelirate.com')
+    ),
 });
 
 export default function ForgotPassword() {

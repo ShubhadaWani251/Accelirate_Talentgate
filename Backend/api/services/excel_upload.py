@@ -1,7 +1,8 @@
+from django.db import transaction
 from openpyxl import Workbook, load_workbook
 
 from api.models import Candidate
-from api.services.duplicate_check import run_duplicate_check
+from api.services.duplicate_check import preload_duplicate_lookup, run_duplicate_check
 
 TEMPLATE_COLUMNS = [
     'Name', 'Email', 'Aadhaar Number', 'College Name', 'Degree',
@@ -115,12 +116,25 @@ def _to_int(value):
         return None
 
 
+@transaction.atomic
 def stage_candidates_from_workbook(batch, file_obj, user, cooling_off_months=3):
     """Parse the uploaded workbook and create one Candidate row per data row, attached
     to `batch` (expected to be in Batch.Status.DRAFT), each validated and duplicate-checked.
+
+    Wrapped in one transaction so a failure partway through (e.g. a bad row triggering an
+    unexpected DB error) can't leave a batch half-populated - the caller's `except Exception`
+    around this call sees a clean rollback either way. Rows are parsed into a list up front
+    (rather than streamed) so every Aadhaar number is known before duplicate-checking starts,
+    letting preload_duplicate_lookup fetch every existing match in one query instead of one
+    query per row.
     """
+    rows = list(parse_uploaded_workbook(file_obj))
+    duplicate_lookup = preload_duplicate_lookup(
+        (row.get('aadhaar_number') or '').strip() for row in rows
+    )
+
     created = []
-    for data in parse_uploaded_workbook(file_obj):
+    for data in rows:
         name = data.get('name', '') or ''
         name_parts = name.split(None, 1)
         first_name = name_parts[0] if name_parts else ''
@@ -156,6 +170,11 @@ def stage_candidates_from_workbook(batch, file_obj, user, cooling_off_months=3):
             validation_status=validation_status,
             created_by=user,
         )
-        run_duplicate_check(candidate, cooling_off_months=cooling_off_months)
+        run_duplicate_check(candidate, cooling_off_months=cooling_off_months, existing_lookup=duplicate_lookup)
+        if candidate.aadhaar_number:
+            # Keep the lookup current so a later row in this SAME upload that repeats an
+            # Aadhaar number is still caught as a duplicate against this one, not just against
+            # candidates that existed before the upload started.
+            duplicate_lookup[candidate.aadhaar_number] = candidate
         created.append(candidate)
     return created

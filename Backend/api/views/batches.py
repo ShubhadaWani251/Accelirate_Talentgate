@@ -1,16 +1,24 @@
 import io
 import logging
+import zipfile
 
 from django.conf import settings
+from django.db import DataError
+from django.db.models import Q
 from django.http import Http404, HttpResponse
+from openpyxl.utils.exceptions import InvalidFileException
 from rest_framework import status
 from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from api.models import Batch, Candidate, DuplicateCheck, Invitation
+from api.pagination import StandardResultsPagination
 from api.permissions import IsAdminOrTA
-from api.serializers.batch import BatchDefaultsSerializer, BatchSerializer, CandidateStagingSerializer
+from api.serializers.batch import (
+    BatchDefaultsSerializer, BatchSerializer, CandidateStagingSerializer, annotate_batch_counts,
+)
+from api.services.access import can_access_batch
 from api.services.audit import log_action
 from api.services.batch_defaults import get_batch_defaults, save_batch_defaults
 from api.services.duplicate_check import clear_duplicate
@@ -20,17 +28,12 @@ from api.services.invites import create_invitations, send_invites_async
 logger = logging.getLogger(__name__)
 
 
-def _can_access_batch(user, batch):
-    return user.role.role_code == 'admin' or batch.primary_ta_user_id == user.user_id \
-        or batch.created_by_id == user.user_id
-
-
 def _get_batch_or_404(user, batch_id):
     try:
         batch = Batch.objects.select_related('primary_ta_user').get(batch_id=batch_id, is_deleted=False)
     except Batch.DoesNotExist:
         raise Http404
-    if not _can_access_batch(user, batch):
+    if not can_access_batch(user, batch):
         raise Http404  # don't reveal existence of batches the caller can't access
     return batch
 
@@ -44,10 +47,11 @@ class BatchListCreateView(APIView):
             qs = qs.filter(primary_ta_user=request.user)
         search = request.query_params.get('search', '').strip()
         if search:
-            from django.db.models import Q
             qs = qs.filter(Q(batch_name__icontains=search) | Q(college_name__icontains=search))
-        qs = qs.order_by('-created_at')
-        return Response(BatchSerializer(qs, many=True).data)
+        qs = annotate_batch_counts(qs.order_by('-created_at'))
+        paginator = StandardResultsPagination()
+        page = paginator.paginate_queryset(qs, request, view=self)
+        return paginator.get_paginated_response(BatchSerializer(page, many=True).data)
 
     def post(self, request):
         serializer = BatchSerializer(data=request.data)
@@ -110,6 +114,11 @@ class BatchUploadView(APIView):
     permission_classes = [IsAdminOrTA]
     parser_classes = [MultiPartParser]
 
+    # A legitimate candidate-upload spreadsheet (a few hundred to a few thousand rows of plain
+    # text) is nowhere near this size - anything bigger is either a mistake or someone testing
+    # how much memory/CPU stage_candidates_from_workbook's row-by-row parsing can be made to burn.
+    MAX_UPLOAD_SIZE_BYTES = 5 * 1024 * 1024
+
     def post(self, request, batch_id):
         batch = _get_batch_or_404(request.user, batch_id)
         if batch.status != Batch.Status.DRAFT:
@@ -121,6 +130,11 @@ class BatchUploadView(APIView):
             return Response({'detail': 'No file uploaded.'}, status=status.HTTP_400_BAD_REQUEST)
         if not upload.name.lower().endswith('.xlsx'):
             return Response({'detail': 'Only .xlsx files are supported.'}, status=status.HTTP_400_BAD_REQUEST)
+        if upload.size > self.MAX_UPLOAD_SIZE_BYTES:
+            return Response(
+                {'detail': f'File is too large (max {self.MAX_UPLOAD_SIZE_BYTES // (1024 * 1024)}MB).'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         try:
             cooling_off_months = int(request.data.get('cooling_off_months', 3))
@@ -130,7 +144,11 @@ class BatchUploadView(APIView):
 
         try:
             created = stage_candidates_from_workbook(batch, upload, request.user, cooling_off_months)
-        except Exception:
+        except (zipfile.BadZipFile, InvalidFileException, KeyError, DataError):
+            # These specifically indicate a malformed/corrupt/mistyped-data upload (not a valid
+            # xlsx container, or a cell value that doesn't fit its column) - genuinely the
+            # user's file, not our bug. Anything else propagates as an unhandled 500 so a real
+            # defect here doesn't get silently mislabeled as "bad file" and go unnoticed.
             logger.exception('Failed to parse uploaded workbook for batch_id=%s', batch.batch_id)
             return Response(
                 {'detail': 'Could not read that file. Make sure it matches the template format.'},

@@ -1,3 +1,4 @@
+from django.db.models import Count, Q
 from rest_framework import serializers
 
 from api.models import Batch, Candidate, DuplicateCheck
@@ -5,6 +6,21 @@ from api.serializers.common import mask_aadhaar
 
 
 SECTION_FIELDS = ['logical', 'quantitative', 'verbal', 'programming']
+
+
+def annotate_batch_counts(queryset):
+    """Pass/fail counts as one annotated query instead of two `.filter().count()` queries per
+    batch - callers that list many batches (BatchListCreateView, the dashboard summary) should
+    always apply this before serializing; BatchSerializer falls back to the per-instance query
+    when it isn't (e.g. a freshly created/updated single Batch), which is fine since that's
+    only ever one instance at a time, never a list.
+    """
+    return queryset.annotate(
+        pass_count=Count('candidate', filter=Q(candidate__result=Candidate.Result.PASS,
+                                                candidate__is_deleted=False)),
+        fail_count=Count('candidate', filter=Q(candidate__result=Candidate.Result.FAIL,
+                                                candidate__is_deleted=False)),
+    )
 
 
 class BatchSerializer(serializers.ModelSerializer):
@@ -32,9 +48,13 @@ class BatchSerializer(serializers.ModelSerializer):
         ]
 
     def get_pass_count(self, batch):
+        if hasattr(batch, 'pass_count'):
+            return batch.pass_count
         return batch.candidate_set.filter(result=Candidate.Result.PASS, is_deleted=False).count()
 
     def get_fail_count(self, batch):
+        if hasattr(batch, 'fail_count'):
+            return batch.fail_count
         return batch.candidate_set.filter(result=Candidate.Result.FAIL, is_deleted=False).count()
 
     def get_borderline_count(self, batch):

@@ -53,15 +53,17 @@ export default function ConfigureBatchStep({ onCreated, existingBatch }) {
       });
       return;
     }
-    batchApi.getBatchDefaults().then((defaults) => {
-      reset({
-        batch_name: '',
-        college_name: '',
-        link_valid_from: '',
-        link_valid_until: '',
-        ...defaults,
-      });
-    });
+    batchApi.getBatchDefaults()
+      .then((defaults) => {
+        reset({
+          batch_name: '',
+          college_name: '',
+          link_valid_from: '',
+          link_valid_until: '',
+          ...defaults,
+        });
+      })
+      .catch((err) => toast.error(extractErrorMessage(err)));
   }, [existingBatch, reset]);
 
   async function onSubmit(values) {

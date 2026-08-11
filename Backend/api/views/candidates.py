@@ -1,14 +1,21 @@
+import io
 import logging
+import urllib.error
+import urllib.request
+import zipfile
 
 from django.conf import settings
 from django.db.models import Q
 from django.http import Http404, HttpResponse
+from django.utils.decorators import method_decorator
 from django.utils.dateparse import parse_date
+from django_ratelimit.decorators import ratelimit
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from api.models import Batch, Candidate, Question, QuestionBankSection, User
+from api.models import Batch, Candidate
+from api.pagination import StandardResultsPagination
 from api.permissions import IsAdminOrTA
 from api.serializers.candidates import (
     CandidateDetailSerializer,
@@ -16,19 +23,13 @@ from api.serializers.candidates import (
     CandidateUpdateSerializer,
     _latest_attempt,
 )
+from api.services.access import can_access_batch, visible_candidates_qs
 from api.services.audit import log_action
 from api.services.excel_upload import generate_candidates_workbook
 from api.services.invites import create_single_reinvite, send_invites_async, send_notification_emails
-from api.views.batches import _can_access_batch
+from api.utils.net import ratelimit_user_key
 
 logger = logging.getLogger(__name__)
-
-
-def _visible_candidates_qs(user):
-    qs = Candidate.objects.select_related('batch').filter(is_deleted=False, batch__is_deleted=False)
-    if user.role.role_code != 'admin':
-        qs = qs.filter(Q(batch__primary_ta_user_id=user.user_id) | Q(batch__created_by_id=user.user_id))
-    return qs
 
 
 def _get_candidate_or_404(user, candidate_id):
@@ -38,7 +39,7 @@ def _get_candidate_or_404(user, candidate_id):
         )
     except Candidate.DoesNotExist:
         raise Http404
-    if not _can_access_batch(user, candidate.batch):
+    if not can_access_batch(user, candidate.batch):
         raise Http404  # don't reveal existence of candidates the caller can't access
     return candidate
 
@@ -54,7 +55,7 @@ class CandidateListView(APIView):
     permission_classes = [IsAdminOrTA]
 
     def get(self, request):
-        qs = _visible_candidates_qs(request.user)
+        qs = visible_candidates_qs(request.user)
 
         name = request.query_params.get('name', '').strip()
         if name:
@@ -85,7 +86,9 @@ class CandidateListView(APIView):
             qs = qs.filter(overall_score__lte=score_max)
 
         qs = qs.order_by('-created_at')
-        return Response(CandidateListSerializer(qs, many=True).data)
+        paginator = StandardResultsPagination()
+        page = paginator.paginate_queryset(qs, request, view=self)
+        return paginator.get_paginated_response(CandidateListSerializer(page, many=True).data)
 
 
 class CandidateDetailView(APIView):
@@ -120,10 +123,15 @@ class CandidateResendInviteView(APIView):
         return Response({'detail': f'Invite re-sent to {candidate.email}.'})
 
 
+@method_decorator(ratelimit(key=ratelimit_user_key, rate='10/m', method='POST', block=False), name='post')
 class CandidateNotifyView(APIView):
     permission_classes = [IsAdminOrTA]
 
     def post(self, request):
+        if getattr(request, 'limited', False):
+            return Response({'detail': 'Too many notification requests. Please try again shortly.'},
+                             status=status.HTTP_429_TOO_MANY_REQUESTS)
+
         candidate_ids = request.data.get('candidate_ids', [])
         subject = (request.data.get('subject') or 'Accelirate TalentGate - Update').strip()
         message = (request.data.get('message') or '').strip()
@@ -134,7 +142,7 @@ class CandidateNotifyView(APIView):
         if not message:
             return Response({'detail': 'A message is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        candidates = list(_visible_candidates_qs(request.user).filter(candidate_id__in=candidate_ids))
+        candidates = list(visible_candidates_qs(request.user).filter(candidate_id__in=candidate_ids))
         if not candidates:
             return Response({'detail': 'No matching candidates found.'},
                              status=status.HTTP_400_BAD_REQUEST)
@@ -147,11 +155,16 @@ class CandidateNotifyView(APIView):
         return Response({'notified_count': len(candidates)})
 
 
+@method_decorator(ratelimit(key=ratelimit_user_key, rate='10/m', method='GET', block=False), name='get')
 class CandidateExportView(APIView):
     permission_classes = [IsAdminOrTA]
 
     def get(self, request):
-        qs = _visible_candidates_qs(request.user).order_by('-created_at')
+        if getattr(request, 'limited', False):
+            return Response({'detail': 'Too many export requests. Please try again shortly.'},
+                             status=status.HTTP_429_TOO_MANY_REQUESTS)
+
+        qs = visible_candidates_qs(request.user).order_by('-created_at')
 
         batch_id = request.query_params.get('batch_id')
         if batch_id:
@@ -174,67 +187,48 @@ class CandidateExportView(APIView):
         return buffer_response
 
 
-class DashboardSummaryView(APIView):
+class CandidateEvidenceZipView(APIView):
+    """Bundles a candidate's proctoring evidence (Aadhaar capture, verification photo, session
+    recording) into one downloadable zip, fetched server-side from the URLs recorded on their
+    latest ExamAttempt so the browser only needs one authenticated request instead of three
+    separate (currently unauthenticated) file URLs.
+    """
     permission_classes = [IsAdminOrTA]
 
-    def get(self, request):
-        user = request.user
-        is_admin = user.role.role_code == 'admin'
+    EVIDENCE_FILES = [
+        ('aadhaar_capture_url', 'aadhaar.jpg'),
+        ('face_photo_url', 'face_photo.jpg'),
+        ('session_recording_url', 'session_recording.mp4'),
+    ]
 
-        batches_qs = Batch.objects.filter(is_deleted=False)
-        if not is_admin:
-            batches_qs = batches_qs.filter(
-                Q(primary_ta_user_id=user.user_id) | Q(created_by_id=user.user_id)
-            )
-        candidates_qs = _visible_candidates_qs(user)
+    def get(self, request, candidate_id):
+        candidate = _get_candidate_or_404(request.user, candidate_id)
+        attempt = _latest_attempt(candidate)
+        if not attempt:
+            return Response({'detail': 'No proctoring evidence exists for this candidate yet.'},
+                             status=status.HTTP_400_BAD_REQUEST)
 
-        stats = {
-            'active_batches': batches_qs.filter(status=Batch.Status.IN_PROGRESS).count(),
-            'total_candidates': candidates_qs.count(),
-            'completed': candidates_qs.filter(status=Candidate.Status.COMPLETED).count(),
-            'total_pass': candidates_qs.filter(result=Candidate.Result.PASS).count(),
-        }
+        buffer = io.BytesIO()
+        fetched_any = False
+        with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as archive:
+            for field, filename in self.EVIDENCE_FILES:
+                url = getattr(attempt, field)
+                if not url:
+                    continue
+                try:
+                    with urllib.request.urlopen(url, timeout=10) as file_response:
+                        archive.writestr(filename, file_response.read())
+                    fetched_any = True
+                except (urllib.error.URLError, ValueError):
+                    logger.exception(
+                        'Failed to fetch evidence file %s for candidate_id=%s', filename, candidate_id
+                    )
 
-        batches_overview = []
-        for batch in batches_qs.select_related('primary_ta_user').order_by('-created_at'):
-            row = {
-                'batch_id': batch.batch_id,
-                'batch_name': batch.batch_name,
-                'college_name': batch.college_name,
-                'total_candidates': batch.total_candidates,
-                'status': batch.status,
-                'status_display': batch.get_status_display(),
-                'pass_count': batch.candidate_set.filter(result=Candidate.Result.PASS,
-                                                         is_deleted=False).count(),
-                'fail_count': batch.candidate_set.filter(result=Candidate.Result.FAIL,
-                                                         is_deleted=False).count(),
-                'borderline_count': 0,
-            }
-            if is_admin:
-                row['primary_ta_user_name'] = batch.primary_ta_user.full_name
-            batches_overview.append(row)
+        if not fetched_any:
+            return Response({'detail': 'No proctoring evidence could be retrieved for this candidate.'},
+                             status=status.HTTP_400_BAD_REQUEST)
 
-        response = {'stats': stats, 'batches_overview': batches_overview}
-
-        if is_admin:
-            response['question_bank_health'] = [
-                {
-                    'section_name': section.section_name,
-                    'active_count': (active_count := section.question_set.filter(
-                        status=Question.Status.ACTIVE).count()),
-                    'min_required_active': section.min_required_active,
-                    'is_ok': active_count >= section.min_required_active,
-                }
-                for section in QuestionBankSection.objects.all()
-            ]
-            response['ta_accounts'] = [
-                {
-                    'user_id': u.user_id,
-                    'full_name': u.full_name,
-                    'role_name': u.role.role_name,
-                    'is_active': u.is_active,
-                }
-                for u in User.objects.filter(is_deleted=False).select_related('role').order_by('first_name')
-            ]
-
-        return Response(response)
+        buffer.seek(0)
+        response = HttpResponse(buffer.read(), content_type='application/zip')
+        response['Content-Disposition'] = f'attachment; filename="candidate_{candidate_id}_evidence.zip"'
+        return response

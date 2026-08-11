@@ -145,6 +145,25 @@ h1, h2, h3, h4, .brand, .btn, .box-label {
 .field input:focus, .field select:focus, .field textarea:focus {
   outline: none; border-color: var(--brand-blue); box-shadow: 0 0 0 3px var(--accent-soft); background: #fff;
 }
+
+.password-input-wrap { position: relative; }
+.password-input-wrap input { padding-right: 40px; }
+.password-toggle {
+  position: absolute; top: 50%; right: 10px; transform: translateY(-50%);
+  display: flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; padding: 0; border: none; background: transparent;
+  color: var(--muted); cursor: pointer; border-radius: 5px;
+}
+.password-toggle:hover { color: var(--brand-blue); background: var(--accent-soft); }
+.password-toggle:focus-visible { outline: 2px solid var(--brand-blue); outline-offset: 1px; }
+
+/* Used by "Export as PDF" buttons (e.g. Candidate Details) - print via the browser's own
+   Print/Save-as-PDF dialog rather than a server-side PDF generator, since the page content is
+   already exactly what should appear in the report. */
+@media print {
+  .brand-header, .app-nav, .brand-footer, .no-print { display: none !important; }
+  body { background: #fff; }
+}
 .field input.has-error { border-color: var(--brand-red); }
 .field-error { color: var(--brand-red); font-size: 11.5px; margin-top: 5px; }
 .field-hint { color: var(--muted); font-size: 11px; margin-top: 5px; }

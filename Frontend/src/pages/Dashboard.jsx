@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { selectRoleCode } from '../features/auth/authSlice';
 import * as dashboardApi from '../api/dashboardApi';
 import * as candidateApi from '../api/candidateApi';
+import ExportModal from '../features/candidates/ExportModal';
 import { extractErrorMessage } from '../utils/passwordSchema';
 
 const STATUS_PILL = { draft: 'gray', in_progress: 'blue', completed: 'green' };
@@ -15,28 +16,13 @@ export default function Dashboard() {
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [exportOpen, setExportOpen] = useState(false);
-  const [exportFrom, setExportFrom] = useState('');
-  const [exportTo, setExportTo] = useState('');
-  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
-    dashboardApi.getDashboardSummary().then((data) => {
-      setSummary(data);
-      setLoading(false);
-    });
+    dashboardApi.getDashboardSummary()
+      .then((data) => setSummary(data))
+      .catch((err) => toast.error(extractErrorMessage(err)))
+      .finally(() => setLoading(false));
   }, []);
-
-  async function handleExportAll() {
-    setExporting(true);
-    try {
-      await candidateApi.exportCandidates({ from: exportFrom || undefined, to: exportTo || undefined });
-      setExportOpen(false);
-    } catch (err) {
-      toast.error(extractErrorMessage(err));
-    } finally {
-      setExporting(false);
-    }
-  }
 
   async function handleExportBatch(batchId) {
     try {
@@ -72,28 +58,7 @@ export default function Dashboard() {
         <button className="btn" onClick={() => setExportOpen(true)}>⬇ Export All Candidates (Excel)</button>
       </div>
 
-      {exportOpen && (
-        <div className="modal-overlay" onClick={() => setExportOpen(false)}>
-          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
-            <h4>Export Candidates</h4>
-            <p>Select the date range for exporting candidate data (leave blank for all).</p>
-            <div className="field">
-              <label>From Date</label>
-              <input type="date" value={exportFrom} onChange={(e) => setExportFrom(e.target.value)} />
-            </div>
-            <div className="field">
-              <label>To Date</label>
-              <input type="date" value={exportTo} onChange={(e) => setExportTo(e.target.value)} />
-            </div>
-            <div className="btn-row" style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-              <button className="btn" onClick={() => setExportOpen(false)}>Cancel</button>
-              <button className="btn primary" style={{ width: 'auto' }} onClick={handleExportAll} disabled={exporting}>
-                {exporting ? 'Exporting…' : 'Export'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {exportOpen && <ExportModal onClose={() => setExportOpen(false)} />}
 
       <div className="card" style={{ marginBottom: 20 }}>
         <div className="box-label">Batches Overview — status &amp; results in one place</div>

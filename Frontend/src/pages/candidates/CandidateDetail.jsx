@@ -12,11 +12,14 @@ export default function CandidateDetail() {
   const [candidate, setCandidate] = useState(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [downloadingZip, setDownloadingZip] = useState(false);
 
   async function refresh() {
     setLoading(true);
     try {
       setCandidate(await candidateApi.getCandidate(id));
+    } catch (err) {
+      toast.error(extractErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -40,11 +43,24 @@ export default function CandidateDetail() {
     }
   }
 
+  async function handleDownloadZip() {
+    setDownloadingZip(true);
+    try {
+      await candidateApi.downloadEvidenceZip(id);
+    } catch (err) {
+      toast.error(extractErrorMessage(err));
+    } finally {
+      setDownloadingZip(false);
+    }
+  }
+
   if (loading || !candidate) return <div>Loading…</div>;
+
+  const hasAnyEvidence = Object.values(candidate.evidence).some(Boolean);
 
   return (
     <div style={{ maxWidth: 900 }}>
-      <Link to="/candidates" className="link-text">← Back to All Candidates</Link>
+      <Link to="/candidates" className="link-text no-print">← Back to All Candidates</Link>
       <h3 style={{ marginTop: 8 }}>
         Candidate Details — {candidate.full_name}{' '}
         <span className={`pill ${RESULT_PILL[candidate.result] || 'gray'}`}>{candidate.result_display}</span>
@@ -102,7 +118,12 @@ export default function CandidateDetail() {
             <div style={{ border: '1px dashed var(--line-soft)', borderRadius: 8, textAlign: 'center', padding: 20 }}>
               🪪<br /><span style={{ fontSize: 11, color: 'var(--muted)' }}>Aadhaar</span>
             </div>
-            {!candidate.evidence.aadhaar_capture_url && (
+            {candidate.evidence.aadhaar_capture_url ? (
+              <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 4 }}>
+                <a className="link-text" href={candidate.evidence.aadhaar_capture_url} target="_blank" rel="noopener noreferrer">View Full Image</a>
+                <a className="link-text" href={candidate.evidence.aadhaar_capture_url} download>⬇ Download</a>
+              </div>
+            ) : (
               <div style={{ textAlign: 'center', fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Not yet captured</div>
             )}
           </div>
@@ -110,7 +131,12 @@ export default function CandidateDetail() {
             <div style={{ border: '1px dashed var(--line-soft)', borderRadius: 8, textAlign: 'center', padding: 20 }}>
               🙂<br /><span style={{ fontSize: 11, color: 'var(--muted)' }}>Live face photo</span>
             </div>
-            {!candidate.evidence.face_photo_url && (
+            {candidate.evidence.face_photo_url ? (
+              <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 4 }}>
+                <a className="link-text" href={candidate.evidence.face_photo_url} target="_blank" rel="noopener noreferrer">View Full Image</a>
+                <a className="link-text" href={candidate.evidence.face_photo_url} download>⬇ Download</a>
+              </div>
+            ) : (
               <div style={{ textAlign: 'center', fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Not yet captured</div>
             )}
           </div>
@@ -118,11 +144,23 @@ export default function CandidateDetail() {
             <div style={{ border: '1px dashed var(--line-soft)', borderRadius: 8, textAlign: 'center', padding: 20 }}>
               🎥<br /><span style={{ fontSize: 11, color: 'var(--muted)' }}>Session recording</span>
             </div>
-            {!candidate.evidence.session_recording_url && (
+            {candidate.evidence.session_recording_url ? (
+              <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 4 }}>
+                <a className="link-text" href={candidate.evidence.session_recording_url} target="_blank" rel="noopener noreferrer">▶ Play Recording</a>
+                <a className="link-text" href={candidate.evidence.session_recording_url} download>⬇ Download</a>
+              </div>
+            ) : (
               <div style={{ textAlign: 'center', fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Not yet recorded</div>
             )}
           </div>
         </div>
+        {hasAnyEvidence && (
+          <div className="btn-row no-print" style={{ marginTop: 12 }}>
+            <button className="btn" onClick={handleDownloadZip} disabled={downloadingZip}>
+              {downloadingZip ? 'Preparing…' : '⬇ Download All Evidence (ZIP)'}
+            </button>
+          </div>
+        )}
         <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 10 }}>
           Populated once the candidate completes their proctored assessment.
         </div>
@@ -144,11 +182,11 @@ export default function CandidateDetail() {
         </table>
       </div>
 
-      <div className="btn-row" style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+      <div className="btn-row no-print" style={{ display: 'flex', gap: 10, marginTop: 16 }}>
         <button className="btn primary" style={{ width: 'auto' }} onClick={handleSendInvite} disabled={sending}>
           {sending ? 'Sending…' : 'Send Invite Link'}
         </button>
-        <button className="btn" disabled title="Coming soon">Export Candidate Details (PDF)</button>
+        <button className="btn" onClick={() => window.print()}>🖨 Export Candidate Details (PDF)</button>
       </div>
     </div>
   );

@@ -8,6 +8,7 @@ import { credentialsReceived } from './authSlice';
 import * as authApi from '../../api/authApi';
 import BrandHeader from '../../components/layout/BrandHeader';
 import BrandFooter from '../../components/layout/BrandFooter';
+import PasswordInput from '../../components/common/PasswordInput';
 
 const schema = yup.object({
   email: yup.string().email('Enter a valid email').required('Corporate email is required'),
@@ -64,9 +65,8 @@ export default function Login() {
             </div>
             <div className="field">
               <label htmlFor="password">Password</label>
-              <input
+              <PasswordInput
                 id="password"
-                type="password"
                 className={errors.password ? 'has-error' : ''}
                 {...register('password')}
               />

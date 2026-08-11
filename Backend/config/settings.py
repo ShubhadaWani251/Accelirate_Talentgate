@@ -204,6 +204,28 @@ ANYMAIL = {
 }
 DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'noreply@accelirate.com')
 
+# Request body / file upload size caps. BatchUploadView additionally enforces its own tighter
+# 5MB limit on the candidate spreadsheet specifically (see MAX_UPLOAD_SIZE_BYTES) - these are the
+# app-wide backstop so no endpoint can be made to buffer an unbounded request body into memory.
+DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
+FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
+
+# Production transport/cookie hardening - gated so local dev (DEBUG=True) is unaffected.
+# SESSION_COOKIE_SECURE/CSRF_COOKIE_SECURE are safe to force on whenever DEBUG is off (they just
+# mark those cookies HTTPS-only, same idea as the refresh-token cookie's own secure flag - see
+# _set_refresh_cookie in api/views/auth.py). SECURE_SSL_REDIRECT/HSTS are opt-in via their own
+# env var instead of tied to DEBUG, because forcing an HTTPS redirect is only correct if THIS
+# process terminates TLS - if it instead sits behind a reverse proxy/load balancer that
+# terminates TLS and forwards plain HTTP, turning this on causes an infinite redirect loop
+# unless SECURE_PROXY_SSL_HEADER is also configured to match that proxy. Set
+# ENABLE_SSL_REDIRECT=True only once that's confirmed for your deployment.
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+SECURE_SSL_REDIRECT = os.environ.get('ENABLE_SSL_REDIRECT', 'False') == 'True'
+SECURE_HSTS_SECONDS = 31536000 if SECURE_SSL_REDIRECT else 0
+SECURE_HSTS_INCLUDE_SUBDOMAINS = SECURE_SSL_REDIRECT
+SECURE_HSTS_PRELOAD = SECURE_SSL_REDIRECT
+
 # Client IP resolution (used for rate-limit keys and audit logs).
 # Only trust X-Forwarded-For if this app sits behind a proxy that YOU control and that
 # overwrites/strips any client-supplied XFF header - otherwise an attacker can spoof this

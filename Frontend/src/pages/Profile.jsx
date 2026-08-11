@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import { useDispatch, useSelector } from 'react-redux';
 import { credentialsReceived, selectUser } from '../features/auth/authSlice';
 import * as authApi from '../api/authApi';
+import PasswordInput from '../components/common/PasswordInput';
 import { extractErrorMessage, passwordSchema, PASSWORD_HINT } from '../utils/passwordSchema';
 
 const schema = yup.object({
@@ -75,9 +76,8 @@ export default function Profile() {
         <form onSubmit={handleSubmit(onSubmit)} noValidate>
           <div className="field">
             <label htmlFor="current_password">Current Password</label>
-            <input
+            <PasswordInput
               id="current_password"
-              type="password"
               className={errors.current_password ? 'has-error' : ''}
               {...register('current_password')}
             />
@@ -85,9 +85,8 @@ export default function Profile() {
           </div>
           <div className="field">
             <label htmlFor="new_password">New Password</label>
-            <input
+            <PasswordInput
               id="new_password"
-              type="password"
               className={errors.new_password ? 'has-error' : ''}
               {...register('new_password')}
             />
@@ -99,9 +98,8 @@ export default function Profile() {
           </div>
           <div className="field">
             <label htmlFor="confirm_password">Confirm New Password</label>
-            <input
+            <PasswordInput
               id="confirm_password"
-              type="password"
               className={errors.confirm_password ? 'has-error' : ''}
               {...register('confirm_password')}
             />

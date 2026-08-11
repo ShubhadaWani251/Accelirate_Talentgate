@@ -7,6 +7,7 @@ import toast from 'react-hot-toast';
 import * as authApi from '../../api/authApi';
 import BrandHeader from '../../components/layout/BrandHeader';
 import BrandFooter from '../../components/layout/BrandFooter';
+import PasswordInput from '../../components/common/PasswordInput';
 import { extractErrorMessage, passwordSchema, PASSWORD_HINT } from '../../utils/passwordSchema';
 
 const RESEND_COOLDOWN_SECONDS = 60;
@@ -143,9 +144,8 @@ export default function OtpVerification() {
 
             <div className="field" style={{ marginTop: 12 }}>
               <label htmlFor="new_password">New Password</label>
-              <input
+              <PasswordInput
                 id="new_password"
-                type="password"
                 className={errors.new_password ? 'has-error' : ''}
                 {...register('new_password')}
               />
@@ -157,9 +157,8 @@ export default function OtpVerification() {
             </div>
             <div className="field">
               <label htmlFor="confirm_password">Confirm New Password</label>
-              <input
+              <PasswordInput
                 id="confirm_password"
-                type="password"
                 className={errors.confirm_password ? 'has-error' : ''}
                 {...register('confirm_password')}
               />

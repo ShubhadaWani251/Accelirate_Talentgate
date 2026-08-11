@@ -1,5 +1,18 @@
 import axiosClient from './axiosClient';
 
+function downloadBlob(data, filename) {
+  const url = window.URL.createObjectURL(new Blob([data]));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}
+
+// Returns the paginated envelope {count, next, previous, results} - pass `page` (and optionally
+// `page_size`) as one of the filter keys to move between pages, same as any other filter.
 export const listCandidates = (filters = {}) => {
   const params = {};
   Object.entries(filters).forEach(([key, value]) => {
@@ -27,12 +40,10 @@ export const exportCandidates = async ({ from, to, batchId } = {}) => {
   if (to) params.to = to;
   if (batchId) params.batch_id = batchId;
   const response = await axiosClient.get('/candidates/export/', { params, responseType: 'blob' });
-  const url = window.URL.createObjectURL(new Blob([response.data]));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = 'candidates_export.xlsx';
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.URL.revokeObjectURL(url);
+  downloadBlob(response.data, 'candidates_export.xlsx');
+};
+
+export const downloadEvidenceZip = async (id) => {
+  const response = await axiosClient.get(`/candidates/${id}/evidence.zip`, { responseType: 'blob' });
+  downloadBlob(response.data, `candidate_${id}_evidence.zip`);
 };

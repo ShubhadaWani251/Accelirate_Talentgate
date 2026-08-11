@@ -1,7 +1,15 @@
 import axiosClient from './axiosClient';
 
-export const listBatches = (search = '') =>
-  axiosClient.get('/batches/', { params: search ? { search } : {} }).then((r) => r.data);
+// Returns the paginated envelope {count, next, previous, results} - callers that just want
+// every batch for a dropdown (not a browsable list) should pass a page_size big enough to
+// cover realistic batch counts in one page (e.g. { pageSize: 200 }).
+export const listBatches = (search = '', { page, pageSize } = {}) => {
+  const params = {};
+  if (search) params.search = search;
+  if (page) params.page = page;
+  if (pageSize) params.page_size = pageSize;
+  return axiosClient.get('/batches/', { params }).then((r) => r.data);
+};
 
 export const getBatch = (id) => axiosClient.get(`/batches/${id}/`).then((r) => r.data);
 

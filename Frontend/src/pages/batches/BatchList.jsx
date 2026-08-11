@@ -1,24 +1,36 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import * as batchApi from '../../api/batchApi';
+import PaginationControls from '../../components/common/PaginationControls';
+import { extractErrorMessage } from '../../utils/passwordSchema';
 
 const STATUS_PILL = { draft: 'gray', in_progress: 'blue', completed: 'green' };
 
 export default function BatchList() {
   const [batches, setBatches] = useState([]);
+  const [page, setPage] = useState(1);
+  const [pageMeta, setPageMeta] = useState({ count: 0, next: null, previous: null });
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
 
-  function refresh(q = '') {
+  async function refresh(q = search, p = page) {
     setLoading(true);
-    batchApi.listBatches(q).then((data) => {
-      setBatches(data);
+    try {
+      const data = await batchApi.listBatches(q, { page: p });
+      setBatches(data.results);
+      setPageMeta({ count: data.count, next: data.next, previous: data.previous });
+      setPage(p);
+    } catch (err) {
+      toast.error(extractErrorMessage(err));
+    } finally {
       setLoading(false);
-    });
+    }
   }
 
   useEffect(() => {
     refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -35,10 +47,10 @@ export default function BatchList() {
           placeholder="Search by batch name or college…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && refresh(search)}
+          onKeyDown={(e) => e.key === 'Enter' && refresh(search, 1)}
           style={{ flex: 1, padding: '9px 12px', borderRadius: 8, border: '1px solid var(--line-soft)' }}
         />
-        <button className="btn" onClick={() => refresh(search)}>Search</button>
+        <button className="btn" onClick={() => refresh(search, 1)}>Search</button>
       </div>
 
       <div className="table-scroll">
@@ -77,6 +89,15 @@ export default function BatchList() {
           </tbody>
         </table>
       </div>
+
+      <PaginationControls
+        page={page}
+        count={pageMeta.count}
+        hasPrevious={Boolean(pageMeta.previous)}
+        hasNext={Boolean(pageMeta.next)}
+        onPrev={() => refresh(search, page - 1)}
+        onNext={() => refresh(search, page + 1)}
+      />
     </div>
   );
 }
