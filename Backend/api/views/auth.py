@@ -23,6 +23,7 @@ from api.services.otp import OtpCooldownError, issue_otp
 from api.services.passwords import is_password_reused, record_password_history
 from api.services.tokens import issue_tokens_for_user, revoke_refresh_token, rotate_refresh_token
 from api.utils.net import get_client_ip, ratelimit_ip_key
+from api.utils.validation import is_corporate_email
 
 # A dummy hash to run password verification against when no matching user exists, so a
 # nonexistent email doesn't return measurably faster than one that requires an actual
@@ -43,11 +44,6 @@ def _log(request, user, action_type, entity_id=None):
         ip_address=get_client_ip(request),
         user_agent=_user_agent(request),
     )
-
-
-def _is_corporate_email(email):
-    domain = email.rsplit('@', 1)[-1].lower()
-    return domain in settings.CORPORATE_EMAIL_DOMAINS
 
 
 def _set_refresh_cookie(response, refresh_token):
@@ -86,7 +82,7 @@ class LoginView(APIView):
             return Response({'detail': 'Too many failed attempts. Please try again later.'},
                              status=status.HTTP_429_TOO_MANY_REQUESTS)
 
-        if not _is_corporate_email(email):
+        if not is_corporate_email(email):
             check_hash(password, _DUMMY_PASSWORD_HASH)  # keep timing consistent with the checks below
             register_failed_attempt(email)
             return Response(generic_error, status=status.HTTP_401_UNAUTHORIZED)
@@ -170,23 +166,31 @@ class ForgotPasswordView(APIView):
         serializer.is_valid(raise_exception=True)
         email = serializer.validated_data['email']
 
-        generic_response = Response(
-            {'detail': 'If an account exists for that email, a reset code has been sent.'}
+        # Explicitly reveals whether the email is registered (per product decision) rather
+        # than the previous anti-enumeration generic response - anyone relying on the old
+        # "no enumeration" guarantee should know this endpoint no longer provides it.
+        not_found_response = Response(
+            {'detail': 'No account found for this email address.'},
+            status=status.HTTP_400_BAD_REQUEST,
         )
 
-        if not _is_corporate_email(email):
-            return generic_response
+        if not is_corporate_email(email):
+            return not_found_response
 
         try:
             user = User.objects.get(email__iexact=email, is_active=True, is_deleted=False)
         except User.DoesNotExist:
-            return generic_response
+            return not_found_response
 
         try:
             issue_otp(user, async_send=True)
-        except OtpCooldownError:
-            pass  # a code was already sent very recently - don't reveal timing to the caller
-        return generic_response
+        except OtpCooldownError as exc:
+            return Response(
+                {'detail': f'Please wait {exc.retry_after_seconds}s before requesting another code.',
+                 'retry_after_seconds': exc.retry_after_seconds},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+        return Response({'detail': 'A reset code has been sent to your email.'})
 
 
 @method_decorator(ratelimit(key=ratelimit_ip_key, rate='5/m', method='POST', block=False), name='post')

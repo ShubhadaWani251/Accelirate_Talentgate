@@ -30,6 +30,14 @@ from .candidates import (
     CandidateEvidenceZipView,
 )
 from .dashboard import DashboardSummaryView
+from .questions import (
+    QuestionSectionListView,
+    QuestionListCreateView,
+    QuestionDetailView,
+    QuestionTemplateDownloadView,
+    QuestionBulkUploadView,
+)
+from .users import UserListCreateView, UserDetailView
 
 __all__ = [
     'health_check',
@@ -41,4 +49,7 @@ __all__ = [
     'BatchCandidateClearDuplicateView', 'BatchFinalizeView', 'BatchSendInvitesView',
     'CandidateListView', 'CandidateDetailView', 'CandidateResendInviteView',
     'CandidateNotifyView', 'CandidateExportView', 'CandidateEvidenceZipView', 'DashboardSummaryView',
+    'QuestionSectionListView', 'QuestionListCreateView', 'QuestionDetailView',
+    'QuestionTemplateDownloadView', 'QuestionBulkUploadView',
+    'UserListCreateView', 'UserDetailView',
 ]

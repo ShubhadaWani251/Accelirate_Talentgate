@@ -5,7 +5,7 @@ import * as batchApi from '../../api/batchApi';
 import PaginationControls from '../../components/common/PaginationControls';
 import { extractErrorMessage } from '../../utils/passwordSchema';
 
-const STATUS_PILL = { draft: 'gray', in_progress: 'blue', completed: 'green' };
+const STATUS_PILL = { draft: 'gray', in_progress: 'blue', completed: 'green', cancelled: 'red' };
 
 export default function BatchList() {
   const [batches, setBatches] = useState([]);

@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from api.models import Candidate
+from api.models import Candidate, ExamAttempt
 from api.serializers.common import mask_aadhaar
 
 SECTION_LABELS = {
@@ -10,9 +10,25 @@ SECTION_LABELS = {
     'programming': 'Programming',
 }
 
+# Maps an in-flight ExamAttempt's own status onto the equivalent Candidate.Status value/label -
+# nothing in the codebase yet writes IN_PROGRESS/COMPLETED/TERMINATED back onto Candidate.status
+# itself (that requires the exam-taking flow, a later phase), so this derives the same
+# information at read time from data that's already loaded for the score columns.
+_ATTEMPT_STATUS_TO_CANDIDATE_STATUS = {
+    ExamAttempt.Status.IN_PROGRESS: (Candidate.Status.IN_PROGRESS, 'In Progress'),
+    ExamAttempt.Status.SUBMITTED: (Candidate.Status.COMPLETED, 'Completed'),
+    ExamAttempt.Status.TERMINATED: (Candidate.Status.TERMINATED, 'Terminated'),
+}
+
 
 def _latest_attempt(candidate):
-    """Per-instance cached lookup, same pattern as CandidateStagingSerializer._latest_check."""
+    """Per-instance cached lookup, same pattern as CandidateStagingSerializer._latest_check.
+    Prefers a bulk-fetched `prefetched_latest_attempts` list (set by views/candidates.py's
+    `_with_latest_attempt`) over the per-instance query, to avoid N+1 across a list response.
+    """
+    if hasattr(candidate, 'prefetched_latest_attempts'):
+        attempts = candidate.prefetched_latest_attempts
+        return attempts[0] if attempts else None
     if not hasattr(candidate, '_latest_attempt_cache'):
         candidate._latest_attempt_cache = (
             candidate.examattempt_set.order_by('-started_at').first()
@@ -20,11 +36,22 @@ def _latest_attempt(candidate):
     return candidate._latest_attempt_cache
 
 
+def _effective_status(candidate):
+    """(status, status_display) - reflects the candidate's latest exam attempt when one
+    exists, since that's more current than the static Candidate.status field.
+    """
+    attempt = _latest_attempt(candidate)
+    if attempt and attempt.status in _ATTEMPT_STATUS_TO_CANDIDATE_STATUS:
+        return _ATTEMPT_STATUS_TO_CANDIDATE_STATUS[attempt.status]
+    return candidate.status, candidate.get_status_display()
+
+
 class CandidateListSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(read_only=True)
     aadhaar_masked = serializers.SerializerMethodField()
     batch_name = serializers.CharField(source='batch.batch_name', read_only=True)
-    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    status = serializers.SerializerMethodField()
+    status_display = serializers.SerializerMethodField()
     result_display = serializers.CharField(source='get_result_display', read_only=True)
     logical_score = serializers.SerializerMethodField()
     quantitative_score = serializers.SerializerMethodField()
@@ -45,6 +72,12 @@ class CandidateListSerializer(serializers.ModelSerializer):
 
     def get_aadhaar_masked(self, candidate):
         return mask_aadhaar(candidate.aadhaar_number)
+
+    def get_status(self, candidate):
+        return _effective_status(candidate)[0]
+
+    def get_status_display(self, candidate):
+        return _effective_status(candidate)[1]
 
     def get_logical_score(self, candidate):
         attempt = _latest_attempt(candidate)
@@ -86,7 +119,8 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(read_only=True)
     aadhaar_masked = serializers.SerializerMethodField()
     batch_name = serializers.CharField(source='batch.batch_name', read_only=True)
-    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    status = serializers.SerializerMethodField()
+    status_display = serializers.SerializerMethodField()
     result_display = serializers.CharField(source='get_result_display', read_only=True)
     section_results = serializers.SerializerMethodField()
     overall_score = serializers.SerializerMethodField()
@@ -104,6 +138,12 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
 
     def get_aadhaar_masked(self, candidate):
         return mask_aadhaar(candidate.aadhaar_number)
+
+    def get_status(self, candidate):
+        return _effective_status(candidate)[0]
+
+    def get_status_display(self, candidate):
+        return _effective_status(candidate)[1]
 
     def get_overall_score(self, candidate):
         attempt = _latest_attempt(candidate)

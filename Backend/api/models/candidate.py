@@ -69,6 +69,8 @@ class Candidate(models.Model):
             models.Index(fields=['batch', 'status'], name='ix_candidates_batch_status'),
             models.Index(fields=['aadhaar_number'], name='ix_candidates_aadhaar'),
             models.Index(fields=['email'], name='ix_candidates_email'),
+            models.Index(fields=['status'], name='ix_candidates_status'),
+            models.Index(fields=['result'], name='ix_candidates_result'),
         ]
 
     def __str__(self):

@@ -40,4 +40,13 @@ urlpatterns = [
          name='candidate-resend-invite'),
     path('candidates/<int:candidate_id>/evidence.zip', views.CandidateEvidenceZipView.as_view(),
          name='candidate-evidence-zip'),
+
+    path('questions/', views.QuestionListCreateView.as_view(), name='question-list-create'),
+    path('questions/sections/', views.QuestionSectionListView.as_view(), name='question-sections'),
+    path('questions/template/', views.QuestionTemplateDownloadView.as_view(), name='question-template'),
+    path('questions/upload/', views.QuestionBulkUploadView.as_view(), name='question-upload'),
+    path('questions/<int:question_id>/', views.QuestionDetailView.as_view(), name='question-detail'),
+
+    path('users/', views.UserListCreateView.as_view(), name='user-list-create'),
+    path('users/<int:user_id>/', views.UserDetailView.as_view(), name='user-detail'),
 ]

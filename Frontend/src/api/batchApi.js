@@ -18,6 +18,8 @@ export const createBatch = (payload) => axiosClient.post('/batches/', payload).t
 export const updateBatch = (id, payload) =>
   axiosClient.patch(`/batches/${id}/`, payload).then((r) => r.data);
 
+export const deleteBatch = (id) => axiosClient.delete(`/batches/${id}/`).then((r) => r.data);
+
 export const getBatchDefaults = () => axiosClient.get('/batches/defaults/').then((r) => r.data);
 
 export const saveBatchDefaults = (payload) =>

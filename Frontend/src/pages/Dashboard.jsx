@@ -8,7 +8,7 @@ import * as candidateApi from '../api/candidateApi';
 import ExportModal from '../features/candidates/ExportModal';
 import { extractErrorMessage } from '../utils/passwordSchema';
 
-const STATUS_PILL = { draft: 'gray', in_progress: 'blue', completed: 'green' };
+const STATUS_PILL = { draft: 'gray', in_progress: 'blue', completed: 'green', cancelled: 'red' };
 
 export default function Dashboard() {
   const roleCode = useSelector(selectRoleCode);
@@ -128,6 +128,9 @@ export default function Dashboard() {
                 </tbody>
               </table>
             )}
+            <Link to="/admin/question-bank" className="link-text" style={{ display: 'inline-block', marginTop: 10 }}>
+              Manage Question Bank →
+            </Link>
           </div>
           <div className="card">
             <div className="box-label">TA Accounts</div>
@@ -142,6 +145,9 @@ export default function Dashboard() {
                 ))}
               </tbody>
             </table>
+            <Link to="/admin/users" className="link-text" style={{ display: 'inline-block', marginTop: 10 }}>
+              Manage Users →
+            </Link>
           </div>
         </div>
       )}

@@ -5,7 +5,7 @@ import urllib.request
 import zipfile
 
 from django.conf import settings
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from django.http import Http404, HttpResponse
 from django.utils.decorators import method_decorator
 from django.utils.dateparse import parse_date
@@ -14,7 +14,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from api.models import Batch, Candidate
+from api.models import Batch, Candidate, ExamAttempt
 from api.pagination import StandardResultsPagination
 from api.permissions import IsAdminOrTA
 from api.serializers.candidates import (
@@ -51,6 +51,17 @@ def _to_decimal_param(value):
         return None
 
 
+def _with_latest_attempt(qs):
+    """Prefetch each candidate's most recent ExamAttempt in one extra query instead of one
+    query per candidate - serializers/candidates.py's _latest_attempt reads the resulting
+    `prefetched_latest_attempts` list instead of querying per-instance.
+    """
+    return qs.prefetch_related(
+        Prefetch('examattempt_set', queryset=ExamAttempt.objects.order_by('-started_at'),
+                 to_attr='prefetched_latest_attempts')
+    )
+
+
 class CandidateListView(APIView):
     permission_classes = [IsAdminOrTA]
 
@@ -85,7 +96,7 @@ class CandidateListView(APIView):
         if score_max is not None:
             qs = qs.filter(overall_score__lte=score_max)
 
-        qs = qs.order_by('-created_at')
+        qs = _with_latest_attempt(qs.order_by('-created_at'))
         paginator = StandardResultsPagination()
         page = paginator.paginate_queryset(qs, request, view=self)
         return paginator.get_paginated_response(CandidateListSerializer(page, many=True).data)
@@ -178,7 +189,7 @@ class CandidateExportView(APIView):
         if date_to:
             qs = qs.filter(created_at__date__lte=date_to)
 
-        wb = generate_candidates_workbook(qs, _latest_attempt)
+        wb = generate_candidates_workbook(_with_latest_attempt(qs), _latest_attempt)
         buffer_response = HttpResponse(
             content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         )

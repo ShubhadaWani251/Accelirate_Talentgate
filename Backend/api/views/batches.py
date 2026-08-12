@@ -74,11 +74,39 @@ class BatchDetailView(APIView):
 
     def patch(self, request, batch_id):
         batch = _get_batch_or_404(request.user, batch_id)
+        if batch.status != Batch.Status.DRAFT:
+            return Response(
+                {'detail': 'This batch has already been finalized; its configuration can no '
+                            'longer be changed.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         serializer = BatchSerializer(batch, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
         log_action(request, request.user, 'update', 'batch', batch.batch_id)
         return Response(serializer.data)
+
+    def delete(self, request, batch_id):
+        batch = _get_batch_or_404(request.user, batch_id)
+        if batch.status == Batch.Status.CANCELLED:
+            return Response({'detail': 'This batch is already cancelled.'},
+                             status=status.HTTP_400_BAD_REQUEST)
+
+        # Invites already sent means real candidates may already be mid-exam or have results
+        # tied to this batch - hard-deleting it would erase that history, so it's deactivated
+        # (marked Cancelled) instead of removed. A batch with no invites sent yet has nothing
+        # to preserve, so it's safe to soft-delete outright.
+        if Invitation.objects.filter(batch=batch).exists():
+            batch.status = Batch.Status.CANCELLED
+            batch.save(update_fields=['status'])
+            log_action(request, request.user, 'deactivate', 'batch', batch.batch_id)
+            return Response({'detail': f'"{batch.batch_name}" has invites already sent, so it has '
+                                        f'been deactivated (marked Cancelled) rather than deleted.'})
+
+        batch.is_deleted = True
+        batch.save(update_fields=['is_deleted'])
+        log_action(request, request.user, 'delete', 'batch', batch.batch_id)
+        return Response({'detail': f'"{batch.batch_name}" has been deleted.'})
 
 
 class BatchDefaultsView(APIView):
@@ -251,8 +279,8 @@ class BatchFinalizeView(APIView):
             )
 
         blocking_ids = [
-            c.candidate_id for c in candidates
-            if (latest := c.duplicate_checks.order_by('-checked_at').first())
+            c.candidate_id for c in candidates.prefetch_related('duplicate_checks')
+            if (latest := max(c.duplicate_checks.all(), key=lambda d: d.checked_at, default=None))
             and latest.check_status == DuplicateCheck.CheckStatus.DUPLICATE_WITHIN_WINDOW
         ]
         if blocking_ids:
@@ -292,6 +320,9 @@ class BatchSendInvitesView(APIView):
         batch = _get_batch_or_404(request.user, batch_id)
         if batch.status == Batch.Status.DRAFT:
             return Response({'detail': 'Finalize this batch before sending invites.'},
+                             status=status.HTTP_400_BAD_REQUEST)
+        if batch.status == Batch.Status.CANCELLED:
+            return Response({'detail': 'This batch has been cancelled and can no longer send invites.'},
                              status=status.HTTP_400_BAD_REQUEST)
 
         invitations = create_invitations(batch, request.user)

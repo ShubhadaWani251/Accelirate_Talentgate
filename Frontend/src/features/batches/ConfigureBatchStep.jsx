@@ -33,7 +33,7 @@ const schema = yup.object({
   programming_cutoff: yup.number().typeError('Required').min(0).max(100).required(),
 });
 
-export default function ConfigureBatchStep({ onCreated, existingBatch }) {
+export default function ConfigureBatchStep({ onCreated, existingBatch, readOnly = false }) {
   const [submitting, setSubmitting] = useState(false);
   const [savingDefaults, setSavingDefaults] = useState(false);
   const {
@@ -111,74 +111,83 @@ export default function ConfigureBatchStep({ onCreated, existingBatch }) {
   return (
     <div className="card">
       <div className="box-label">Configure Batch</div>
+      {readOnly && (
+        <div className="alert" style={{ marginBottom: 14 }}>
+          This batch has been finalized - configuration is locked.
+        </div>
+      )}
       <form onSubmit={handleSubmit(onSubmit)} noValidate>
-        <div className="grid-2">
-          <div className="field">
-            <label htmlFor="batch_name">Batch Name</label>
-            <input id="batch_name" className={errors.batch_name ? 'has-error' : ''} {...register('batch_name')} />
-            {errors.batch_name && <div className="field-error">{errors.batch_name.message}</div>}
-          </div>
-          <div className="field">
-            <label htmlFor="college_name">College Name</label>
-            <input id="college_name" className={errors.college_name ? 'has-error' : ''} {...register('college_name')} />
-            {errors.college_name && <div className="field-error">{errors.college_name.message}</div>}
-          </div>
-        </div>
-
-        <div className="grid-2">
-          <div className="field">
-            <label htmlFor="link_valid_from">Link Valid From</label>
-            <input id="link_valid_from" type="datetime-local"
-              className={errors.link_valid_from ? 'has-error' : ''} {...register('link_valid_from')} />
-            {errors.link_valid_from && <div className="field-error">{errors.link_valid_from.message}</div>}
-          </div>
-          <div className="field">
-            <label htmlFor="link_valid_until">Link Valid Until</label>
-            <input id="link_valid_until" type="datetime-local"
-              className={errors.link_valid_until ? 'has-error' : ''} {...register('link_valid_until')} />
-            {errors.link_valid_until && <div className="field-error">{errors.link_valid_until.message}</div>}
-          </div>
-        </div>
-
-        <div className="field" style={{ maxWidth: 220 }}>
-          <label htmlFor="exam_duration_minutes">Exam Duration (minutes)</label>
-          <input id="exam_duration_minutes" type="number"
-            className={errors.exam_duration_minutes ? 'has-error' : ''} {...register('exam_duration_minutes')} />
-          {errors.exam_duration_minutes && <div className="field-error">{errors.exam_duration_minutes.message}</div>}
-        </div>
-
-        <div className="grid-4">
-          {SECTIONS.map((s) => (
-            <div key={s.key} className="field">
-              <label htmlFor={`${s.key}_questions`}>{s.label} Questions</label>
-              <input id={`${s.key}_questions`} type="number"
-                className={errors[`${s.key}_questions`] ? 'has-error' : ''}
-                {...register(`${s.key}_questions`)} />
-              {errors[`${s.key}_questions`] && (
-                <div className="field-error">{errors[`${s.key}_questions`].message}</div>
-              )}
+        <fieldset disabled={readOnly} style={{ border: 'none', padding: 0, margin: 0 }}>
+          <div className="grid-2">
+            <div className="field">
+              <label htmlFor="batch_name">Batch Name</label>
+              <input id="batch_name" className={errors.batch_name ? 'has-error' : ''} {...register('batch_name')} />
+              {errors.batch_name && <div className="field-error">{errors.batch_name.message}</div>}
             </div>
-          ))}
-        </div>
-        <div className="grid-4">
-          {SECTIONS.map((s) => (
-            <div key={s.key} className="field">
-              <label htmlFor={`${s.key}_cutoff`}>{s.label} Cutoff (%)</label>
-              <input id={`${s.key}_cutoff`} type="number" step="0.01"
-                className={errors[`${s.key}_cutoff`] ? 'has-error' : ''}
-                {...register(`${s.key}_cutoff`)} />
-              {errors[`${s.key}_cutoff`] && <div className="field-error">{errors[`${s.key}_cutoff`].message}</div>}
+            <div className="field">
+              <label htmlFor="college_name">College Name</label>
+              <input id="college_name" className={errors.college_name ? 'has-error' : ''} {...register('college_name')} />
+              {errors.college_name && <div className="field-error">{errors.college_name.message}</div>}
             </div>
-          ))}
-        </div>
+          </div>
+
+          <div className="grid-2">
+            <div className="field">
+              <label htmlFor="link_valid_from">Link Valid From</label>
+              <input id="link_valid_from" type="datetime-local"
+                className={errors.link_valid_from ? 'has-error' : ''} {...register('link_valid_from')} />
+              {errors.link_valid_from && <div className="field-error">{errors.link_valid_from.message}</div>}
+            </div>
+            <div className="field">
+              <label htmlFor="link_valid_until">Link Valid Until</label>
+              <input id="link_valid_until" type="datetime-local"
+                className={errors.link_valid_until ? 'has-error' : ''} {...register('link_valid_until')} />
+              {errors.link_valid_until && <div className="field-error">{errors.link_valid_until.message}</div>}
+            </div>
+          </div>
+
+          <div className="field" style={{ maxWidth: 220 }}>
+            <label htmlFor="exam_duration_minutes">Exam Duration (minutes)</label>
+            <input id="exam_duration_minutes" type="number"
+              className={errors.exam_duration_minutes ? 'has-error' : ''} {...register('exam_duration_minutes')} />
+            {errors.exam_duration_minutes && <div className="field-error">{errors.exam_duration_minutes.message}</div>}
+          </div>
+
+          <div className="grid-4">
+            {SECTIONS.map((s) => (
+              <div key={s.key} className="field">
+                <label htmlFor={`${s.key}_questions`}>{s.label} Questions</label>
+                <input id={`${s.key}_questions`} type="number"
+                  className={errors[`${s.key}_questions`] ? 'has-error' : ''}
+                  {...register(`${s.key}_questions`)} />
+                {errors[`${s.key}_questions`] && (
+                  <div className="field-error">{errors[`${s.key}_questions`].message}</div>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="grid-4">
+            {SECTIONS.map((s) => (
+              <div key={s.key} className="field">
+                <label htmlFor={`${s.key}_cutoff`}>{s.label} Cutoff (%)</label>
+                <input id={`${s.key}_cutoff`} type="number" step="0.01"
+                  className={errors[`${s.key}_cutoff`] ? 'has-error' : ''}
+                  {...register(`${s.key}_cutoff`)} />
+                {errors[`${s.key}_cutoff`] && <div className="field-error">{errors[`${s.key}_cutoff`].message}</div>}
+              </div>
+            ))}
+          </div>
+        </fieldset>
 
         <div className="btn-row" style={{ display: 'flex', gap: 10, marginTop: 8 }}>
           <button type="button" className="btn" onClick={handleSaveDefaults} disabled={savingDefaults}>
             {savingDefaults ? 'Saving…' : 'Save as Default for New Batches'}
           </button>
-          <button type="submit" className="btn primary" style={{ width: 'auto' }} disabled={submitting}>
-            {submitting ? 'Saving…' : existingBatch ? 'Save Batch Configuration' : 'Continue to Upload →'}
-          </button>
+          {!readOnly && (
+            <button type="submit" className="btn primary" style={{ width: 'auto' }} disabled={submitting}>
+              {submitting ? 'Saving…' : existingBatch ? 'Save Batch Configuration' : 'Continue to Upload →'}
+            </button>
+          )}
         </div>
       </form>
     </div>

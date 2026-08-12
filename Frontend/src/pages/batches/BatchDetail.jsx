@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import * as batchApi from '../../api/batchApi';
 import * as candidateApi from '../../api/candidateApi';
 import ConfigureBatchStep from '../../features/batches/ConfigureBatchStep';
+import DeleteBatchModal from '../../features/batches/DeleteBatchModal';
 import UploadStep from '../../features/batches/UploadStep';
 import ReviewStep from '../../features/batches/ReviewStep';
 import InviteConfirmationStep from '../../features/batches/InviteConfirmationStep';
@@ -15,14 +16,16 @@ import ExportModal from '../../features/candidates/ExportModal';
 import PaginationControls from '../../components/common/PaginationControls';
 import { extractErrorMessage } from '../../utils/passwordSchema';
 
-const STATUS_PILL = { draft: 'gray', in_progress: 'blue', completed: 'green' };
+const STATUS_PILL = { draft: 'gray', in_progress: 'blue', completed: 'green', cancelled: 'red' };
 const EMPTY_FILTERS = { name: '', email: '', aadhaar: '', result: '', score_min: '', score_max: '' };
 
 export default function BatchDetail() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const [batch, setBatch] = useState(null);
   const [finalizeSummary, setFinalizeSummary] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   // Once a batch is finalized, this page gives it the same browse/select/notify/edit
   // capability as All Candidates, just pre-scoped to this one batch_id (wireframe parity -
@@ -99,10 +102,15 @@ export default function BatchDetail() {
 
   return (
     <div style={{ maxWidth: 900 }}>
-      <h3>
-        Batch Details — {batch.batch_name}{' '}
-        <span className={`pill ${STATUS_PILL[batch.status] || 'gray'}`}>{batch.status_display}</span>
-      </h3>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <h3>
+          Batch Details — {batch.batch_name}{' '}
+          <span className={`pill ${STATUS_PILL[batch.status] || 'gray'}`}>{batch.status_display}</span>
+        </h3>
+        {batch.status !== 'cancelled' && (
+          <button className="btn danger" onClick={() => setDeleteOpen(true)}>🗑 Delete / Deactivate Batch</button>
+        )}
+      </div>
 
       <div className="grid-4" style={{ marginBottom: 20 }}>
         <div className="stat-card"><div className="stat-num">{batch.total_candidates}</div><div className="stat-lbl">Candidates</div></div>
@@ -111,7 +119,11 @@ export default function BatchDetail() {
         <div className="stat-card"><div className="stat-num">{batch.borderline_count}</div><div className="stat-lbl">Borderline</div></div>
       </div>
 
-      <ConfigureBatchStep existingBatch={batch} onCreated={(updated) => setBatch(updated)} />
+      <ConfigureBatchStep
+        existingBatch={batch}
+        onCreated={(updated) => setBatch(updated)}
+        readOnly={batch.status !== 'draft'}
+      />
 
       {batch.status === 'draft' ? (
         <>
@@ -126,11 +138,13 @@ export default function BatchDetail() {
         </>
       ) : (
         <>
-          <div className="btn-row" style={{ margin: '16px 0' }}>
-            <button className="btn primary" style={{ width: 'auto' }} onClick={handleSendInvites}>
-              📧 Send Invite Link(s)
-            </button>
-          </div>
+          {batch.status !== 'cancelled' && (
+            <div className="btn-row" style={{ margin: '16px 0' }}>
+              <button className="btn primary" style={{ width: 'auto' }} onClick={handleSendInvites}>
+                📧 Send Invite Link(s)
+              </button>
+            </div>
+          )}
 
           <CandidateFilters
             filters={filters}
@@ -180,6 +194,21 @@ export default function BatchDetail() {
       )}
 
       {finalizeSummary && <InviteConfirmationStep summary={finalizeSummary} />}
+
+      {deleteOpen && (
+        <DeleteBatchModal
+          batch={batch}
+          onClose={() => setDeleteOpen(false)}
+          onDeleted={(res) => {
+            setDeleteOpen(false);
+            // "deactivated" outcome leaves the batch row intact (just marked Cancelled) -
+            // stay on the page and show the new status. A real delete removes the row, so
+            // there's nothing left here to show.
+            if (res.detail.includes('deactivated')) refresh();
+            else navigate('/batches');
+          }}
+        />
+      )}
     </div>
   );
 }

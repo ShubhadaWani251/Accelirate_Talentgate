@@ -1,4 +1,4 @@
-from django.db.models import Q
+from django.db.models import Count, Q
 
 from api.models import Batch, Candidate, Question, QuestionBankSection, User
 from api.serializers.batch import annotate_batch_counts
@@ -13,11 +13,16 @@ def _batches_qs_for(user):
 
 
 def _build_stats(batches_qs, candidates_qs):
+    # One aggregate query for the candidate-derived numbers (was 3 separate .count() calls),
+    # same conditional-Count technique annotate_batch_counts already uses for batches.
+    candidate_stats = candidates_qs.aggregate(
+        total_candidates=Count('candidate_id'),
+        completed=Count('candidate_id', filter=Q(status=Candidate.Status.COMPLETED)),
+        total_pass=Count('candidate_id', filter=Q(result=Candidate.Result.PASS)),
+    )
     return {
         'active_batches': batches_qs.filter(status=Batch.Status.IN_PROGRESS).count(),
-        'total_candidates': candidates_qs.count(),
-        'completed': candidates_qs.filter(status=Candidate.Status.COMPLETED).count(),
-        'total_pass': candidates_qs.filter(result=Candidate.Result.PASS).count(),
+        **candidate_stats,
     }
 
 
@@ -43,15 +48,17 @@ def _build_batches_overview(batches_qs, is_admin):
 
 
 def _build_question_bank_health():
+    sections = QuestionBankSection.objects.annotate(
+        active_count=Count('question', filter=Q(question__status=Question.Status.ACTIVE))
+    )
     return [
         {
             'section_name': section.section_name,
-            'active_count': (active_count := section.question_set.filter(
-                status=Question.Status.ACTIVE).count()),
+            'active_count': section.active_count,
             'min_required_active': section.min_required_active,
-            'is_ok': active_count >= section.min_required_active,
+            'is_ok': section.active_count >= section.min_required_active,
         }
-        for section in QuestionBankSection.objects.all()
+        for section in sections
     ]
 
 

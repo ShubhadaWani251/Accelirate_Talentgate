@@ -9,8 +9,8 @@ const NAV_LINKS = {
   admin: [
     { label: 'Dashboard', to: '/admin/dashboard' },
     { label: 'All Candidates', to: '/candidates' },
-    { label: 'Question Bank', to: null },
-    { label: 'Users', to: null },
+    { label: 'Question Bank', to: '/admin/question-bank' },
+    { label: 'Users', to: '/admin/users' },
   ],
   ta: [
     { label: 'Dashboard', to: '/ta/dashboard' },

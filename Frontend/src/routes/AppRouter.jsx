@@ -15,6 +15,9 @@ import BatchDetail from '../pages/batches/BatchDetail';
 import BatchWizard from '../features/batches/BatchWizard';
 import AllCandidates from '../pages/candidates/AllCandidates';
 import CandidateDetail from '../pages/candidates/CandidateDetail';
+import QuestionBank from '../pages/questions/QuestionBank';
+import UserManagement from '../pages/users/UserManagement';
+import EditUser from '../pages/users/EditUser';
 
 function RoleHome() {
   const roleCode = useSelector(selectRoleCode);
@@ -71,6 +74,19 @@ export default function AppRouter() {
           <Route path="/batches/:id" element={<BatchDetail />} />
           <Route path="/candidates" element={<AllCandidates />} />
           <Route path="/candidates/:id" element={<CandidateDetail />} />
+
+          <Route
+            path="/admin/question-bank"
+            element={<ProtectedRoute allowedRoles={['admin']}><QuestionBank /></ProtectedRoute>}
+          />
+          <Route
+            path="/admin/users"
+            element={<ProtectedRoute allowedRoles={['admin']}><UserManagement /></ProtectedRoute>}
+          />
+          <Route
+            path="/admin/users/:id"
+            element={<ProtectedRoute allowedRoles={['admin']}><EditUser /></ProtectedRoute>}
+          />
         </Route>
 
         <Route path="/" element={<RoleHome />} />

@@ -1,0 +1,46 @@
+[
+  {
+    "model": "api.questionbanksection",
+    "pk": 1,
+    "fields": {
+      "section_name": "Logical & Analytical Reasoning",
+      "section_key": "logical",
+      "description": "Logical and analytical reasoning questions",
+      "min_required_active": 50,
+      "created_at": "2026-08-12T00:00:00Z"
+    }
+  },
+  {
+    "model": "api.questionbanksection",
+    "pk": 2,
+    "fields": {
+      "section_name": "Quantitative",
+      "section_key": "quantitative",
+      "description": "Quantitative aptitude questions",
+      "min_required_active": 50,
+      "created_at": "2026-08-12T00:00:00Z"
+    }
+  },
+  {
+    "model": "api.questionbanksection",
+    "pk": 3,
+    "fields": {
+      "section_name": "Verbal Ability",
+      "section_key": "verbal",
+      "description": "Verbal ability and comprehension questions",
+      "min_required_active": 50,
+      "created_at": "2026-08-12T00:00:00Z"
+    }
+  },
+  {
+    "model": "api.questionbanksection",
+    "pk": 4,
+    "fields": {
+      "section_name": "Programming",
+      "section_key": "programming",
+      "description": "Programming and coding aptitude questions",
+      "min_required_active": 50,
+      "created_at": "2026-08-12T00:00:00Z"
+    }
+  }
+]
