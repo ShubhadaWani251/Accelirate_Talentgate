@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import toast from 'react-hot-toast';
 
 const STATUS_PILL = {
   pending_invite: 'gray', invited: 'blue', in_progress: 'blue',
@@ -10,7 +11,20 @@ const RESULT_PILL = { pending: 'gray', pass: 'green', fail: 'red' };
 // candidates (All Candidates, Batch Details) needs both and they share selection state.
 export default function CandidateTable({
   candidates, loading, selected, onToggleRow, onToggleSelectAll, onEdit, onOpenNotify, onOpenExport,
+  onOpenCertification, onOpenInvite,
 }) {
+  // Only checked rows are emailed, so an empty selection is a mistake worth naming rather
+  // than a silently dead button.
+  function requireSelection(action) {
+    return () => {
+      if (selected.size === 0) {
+        toast.error('Select at least one candidate first — only checked rows are emailed.');
+        return;
+      }
+      action();
+    };
+  }
+
   return (
     <>
       <div className="btn-row" style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 12 }}>
@@ -18,9 +32,23 @@ export default function CandidateTable({
           <input type="checkbox" checked={selected.size === candidates.length && candidates.length > 0} onChange={onToggleSelectAll} />
           <b>Select All</b>
         </label>
-        <button className="btn" disabled={selected.size === 0} onClick={onOpenNotify}>
+        {/* Batch Details passes this; invites are only ever sent to checked rows, so anyone
+            skipped during upload review is re-invited by choosing them explicitly here. */}
+        {onOpenInvite && (
+          <button className="btn" onClick={requireSelection(onOpenInvite)}>
+            📧 Send Invite Link ({selected.size})
+          </button>
+        )}
+        <button className="btn" onClick={requireSelection(onOpenNotify)}>
           ✉ Send Notification Email ({selected.size})
         </button>
+        {/* Batch Details passes this; All Candidates deliberately doesn't - certification is
+            sent per-batch once its results are in. */}
+        {onOpenCertification && (
+          <button className="btn" onClick={requireSelection(onOpenCertification)}>
+            🎓 Send Certification Link ({selected.size})
+          </button>
+        )}
         <button className="btn" style={{ marginLeft: 'auto' }} onClick={onOpenExport}>
           ⬇ Export Candidates (Excel)
         </button>
@@ -33,7 +61,7 @@ export default function CandidateTable({
               <th></th><th>Name</th><th>Email</th><th>Batch Name</th><th>College</th><th>Degree</th>
               <th>Stream</th><th>Percentage</th><th>Passing Out Year</th><th>Location</th><th>Aadhaar</th>
               <th>Status</th><th>Logical</th><th>Quant.</th><th>Verbal</th><th>Programming</th>
-              <th>Overall</th><th>Result</th><th></th><th></th>
+              <th>Overall</th><th>Result</th><th>History</th><th>Edit</th>
             </tr>
           </thead>
           <tbody>
@@ -62,8 +90,8 @@ export default function CandidateTable({
                   <td>{c.programming_score ?? '—'}</td>
                   <td>{c.overall_score ?? '—'}</td>
                   <td><span className={`pill ${RESULT_PILL[c.result] || 'gray'}`}>{c.result_display}</span></td>
-                  <td><Link className="link-text" to={`/candidates/${c.candidate_id}`}>View</Link></td>
-                  <td><span className="link-text" onClick={() => onEdit(c)}>Edit</span></td>
+                  <td><Link className="link-text" to={`/candidates/${c.candidate_id}`}>View History</Link></td>
+                  <td><button className="btn small" onClick={() => onEdit(c)}>Edit</button></td>
                 </tr>
               ))
             )}

@@ -21,7 +21,7 @@ export default function BatchWizard() {
   const stepIndex = STEPS.findIndex((s) => s.key === stepKey);
 
   return (
-    <div style={{ maxWidth: 900 }}>
+    <div className="page-wide">
       <h3>Bulk Candidate Upload &amp; Duplicate Review</h3>
       <div className="wizard-steps">
         {STEPS.map((s, i) => (
@@ -55,14 +55,11 @@ export default function BatchWizard() {
       )}
 
       {stepKey === 'invite' && finalizeSummary && (
-        <div>
-          <InviteConfirmationStep summary={finalizeSummary} />
-          <div className="btn-row">
-            <button className="btn primary" style={{ width: 'auto' }} onClick={() => navigate(`/batches/${finalizeSummary.batch_id}`)}>
-              Go to Batch Details
-            </button>
-          </div>
-        </div>
+        <InviteConfirmationStep
+          summary={finalizeSummary}
+          onBack={() => setStepKey('review')}
+          onSent={() => navigate(`/batches/${finalizeSummary.batch_id}`)}
+        />
       )}
     </div>
   );

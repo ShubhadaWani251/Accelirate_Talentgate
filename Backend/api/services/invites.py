@@ -17,11 +17,14 @@ def _generate_token():
     return secrets.token_urlsafe(32)[:64]
 
 
-def create_invitations(batch, user):
+def create_invitations(batch, user, candidate_ids=None):
     """Create one Invitation per eligible (OK-validated, still pending) candidate on this
     batch and flip their status to INVITED. Email sending itself is a separate, async step
     (see send_invites_async) - status reflects "invite issued", not "email delivered"
     (see Invitation.email_status for the latter).
+
+    `candidate_ids` narrows this to an explicit subset - the reviewer's checkbox selection on
+    the upload screen. Omit it to invite every still-pending candidate on the batch.
     """
     invitations = []
     candidates = batch.candidate_set.filter(
@@ -29,6 +32,8 @@ def create_invitations(batch, user):
         validation_status=Candidate.ValidationStatus.OK,
         is_deleted=False,
     )
+    if candidate_ids is not None:
+        candidates = candidates.filter(candidate_id__in=candidate_ids)
     for candidate in candidates:
         invitation = Invitation.objects.create(
             candidate=candidate,
@@ -106,10 +111,13 @@ def send_invites_async(invitations, base_url):
     threading.Thread(target=_worker, daemon=True).start()
 
 
-def send_notification_emails(candidates, subject, message):
-    """Send an ad-hoc notification (e.g. 'On Hold', 'Shortlisted') to a shortlist of
+def send_notification_emails(candidates, subject, body_for):
+    """Send a notification (e.g. 'On Hold', 'Shortlisted', 'Not Selected') to a shortlist of
     candidates, on a single background thread - same fire-and-forget pattern as
     send_invites_async, since these emails don't have a per-row status to track back.
+
+    `body_for` is a callable taking a candidate and returning that candidate's message body,
+    so approved templates can personalise per recipient while a custom message stays constant.
     """
     def _worker():
         try:
@@ -117,7 +125,7 @@ def send_notification_emails(candidates, subject, message):
                 try:
                     send_mail(
                         subject=subject,
-                        message=message,
+                        message=body_for(candidate),
                         from_email=settings.DEFAULT_FROM_EMAIL,
                         recipient_list=[candidate.email],
                         fail_silently=False,

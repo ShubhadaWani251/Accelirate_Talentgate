@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { yupResolver } from '@hookform/resolvers/yup';
 import * as yup from 'yup';
@@ -21,7 +22,15 @@ const schema = yup.object({
 export default function Profile() {
   const user = useSelector(selectUser);
   const dispatch = useDispatch();
+  const { hash } = useLocation();
   const [submitting, setSubmitting] = useState(false);
+
+  // React Router doesn't scroll to #fragments on its own, so the navbar's "Reset Password"
+  // menu item would otherwise just land at the top of the page like plain "Profile".
+  useEffect(() => {
+    if (!hash) return;
+    document.querySelector(hash)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [hash]);
   const {
     register,
     handleSubmit,
@@ -71,7 +80,8 @@ export default function Profile() {
         </div>
       </div>
 
-      <div className="card">
+      {/* Anchor target for the navbar's "Reset Password" menu item. */}
+      <div className="card" id="reset-password">
         <div className="box-label">Reset Password</div>
         <form onSubmit={handleSubmit(onSubmit)} noValidate>
           <div className="field">

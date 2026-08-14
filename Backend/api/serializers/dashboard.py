@@ -1,4 +1,4 @@
-from django.db.models import Count, Q
+from django.db.models import Case, Count, IntegerField, Q, Value, When
 
 from api.models import Batch, Candidate, Question, QuestionBankSection, User
 from api.serializers.batch import annotate_batch_counts
@@ -6,10 +6,10 @@ from api.services.access import visible_candidates_qs
 
 
 def _batches_qs_for(user):
-    qs = Batch.objects.filter(is_deleted=False)
-    if user.role.role_code != 'admin':
-        qs = qs.filter(Q(primary_ta_user_id=user.user_id) | Q(created_by_id=user.user_id))
-    return qs
+    # Every TA sees every batch, same as an admin - the owner narrowing that used to live here
+    # was removed deliberately (see services/access.py for the rationale). Kept as a function
+    # so the dashboard has the same single seam the other call sites do.
+    return Batch.objects.filter(is_deleted=False)
 
 
 def _build_stats(batches_qs, candidates_qs):
@@ -27,7 +27,17 @@ def _build_stats(batches_qs, candidates_qs):
 
 
 def _build_batches_overview(batches_qs, is_admin):
-    qs = annotate_batch_counts(batches_qs.select_related('primary_ta_user').order_by('-created_at'))
+    # Deactivated batches sink to the bottom rather than being hidden - they still hold real
+    # candidates and results a TA may need to look up, but they're not live work, so they
+    # shouldn't push active batches down the list.
+    qs = annotate_batch_counts(
+        batches_qs.select_related('primary_ta_user')
+        .annotate(is_cancelled=Case(
+            When(status=Batch.Status.CANCELLED, then=Value(1)),
+            default=Value(0), output_field=IntegerField(),
+        ))
+        .order_by('is_cancelled', '-created_at')
+    )
     rows = []
     for batch in qs:
         row = {

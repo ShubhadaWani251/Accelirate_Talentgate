@@ -119,8 +119,20 @@ class QuestionBulkUploadView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # The upload is launched from inside a section, so that section wins over whatever the
+        # sheet's Section column says - see import_questions_from_workbook's force_section.
+        force_section = None
+        section_key = (request.data.get('section') or '').strip()
+        if section_key:
+            force_section = QuestionBankSection.objects.filter(section_key__iexact=section_key).first()
+            if not force_section:
+                return Response({'detail': f'Unknown section "{section_key}".'},
+                                 status=status.HTTP_400_BAD_REQUEST)
+
         try:
-            created, errors = import_questions_from_workbook(upload, request.user)
+            created, errors, reassigned = import_questions_from_workbook(
+                upload, request.user, force_section=force_section,
+            )
         except (zipfile.BadZipFile, InvalidFileException, KeyError, DataError):
             logger.exception('Failed to parse uploaded question workbook')
             return Response(
@@ -132,10 +144,15 @@ class QuestionBulkUploadView(APIView):
             return Response({'detail': 'No data rows found in that file.'}, status=status.HTTP_400_BAD_REQUEST)
 
         log_action(request, request.user, 'bulk_upload', 'question', 0,
-                   details={'created_count': len(created), 'error_count': len(errors)})
+                   details={'created_count': len(created), 'error_count': len(errors),
+                            'forced_section': force_section.section_key if force_section else None,
+                            'reassigned_count': len(reassigned)})
 
         return Response({
             'created_count': len(created),
             'error_count': len(errors),
             'errors': errors,
+            'section_name': force_section.section_name if force_section else None,
+            'reassigned_count': len(reassigned),
+            'reassigned': reassigned,
         }, status=status.HTTP_201_CREATED)

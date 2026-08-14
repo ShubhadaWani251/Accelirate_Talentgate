@@ -6,6 +6,7 @@ import * as authApi from '../api/authApi';
 import Login from '../features/auth/Login';
 import ForgotPassword from '../features/auth/ForgotPassword';
 import OtpVerification from '../features/auth/OtpVerification';
+import LoggedOut from '../features/auth/LoggedOut';
 import ProtectedRoute from '../components/common/ProtectedRoute';
 import ProtectedLayout from '../components/layout/ProtectedLayout';
 import Dashboard from '../pages/Dashboard';
@@ -48,6 +49,7 @@ export default function AppRouter() {
         <Route path="/login" element={<Login />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/verify-otp" element={<OtpVerification />} />
+        <Route path="/logged-out" element={<LoggedOut />} />
 
         <Route element={<ProtectedRoute><ProtectedLayout /></ProtectedRoute>}>
           <Route

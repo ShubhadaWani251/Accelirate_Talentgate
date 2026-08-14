@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { useSelector } from 'react-redux';
 import toast from 'react-hot-toast';
 import { selectRoleCode } from '../features/auth/authSlice';
@@ -12,7 +12,6 @@ const STATUS_PILL = { draft: 'gray', in_progress: 'blue', completed: 'green', ca
 
 export default function Dashboard() {
   const roleCode = useSelector(selectRoleCode);
-  const navigate = useNavigate();
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [exportOpen, setExportOpen] = useState(false);
@@ -93,9 +92,9 @@ export default function Dashboard() {
                     <td>{b.fail_count}</td>
                     <td>{b.borderline_count}</td>
                     <td>
-                      <span className="link-text" onClick={() => navigate(`/candidates?batch=${b.batch_id}`)}>
-                        View
-                      </span>
+                      {/* Opens that batch's own page, not a filtered All Candidates view -
+                          Batch Details is where the batch's config, actions and candidates live. */}
+                      <Link className="link-text" to={`/batches/${b.batch_id}`}>View</Link>
                     </td>
                     <td>
                       <span className="link-text" onClick={() => handleExportBatch(b.batch_id)}>Export</span>

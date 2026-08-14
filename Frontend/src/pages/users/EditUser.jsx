@@ -56,9 +56,8 @@ export default function EditUser() {
   }
 
   return (
-    <div style={{ maxWidth: 800 }}>
-      <Link to="/admin/users" className="link-text">← Back to User &amp; Access Management</Link>
-      <h3 style={{ marginTop: 8 }}>Edit User Access — {user.full_name}</h3>
+    <div className="page-wide">
+      <h3>Edit User Access — {user.full_name}</h3>
 
       <div className="card">
         <div className="box-label">User Details</div>

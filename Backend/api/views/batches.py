@@ -12,7 +12,7 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from api.models import Batch, Candidate, DuplicateCheck, Invitation
+from api.models import Batch, Candidate, Invitation
 from api.pagination import StandardResultsPagination
 from api.permissions import IsAdminOrTA
 from api.serializers.batch import (
@@ -30,7 +30,13 @@ logger = logging.getLogger(__name__)
 
 def _get_batch_or_404(user, batch_id):
     try:
-        batch = Batch.objects.select_related('primary_ta_user').get(batch_id=batch_id, is_deleted=False)
+        # annotate_batch_counts here rather than letting BatchSerializer fall back to its
+        # per-instance queries: without it pass_count and fail_count each fire their own
+        # COUNT(*), which on a remote database is two extra network round-trips on every
+        # batch fetch. The annotation folds them into this same single query.
+        batch = annotate_batch_counts(
+            Batch.objects.select_related('primary_ta_user')
+        ).get(batch_id=batch_id, is_deleted=False)
     except Batch.DoesNotExist:
         raise Http404
     if not can_access_batch(user, batch):
@@ -42,9 +48,8 @@ class BatchListCreateView(APIView):
     permission_classes = [IsAdminOrTA]
 
     def get(self, request):
+        # Unscoped by owner on purpose - every TA sees every batch (see services/access.py).
         qs = Batch.objects.select_related('primary_ta_user').filter(is_deleted=False)
-        if request.user.role.role_code != 'admin':
-            qs = qs.filter(primary_ta_user=request.user)
         search = request.query_params.get('search', '').strip()
         if search:
             qs = qs.filter(Q(batch_name__icontains=search) | Q(college_name__icontains=search))
@@ -72,41 +77,60 @@ class BatchDetailView(APIView):
         batch = _get_batch_or_404(request.user, batch_id)
         return Response(BatchSerializer(batch).data)
 
+    # Cutoffs are the one part of a finalized batch that still has to move: results are graded
+    # against them, and a TA legitimately revises a cutoff after seeing how a cohort scored.
+    # Everything else (dates, question counts, duration) would retroactively invalidate an exam
+    # that candidates have already sat, so it stays frozen once the batch leaves Draft.
+    EDITABLE_AFTER_DRAFT = {
+        'logical_cutoff', 'quantitative_cutoff', 'verbal_cutoff', 'programming_cutoff',
+    }
+
     def patch(self, request, batch_id):
         batch = _get_batch_or_404(request.user, batch_id)
+        if batch.status == Batch.Status.CANCELLED:
+            return Response({'detail': 'This batch is deactivated; its configuration can no '
+                                        'longer be changed.'},
+                             status=status.HTTP_400_BAD_REQUEST)
+
         if batch.status != Batch.Status.DRAFT:
-            return Response(
-                {'detail': 'This batch has already been finalized; its configuration can no '
-                            'longer be changed.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            locked = set(request.data) - self.EDITABLE_AFTER_DRAFT
+            if locked:
+                return Response(
+                    {'detail': 'This batch has been finalized - only the section cutoffs can '
+                               'still be changed.',
+                     'locked_fields': sorted(locked)},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         serializer = BatchSerializer(batch, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
         log_action(request, request.user, 'update', 'batch', batch.batch_id)
         return Response(serializer.data)
 
-    def delete(self, request, batch_id):
+
+class BatchDeactivateView(APIView):
+    """Deactivation, not deletion: the batch row and all its candidate/result history stay
+    intact and simply stop accepting invites. Batches are never removed - a TA who has sent
+    invites can't un-send them, and results already recorded against a batch are the record
+    of what happened.
+    """
+    permission_classes = [IsAdminOrTA]
+
+    def post(self, request, batch_id):
         batch = _get_batch_or_404(request.user, batch_id)
         if batch.status == Batch.Status.CANCELLED:
-            return Response({'detail': 'This batch is already cancelled.'},
+            return Response({'detail': 'This batch is already deactivated.'},
                              status=status.HTTP_400_BAD_REQUEST)
 
-        # Invites already sent means real candidates may already be mid-exam or have results
-        # tied to this batch - hard-deleting it would erase that history, so it's deactivated
-        # (marked Cancelled) instead of removed. A batch with no invites sent yet has nothing
-        # to preserve, so it's safe to soft-delete outright.
-        if Invitation.objects.filter(batch=batch).exists():
-            batch.status = Batch.Status.CANCELLED
-            batch.save(update_fields=['status'])
-            log_action(request, request.user, 'deactivate', 'batch', batch.batch_id)
-            return Response({'detail': f'"{batch.batch_name}" has invites already sent, so it has '
-                                        f'been deactivated (marked Cancelled) rather than deleted.'})
-
-        batch.is_deleted = True
-        batch.save(update_fields=['is_deleted'])
-        log_action(request, request.user, 'delete', 'batch', batch.batch_id)
-        return Response({'detail': f'"{batch.batch_name}" has been deleted.'})
+        batch.status = Batch.Status.CANCELLED
+        batch.save(update_fields=['status'])
+        log_action(request, request.user, 'deactivate', 'batch', batch.batch_id)
+        return Response({
+            'detail': f'"{batch.batch_name}" has been deactivated. Its candidates and results '
+                      f'are still available, but no further invites can be sent.',
+            'batch': BatchSerializer(batch).data,
+        })
 
 
 class BatchDefaultsView(APIView):
@@ -271,36 +295,52 @@ class BatchFinalizeView(APIView):
             return Response({'detail': 'Upload at least one candidate before finalizing.'},
                              status=status.HTTP_400_BAD_REQUEST)
 
-        invalid_count = candidates.exclude(validation_status=Candidate.ValidationStatus.OK).count()
-        if invalid_count:
+        # The reviewer's checkbox selection IS the invite list. Rows they deliberately left
+        # unchecked (a duplicate inside the cooling-off window, say) stay on the batch as an
+        # uploaded record but are never emailed - so there's no separate "clear the duplicate
+        # flag" step to unblock finalizing any more. Selecting the row is that decision.
+        candidate_ids = request.data.get('candidate_ids')
+        if not isinstance(candidate_ids, list) or not candidate_ids:
             return Response(
-                {'detail': f'{invalid_count} row(s) still have validation errors - fix or remove them first.'},
+                {'detail': 'Select at least one candidate to invite before creating the batch.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        blocking_ids = [
-            c.candidate_id for c in candidates.prefetch_related('duplicate_checks')
-            if (latest := max(c.duplicate_checks.all(), key=lambda d: d.checked_at, default=None))
-            and latest.check_status == DuplicateCheck.CheckStatus.DUPLICATE_WITHIN_WINDOW
-        ]
-        if blocking_ids:
+        selected = list(candidates.filter(candidate_id__in=candidate_ids))
+        if not selected:
+            return Response({'detail': 'None of the selected candidates belong to this batch.'},
+                             status=status.HTTP_400_BAD_REQUEST)
+
+        # Only the selected rows have to be valid - an unselected row with a missing email is
+        # fine, precisely because it's not going to be emailed.
+        invalid = [c for c in selected if c.validation_status != Candidate.ValidationStatus.OK]
+        if invalid:
             return Response(
-                {'detail': f'{len(blocking_ids)} row(s) have an unresolved duplicate within the cooling-off '
-                            f'window - clear or remove them first.',
-                 'candidate_ids': blocking_ids},
+                {'detail': f'{len(invalid)} selected row(s) still have validation errors - '
+                            f'uncheck or remove them first.',
+                 'candidate_ids': [c.candidate_id for c in invalid]},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         batch.status = Batch.Status.IN_PROGRESS
         batch.total_candidates = total
         batch.save(update_fields=['status', 'total_candidates'])
-        log_action(request, request.user, 'finalize', 'batch', batch.batch_id)
+        log_action(request, request.user, 'finalize', 'batch', batch.batch_id,
+                   details={'selected_count': len(selected), 'uploaded_count': total})
+
+        # Finalizing creates the batch but sends nothing. The wireframe makes the summary on
+        # "Send Invite - Confirmation" a mandatory pre-dispatch step, so the selected ids are
+        # handed back for that screen to post to send-invites once the TA confirms.
+        selected_ids = [c.candidate_id for c in selected]
 
         return Response({
             'batch_id': batch.batch_id,
             'batch_name': batch.batch_name,
             'college_name': batch.college_name,
             'candidate_count': total,
+            'selected_candidate_ids': selected_ids,
+            'selected_count': len(selected_ids),
+            'skipped_count': total - len(selected_ids),
             'link_valid_from': batch.link_valid_from,
             'link_valid_until': batch.link_valid_until,
             'exam_duration_minutes': batch.exam_duration_minutes,
@@ -325,15 +365,28 @@ class BatchSendInvitesView(APIView):
             return Response({'detail': 'This batch has been cancelled and can no longer send invites.'},
                              status=status.HTTP_400_BAD_REQUEST)
 
-        invitations = create_invitations(batch, request.user)
+        # Invites are always sent to an explicit selection - never "everyone still pending".
+        # A blanket send would sweep up rows the reviewer deliberately skipped (a duplicate
+        # inside the cooling-off window, say) and silently undo that decision.
+        candidate_ids = request.data.get('candidate_ids')
+        if not isinstance(candidate_ids, list) or not candidate_ids:
+            return Response({'detail': 'Select the candidates to invite first.'},
+                             status=status.HTTP_400_BAD_REQUEST)
+
+        invitations = create_invitations(batch, request.user, candidate_ids=candidate_ids)
         if invitations:
             send_invites_async(invitations, settings.FRONTEND_ORIGIN)
             for invitation in invitations:
                 log_action(request, request.user, 'invite_sent', 'candidate', invitation.candidate_id,
                            details={'batch_id': batch.batch_id})
 
-        return Response({
-            'invited_count': len(invitations),
-            'detail': f'{len(invitations)} invitation(s) queued for sending.' if invitations
-                      else 'No pending candidates to invite (already sent, or none uploaded).',
-        })
+        skipped = len(candidate_ids) - len(invitations)
+        detail = f'{len(invitations)} invitation(s) queued for sending.'
+        if not invitations:
+            detail = ('No invitations sent - the selected candidate(s) have already been '
+                      'invited, or have unresolved validation errors.')
+        elif skipped > 0:
+            detail += f' {skipped} already invited, so skipped.'
+
+        return Response({'invited_count': len(invitations), 'skipped_count': max(skipped, 0),
+                         'detail': detail})

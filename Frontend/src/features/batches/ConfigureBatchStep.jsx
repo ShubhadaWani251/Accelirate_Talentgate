@@ -33,7 +33,12 @@ const schema = yup.object({
   programming_cutoff: yup.number().typeError('Required').min(0).max(100).required(),
 });
 
-export default function ConfigureBatchStep({ onCreated, existingBatch, readOnly = false }) {
+// `readOnly` means "this batch is past Draft": the dates, question counts and duration are
+// frozen because candidates may already have sat the exam against them, but the section cutoffs
+// stay editable so a TA can still revise them after seeing how the cohort scored. A deactivated
+// batch is frozen outright - `locked` covers that case.
+export default function ConfigureBatchStep({ onCreated, existingBatch, readOnly = false, locked = false }) {
+  const cutoffsOnly = readOnly && !locked;
   const [submitting, setSubmitting] = useState(false);
   const [savingDefaults, setSavingDefaults] = useState(false);
   const {
@@ -69,11 +74,20 @@ export default function ConfigureBatchStep({ onCreated, existingBatch, readOnly 
   async function onSubmit(values) {
     setSubmitting(true);
     try {
-      const payload = {
-        ...values,
-        link_valid_from: fromDatetimeLocalValue(values.link_valid_from),
-        link_valid_until: fromDatetimeLocalValue(values.link_valid_until),
-      };
+      // Once a batch is finalized only the cutoffs are still editable, so send just those -
+      // the backend rejects a PATCH carrying any of the frozen fields.
+      const payload = cutoffsOnly
+        ? {
+            logical_cutoff: values.logical_cutoff,
+            quantitative_cutoff: values.quantitative_cutoff,
+            verbal_cutoff: values.verbal_cutoff,
+            programming_cutoff: values.programming_cutoff,
+          }
+        : {
+            ...values,
+            link_valid_from: fromDatetimeLocalValue(values.link_valid_from),
+            link_valid_until: fromDatetimeLocalValue(values.link_valid_until),
+          };
       const batch = existingBatch
         ? await batchApi.updateBatch(existingBatch.batch_id, payload)
         : await batchApi.createBatch(payload);
@@ -113,7 +127,10 @@ export default function ConfigureBatchStep({ onCreated, existingBatch, readOnly 
       <div className="box-label">Configure Batch</div>
       {readOnly && (
         <div className="alert" style={{ marginBottom: 14 }}>
-          This batch has been finalized - configuration is locked.
+          {locked
+            ? 'This batch is deactivated - its configuration is locked.'
+            : 'This batch has been finalized. Candidates may already have sat the exam, so the '
+              + 'schedule and question counts are locked - only the section cutoffs can still be changed.'}
         </div>
       )}
       <form onSubmit={handleSubmit(onSubmit)} noValidate>
@@ -166,6 +183,11 @@ export default function ConfigureBatchStep({ onCreated, existingBatch, readOnly 
               </div>
             ))}
           </div>
+        </fieldset>
+
+        {/* Deliberately outside the fieldset above so cutoffs stay editable on a finalized
+            batch - see the component's note. A deactivated batch disables them too. */}
+        <fieldset disabled={locked} style={{ border: 'none', padding: 0, margin: 0 }}>
           <div className="grid-4">
             {SECTIONS.map((s) => (
               <div key={s.key} className="field">
@@ -183,9 +205,11 @@ export default function ConfigureBatchStep({ onCreated, existingBatch, readOnly 
           <button type="button" className="btn" onClick={handleSaveDefaults} disabled={savingDefaults}>
             {savingDefaults ? 'Saving…' : 'Save as Default for New Batches'}
           </button>
-          {!readOnly && (
+          {!locked && (
             <button type="submit" className="btn primary" style={{ width: 'auto' }} disabled={submitting}>
-              {submitting ? 'Saving…' : existingBatch ? 'Save Batch Configuration' : 'Continue to Upload →'}
+              {submitting ? 'Saving…'
+                : cutoffsOnly ? 'Save Cutoffs'
+                : existingBatch ? 'Save Batch Configuration' : 'Continue to Upload →'}
             </button>
           )}
         </div>

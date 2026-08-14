@@ -5,6 +5,8 @@ import urllib.request
 import zipfile
 
 from django.conf import settings
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.validators import URLValidator
 from django.db.models import Prefetch, Q
 from django.http import Http404, HttpResponse
 from django.utils.decorators import method_decorator
@@ -14,17 +16,23 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from api.models import Batch, Candidate, ExamAttempt
+from api.models import AuditLog, Batch, Candidate, ExamAttempt
 from api.pagination import StandardResultsPagination
 from api.permissions import IsAdminOrTA
 from api.serializers.candidates import (
     CandidateDetailSerializer,
     CandidateListSerializer,
     CandidateUpdateSerializer,
+    _ACTIVITY_STATUS_LABELS,
+    _effective_status,
     _latest_attempt,
 )
 from api.services.access import can_access_batch, visible_candidates_qs
 from api.services.audit import log_action
+from api.services.candidate_history import build_candidate_history
+from api.services.email_templates import (
+    CERTIFICATION_TEMPLATE, NOTIFICATION_TEMPLATES, render_certification_email, render_template,
+)
 from api.services.excel_upload import generate_candidates_workbook
 from api.services.invites import create_single_reinvite, send_invites_async, send_notification_emails
 from api.utils.net import ratelimit_user_key
@@ -49,6 +57,63 @@ def _to_decimal_param(value):
         return float(value) if value not in (None, '') else None
     except ValueError:
         return None
+
+
+# Overall score lives on Candidate; per-section scores only exist on the ExamAttempt, so a
+# section filter has to reach through the related attempt. Both are exposed as <field>_min /
+# <field>_max query params so one shared filter UI can drive them all.
+_SCORE_FILTER_FIELDS = {
+    'score': 'overall_score',
+    'logical': 'examattempt__logical_score',
+    'quantitative': 'examattempt__quantitative_score',
+    'verbal': 'examattempt__verbal_score',
+    'programming': 'examattempt__programming_score',
+}
+
+
+def _apply_score_filters(qs, params):
+    """Apply any overall/section score range filters present in the query params."""
+    section_filter_applied = False
+    for param_prefix, field in _SCORE_FILTER_FIELDS.items():
+        for suffix, lookup in (('min', 'gte'), ('max', 'lte')):
+            value = _to_decimal_param(params.get(f'{param_prefix}_{suffix}'))
+            if value is None:
+                continue
+            qs = qs.filter(**{f'{field}__{lookup}': value})
+            if field.startswith('examattempt__'):
+                section_filter_applied = True
+
+    # Joining through examattempt yields one row per attempt, so a candidate with more than
+    # one attempt in range would appear twice. Only pay for DISTINCT when a section filter
+    # actually introduced the join.
+    return qs.distinct() if section_filter_applied else qs
+
+
+def attach_latest_activity(candidates):
+    """Bulk-attach each candidate's most recent outreach audit row in ONE query.
+
+    AuditLog has no FK to Candidate (entity_type/entity_id is a generic pointer), so this can't
+    be a prefetch_related - without it the Status column would fire a query per row, which on a
+    remote database is a full network round-trip each. Sets `prefetched_latest_activity`, which
+    serializers/candidates.py's `_latest_activity` reads in preference to querying.
+    """
+    candidates = list(candidates)
+    if not candidates:
+        return candidates
+
+    latest = {}
+    rows = AuditLog.objects.filter(
+        entity_type='candidate',
+        entity_id__in=[c.candidate_id for c in candidates],
+        action_type__in=_ACTIVITY_STATUS_LABELS,
+    ).order_by('-created_at').only('entity_id', 'action_type', 'action_details', 'created_at')
+    for row in rows:
+        # Ordered newest-first, so the first row seen per candidate is the one we want.
+        latest.setdefault(row.entity_id, row)
+
+    for candidate in candidates:
+        candidate.prefetched_latest_activity = latest.get(candidate.candidate_id)
+    return candidates
 
 
 def _with_latest_attempt(qs):
@@ -88,17 +153,11 @@ class CandidateListView(APIView):
         if result:
             qs = qs.filter(result=result)
 
-        score_min = _to_decimal_param(request.query_params.get('score_min'))
-        if score_min is not None:
-            qs = qs.filter(overall_score__gte=score_min)
-
-        score_max = _to_decimal_param(request.query_params.get('score_max'))
-        if score_max is not None:
-            qs = qs.filter(overall_score__lte=score_max)
+        qs = _apply_score_filters(qs, request.query_params)
 
         qs = _with_latest_attempt(qs.order_by('-created_at'))
         paginator = StandardResultsPagination()
-        page = paginator.paginate_queryset(qs, request, view=self)
+        page = attach_latest_activity(paginator.paginate_queryset(qs, request, view=self))
         return paginator.get_paginated_response(CandidateListSerializer(page, many=True).data)
 
 
@@ -118,6 +177,22 @@ class CandidateDetailView(APIView):
         return Response(CandidateDetailSerializer(candidate).data)
 
 
+class CandidateHistoryView(APIView):
+    """Backs the "View History" action on the bulk-upload review table and the candidate
+    tables. Returns an empty `events` list rather than a 404 when there's nothing recorded -
+    the UI renders that as the wireframe's "No history found" empty state.
+    """
+    permission_classes = [IsAdminOrTA]
+
+    def get(self, request, candidate_id):
+        candidate = _get_candidate_or_404(request.user, candidate_id)
+        return Response({
+            'candidate_id': candidate.candidate_id,
+            'full_name': candidate.full_name,
+            'events': build_candidate_history(candidate),
+        })
+
+
 class CandidateResendInviteView(APIView):
     permission_classes = [IsAdminOrTA]
 
@@ -134,6 +209,20 @@ class CandidateResendInviteView(APIView):
         return Response({'detail': f'Invite re-sent to {candidate.email}.'})
 
 
+class NotificationTemplateListView(APIView):
+    """Serves the approved template copy to the notify modal, so the wording lives only in
+    services/email_templates.py rather than being duplicated in the frontend bundle.
+    """
+    permission_classes = [IsAdminOrTA]
+
+    def get(self, request):
+        return Response([
+            {'key': key, 'label': template['label'],
+             'subject': template['subject'], 'body': template['body']}
+            for key, template in NOTIFICATION_TEMPLATES.items()
+        ])
+
+
 @method_decorator(ratelimit(key=ratelimit_user_key, rate='10/m', method='POST', block=False), name='post')
 class CandidateNotifyView(APIView):
     permission_classes = [IsAdminOrTA]
@@ -144,23 +233,90 @@ class CandidateNotifyView(APIView):
                              status=status.HTTP_429_TOO_MANY_REQUESTS)
 
         candidate_ids = request.data.get('candidate_ids', [])
-        subject = (request.data.get('subject') or 'Accelirate TalentGate - Update').strip()
+        template_key = (request.data.get('template') or '').strip()
         message = (request.data.get('message') or '').strip()
 
         if not isinstance(candidate_ids, list) or not candidate_ids:
-            return Response({'detail': 'candidate_ids must be a non-empty list.'},
+            return Response({'detail': 'Select at least one candidate to notify.'},
                              status=status.HTTP_400_BAD_REQUEST)
-        if not message:
-            return Response({'detail': 'A message is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        template = NOTIFICATION_TEMPLATES.get(template_key) if template_key else None
+        if template_key and not template:
+            return Response({'detail': f'Unknown email template "{template_key}".'},
+                             status=status.HTTP_400_BAD_REQUEST)
+        if not template and not message:
+            return Response({'detail': 'Pick a template or write a message first.'},
+                             status=status.HTTP_400_BAD_REQUEST)
 
         candidates = list(visible_candidates_qs(request.user).filter(candidate_id__in=candidate_ids))
         if not candidates:
             return Response({'detail': 'No matching candidates found.'},
                              status=status.HTTP_400_BAD_REQUEST)
 
-        send_notification_emails(candidates, subject, message)
+        # An unedited template sends the approved copy verbatim (personalised per recipient);
+        # anything the TA typed over it wins, since they edited it deliberately.
+        if template:
+            subject = request.data.get('subject') or template['subject']
+            body_for = (lambda c: message) if message else (lambda c: render_template(template_key, c)[1])
+        else:
+            subject = request.data.get('subject') or 'Accelirate TalentGate - Update'
+            body_for = lambda c: message  # noqa: E731 - trivial constant-body case
+
+        send_notification_emails(candidates, subject.strip(), body_for)
         for candidate in candidates:
             log_action(request, request.user, 'notify_sent', 'candidate', candidate.candidate_id,
+                       details={'subject': subject, 'template': template_key or 'custom'})
+
+        return Response({'notified_count': len(candidates)})
+
+
+@method_decorator(ratelimit(key=ratelimit_user_key, rate='10/m', method='POST', block=False), name='post')
+class CandidateCertificationView(APIView):
+    """Send the fixed certification email to a checked shortlist, with two TA-supplied links.
+
+    The copy lives in email_templates.CERTIFICATION_TEMPLATE and is not editable from the UI -
+    the TA supplies only the two URLs, so approved wording can't drift per-send.
+    """
+    permission_classes = [IsAdminOrTA]
+
+    def post(self, request):
+        if getattr(request, 'limited', False):
+            return Response({'detail': 'Too many certification requests. Please try again shortly.'},
+                             status=status.HTTP_429_TOO_MANY_REQUESTS)
+
+        candidate_ids = request.data.get('candidate_ids', [])
+        link_one = (request.data.get('link_one') or '').strip()
+        link_two = (request.data.get('link_two') or '').strip()
+
+        if not isinstance(candidate_ids, list) or not candidate_ids:
+            return Response({'detail': 'Select at least one candidate first.'},
+                             status=status.HTTP_400_BAD_REQUEST)
+        if not link_one or not link_two:
+            return Response({'detail': 'Both certification links are required.'},
+                             status=status.HTTP_400_BAD_REQUEST)
+
+        validate_url = URLValidator(schemes=['http', 'https'])
+        for label, link in (('Link 1', link_one), ('Link 2', link_two)):
+            try:
+                validate_url(link)
+            except DjangoValidationError:
+                return Response(
+                    {'detail': f'{label} is not a valid URL - it should start with https://'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        candidates = list(visible_candidates_qs(request.user).filter(candidate_id__in=candidate_ids))
+        if not candidates:
+            return Response({'detail': 'No matching candidates found.'},
+                             status=status.HTTP_400_BAD_REQUEST)
+
+        subject = CERTIFICATION_TEMPLATE['subject']
+        send_notification_emails(
+            candidates, subject,
+            lambda c: render_certification_email(c, link_one, link_two)[1],
+        )
+        for candidate in candidates:
+            log_action(request, request.user, 'certification_sent', 'candidate', candidate.candidate_id,
                        details={'subject': subject})
 
         return Response({'notified_count': len(candidates)})
@@ -189,7 +345,11 @@ class CandidateExportView(APIView):
         if date_to:
             qs = qs.filter(created_at__date__lte=date_to)
 
-        wb = generate_candidates_workbook(_with_latest_attempt(qs), _latest_attempt)
+        # attach_latest_activity so exported Status cells match what the table shows.
+        wb = generate_candidates_workbook(
+            attach_latest_activity(_with_latest_attempt(qs)), _latest_attempt,
+            status_display_fn=lambda c: _effective_status(c)[1],
+        )
         buffer_response = HttpResponse(
             content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         )

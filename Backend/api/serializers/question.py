@@ -1,6 +1,40 @@
+import re
+
 from rest_framework import serializers
 
 from api.models import Question, QuestionBankSection
+
+
+def normalize_question_text(text):
+    """Comparison key for duplicate detection: case-folded with runs of whitespace collapsed.
+
+    Two questions that differ only in capitalisation, indentation, or a stray double space are
+    the same question to a candidate, so they're the same question to the bank.
+    """
+    return re.sub(r'\s+', ' ', (text or '')).strip().lower()
+
+
+def find_duplicate_question(text, exclude_pk=None):
+    """Return an existing Question with the same normalised text, or None.
+
+    Deliberately bank-wide rather than per-section: the same question filed under two sections
+    is still a duplicate (and usually means one of them was mis-filed). Inactive questions
+    count too - the text still exists in the bank and could be reactivated.
+
+    Filters in Python because the normalisation (whitespace collapsing) has no SQL equivalent
+    that could use an index; the bank is a few hundred rows, so one scan is cheaper than the
+    machinery to maintain a normalised column.
+    """
+    target = normalize_question_text(text)
+    if not target:
+        return None
+    qs = Question.objects.all()
+    if exclude_pk is not None:
+        qs = qs.exclude(pk=exclude_pk)
+    for question_id, existing_text, code in qs.values_list('question_id', 'question_text', 'question_code'):
+        if normalize_question_text(existing_text) == target:
+            return {'question_id': question_id, 'question_code': code}
+    return None
 
 
 class QuestionBankSectionSerializer(serializers.ModelSerializer):
@@ -25,6 +59,16 @@ class QuestionSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at',
         ]
         read_only_fields = ['question_id', 'question_code', 'created_at', 'updated_at']
+
+    def validate_question_text(self, value):
+        duplicate = find_duplicate_question(
+            value, exclude_pk=self.instance.pk if self.instance else None,
+        )
+        if duplicate:
+            raise serializers.ValidationError(
+                f'This question already exists in the bank as {duplicate["question_code"]}.'
+            )
+        return value
 
     def validate(self, attrs):
         option_c = attrs.get('option_c', getattr(self.instance, 'option_c', None))

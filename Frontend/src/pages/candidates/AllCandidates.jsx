@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import * as candidateApi from '../../api/candidateApi';
 import * as batchApi from '../../api/batchApi';
-import CandidateFilters from '../../features/candidates/CandidateFilters';
+import CandidateFilters, { EMPTY_CANDIDATE_FILTERS } from '../../features/candidates/CandidateFilters';
 import CandidateTable from '../../features/candidates/CandidateTable';
 import EditCandidateModal from '../../features/candidates/EditCandidateModal';
 import NotifyModal from '../../features/candidates/NotifyModal';
@@ -11,7 +11,7 @@ import ExportModal from '../../features/candidates/ExportModal';
 import PaginationControls from '../../components/common/PaginationControls';
 import { extractErrorMessage } from '../../utils/passwordSchema';
 
-const EMPTY_FILTERS = { name: '', email: '', aadhaar: '', batch_id: '', result: '', score_min: '', score_max: '' };
+const EMPTY_FILTERS = EMPTY_CANDIDATE_FILTERS;
 
 export default function AllCandidates() {
   const [searchParams, setSearchParams] = useSearchParams();

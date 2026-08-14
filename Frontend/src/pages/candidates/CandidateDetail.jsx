@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import * as candidateApi from '../../api/candidateApi';
 import { formatDateTime } from '../../utils/datetime';
@@ -59,9 +59,8 @@ export default function CandidateDetail() {
   const hasAnyEvidence = Object.values(candidate.evidence).some(Boolean);
 
   return (
-    <div style={{ maxWidth: 900 }}>
-      <Link to="/candidates" className="link-text no-print">← Back to All Candidates</Link>
-      <h3 style={{ marginTop: 8 }}>
+    <div className="page-wide">
+      <h3>
         Candidate Details — {candidate.full_name}{' '}
         <span className={`pill ${RESULT_PILL[candidate.result] || 'gray'}`}>{candidate.result_display}</span>
       </h3>
@@ -106,14 +105,20 @@ export default function CandidateDetail() {
             </tbody>
           </table>
           <div style={{ fontSize: 12.5, marginTop: 8 }}>
-            <b>Overall: {candidate.overall_score != null ? candidate.overall_score : '—'}</b>
+            <b>
+              Overall: {candidate.overall_score != null
+                ? `${candidate.overall_score}/${candidate.overall_total}`
+                : `—/${candidate.overall_total}`}{' '}
+              · <span className={`pill ${RESULT_PILL[candidate.result] || 'gray'}`}>{candidate.result_display}</span>
+            </b>
           </div>
         </div>
       </div>
 
       <div className="card" style={{ marginTop: 16 }}>
         <div className="box-label">Identity Verification &amp; Proctoring</div>
-        <div className="grid-4">
+        {/* Three tiles, three columns - grid-4 left a dead fourth column and squeezed them. */}
+        <div className="grid-3">
           <div>
             <div style={{ border: '1px dashed var(--line-soft)', borderRadius: 8, textAlign: 'center', padding: 20 }}>
               🪪<br /><span style={{ fontSize: 11, color: 'var(--muted)' }}>Aadhaar</span>
@@ -169,13 +174,14 @@ export default function CandidateDetail() {
       <div className="card" style={{ marginTop: 16 }}>
         <div className="box-label">Process / Status History</div>
         <table className="data-table">
-          <thead><tr><th>Date/Time</th><th>Event</th><th>Details</th></tr></thead>
+          <thead><tr><th>Date/Time</th><th>Event</th><th>Details</th><th>Batch</th></tr></thead>
           <tbody>
             {candidate.timeline.map((event, i) => (
               <tr key={i}>
                 <td>{formatDateTime(event.timestamp)}</td>
                 <td>{event.event}</td>
                 <td>{event.details || '—'}</td>
+                <td>{event.batch_name}</td>
               </tr>
             ))}
           </tbody>

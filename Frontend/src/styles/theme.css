@@ -15,6 +15,7 @@
   --amber-bg: #fbf3dd;
   --red: var(--brand-red-dark);
   --red-bg: #fce9eb;
+  --indigo: #3949a6;
 
   --text: #23272b;
   --muted: #6b7280;
@@ -84,21 +85,41 @@ h1, h2, h3, h4, .brand, .btn, .box-label {
   display: flex; justify-content: space-between; align-items: center;
   padding: 12px 24px; border-bottom: 1px solid var(--line-soft); background: #fff;
 }
-.app-nav .nav-left { display: flex; align-items: center; gap: 18px; }
-.app-nav .nav-brand { font-weight: 700; font-size: 13.5px; color: var(--brand-navy); }
-.app-nav .back-home { display: flex; gap: 10px; }
-.app-nav .back-home button {
-  background: none; border: none; color: var(--muted); font-size: 12.5px; cursor: pointer; padding: 4px 6px;
+.app-nav .nav-left { display: flex; align-items: center; gap: 8px; }
+.app-nav .nav-brand {
+  font-weight: 700; font-size: 13.5px; color: var(--brand-navy);
+  margin-left: 4px; white-space: nowrap;
 }
-.app-nav .back-home button:hover { color: var(--brand-blue); }
-.nav-links { display: flex; gap: 18px; font-size: 12.5px; }
-.nav-links span {
-  cursor: pointer; color: var(--muted); padding-bottom: 4px; border-bottom: 2px solid transparent;
-}
-.nav-links span:hover { color: var(--brand-blue); }
-.nav-links span.current { color: var(--text); font-weight: 700; border-bottom-color: var(--brand-blue); }
 
-.profile-wrap { position: relative; }
+/* Back / Home controls - the wireframe's `.persistent-nav` spec: both are ordinary small
+   buttons, with Home carrying the same blue-to-indigo primary gradient it has there. */
+.btn.small { padding: 5px 13px; font-size: 11.5px; }
+.nav-back, .nav-home { white-space: nowrap; }
+.btn.primary.nav-home {
+  width: auto;
+  background: linear-gradient(135deg, var(--brand-blue) 0%, var(--indigo) 100%);
+  border-color: var(--indigo); color: #fff; box-shadow: 0 2px 6px rgba(57,73,166,.25);
+}
+.btn.primary.nav-home:hover:not(:disabled) {
+  filter: brightness(1.06); box-shadow: 0 4px 12px rgba(57,73,166,.4);
+}
+/* Pill-shaped tabs, per the wireframe's "Top nav buttons - highlighted, tab-like" spec. */
+.nav-links { display: flex; gap: 6px; align-items: center; font-size: 12px; }
+.nav-links span {
+  cursor: pointer; padding: 8px 16px; border-radius: 999px; font-weight: 600; color: #5a6272;
+  background: #eef1f6; border: 1px solid transparent; transition: all .15s ease; white-space: nowrap;
+}
+.nav-links span:hover:not(.current) {
+  background: var(--accent-soft); color: var(--brand-blue-dark); transform: translateY(-1px);
+}
+.nav-links span.current {
+  background: linear-gradient(135deg, var(--brand-blue) 0%, var(--indigo) 100%);
+  color: #fff; border-color: transparent; box-shadow: 0 3px 10px rgba(57,73,166,.35);
+}
+
+/* Flex so the standalone Logout button sits beside the avatar trigger, per the wireframe;
+   position:relative still anchors the dropdown. */
+.profile-wrap { position: relative; display: flex; align-items: center; gap: 10px; }
 .profile-trigger {
   display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12.5px; color: var(--text);
   background: none; border: none; padding: 4px;
@@ -122,6 +143,14 @@ h1, h2, h3, h4, .brand, .btn, .box-label {
 .profile-menu .pitem.logout:hover { background: var(--red-bg); }
 
 .page-body { flex: 1; padding: 28px 24px; }
+
+/* Wide, centred column for data-dense screens (Batch Details): a fixed narrow max-width left
+   these pages hugging the left edge on a normal monitor with the wide candidate table cramped
+   inside it. Capped so it doesn't sprawl on ultra-wide displays. */
+.page-wide { width: 100%; max-width: min(80vw, 1600px); margin-inline: auto; }
+/* Below this, 80vw would be narrower than the old fixed width and just waste the margins -
+   a laptop or split-screen window should use everything it has. */
+@media (max-width: 1280px) { .page-wide { max-width: 100%; } }
 
 /* ---------- Auth screens ---------- */
 .auth-shell {
@@ -264,8 +293,17 @@ table.data-table tbody tr:hover td { background: var(--accent-soft); }
 .wizard-steps .wstep.done { border-color: var(--green); color: var(--green); background: var(--green-bg); }
 
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
-@media (max-width: 900px) { .grid-4 { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 900px) {
+  .grid-4 { grid-template-columns: repeat(2, 1fr); }
+  .grid-3 { grid-template-columns: 1fr; }
+  .grid-2 { grid-template-columns: 1fr; }
+  /* Nav wraps rather than squeezing Back/Home off-screen - both must stay reachable. */
+  .app-nav { flex-wrap: wrap; gap: 10px; padding: 12px 16px; }
+  .app-nav .nav-left { flex-wrap: wrap; }
+  .app-nav .nav-brand { order: -1; width: 100%; }
+}
 
 .dropzone {
   border: 2px dashed var(--line-soft); border-radius: 12px; padding: 28px; text-align: center;
@@ -280,10 +318,24 @@ table.data-table tbody tr:hover td { background: var(--accent-soft); }
 .modal-overlay {
   position: fixed; inset: 0; background: rgba(11,31,77,.35); display: flex; align-items: center;
   justify-content: center; z-index: 100; padding: 24px;
+  /* Tall modals (Edit Candidate, Certification, a long History table) would otherwise run off
+     the top and bottom of the viewport with no way to reach the buttons. Scrolling the overlay
+     keeps the whole dialog reachable. */
+  overflow-y: auto;
 }
+/* `margin: auto` rather than relying on align-items alone: a flex child centred by alignment
+   gets clipped at BOTH ends once it's taller than the container, and the overflowing top
+   becomes unscrollable. Auto margins centre it while keeping all of it reachable. */
+.modal-overlay > * { margin: auto; }
 .modal-box {
   background: #fff; border-radius: 14px; padding: 22px 24px; width: 100%; max-width: 380px;
   box-shadow: 0 16px 40px rgba(16,24,40,.2); border-top: 4px solid var(--brand-red);
+  /* Cap the dialog itself and scroll its body, so the header/buttons stay put on long content. */
+  max-height: calc(100vh - 48px); overflow-y: auto;
 }
 .modal-box h4 { margin: 0 0 8px; font-size: 15px; color: var(--brand-navy); }
 .modal-box p { font-size: 12.5px; color: var(--muted); margin: 0 0 18px; line-height: 1.5; }
+
+/* "No history found" state inside the candidate History modal, per the wireframe. */
+.hist-empty { text-align: center; padding: 22px 6px; color: var(--muted); font-size: 12.5px; }
+.hist-empty .hist-icon { font-size: 22px; margin-bottom: 6px; }

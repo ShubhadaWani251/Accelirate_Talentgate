@@ -1,36 +1,37 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import * as batchApi from '../../api/batchApi';
 import * as candidateApi from '../../api/candidateApi';
 import ConfigureBatchStep from '../../features/batches/ConfigureBatchStep';
-import DeleteBatchModal from '../../features/batches/DeleteBatchModal';
+import DeactivateBatchModal from '../../features/batches/DeactivateBatchModal';
 import UploadStep from '../../features/batches/UploadStep';
 import ReviewStep from '../../features/batches/ReviewStep';
 import InviteConfirmationStep from '../../features/batches/InviteConfirmationStep';
-import CandidateFilters from '../../features/candidates/CandidateFilters';
+import CandidateFilters, { EMPTY_CANDIDATE_FILTERS } from '../../features/candidates/CandidateFilters';
 import CandidateTable from '../../features/candidates/CandidateTable';
 import EditCandidateModal from '../../features/candidates/EditCandidateModal';
 import NotifyModal from '../../features/candidates/NotifyModal';
+import CertificationModal from '../../features/candidates/CertificationModal';
 import ExportModal from '../../features/candidates/ExportModal';
 import PaginationControls from '../../components/common/PaginationControls';
+import ConfirmModal from '../../components/common/ConfirmModal';
 import { extractErrorMessage } from '../../utils/passwordSchema';
 
 const STATUS_PILL = { draft: 'gray', in_progress: 'blue', completed: 'green', cancelled: 'red' };
-const EMPTY_FILTERS = { name: '', email: '', aadhaar: '', result: '', score_min: '', score_max: '' };
 
 export default function BatchDetail() {
   const { id } = useParams();
-  const navigate = useNavigate();
   const [batch, setBatch] = useState(null);
   const [finalizeSummary, setFinalizeSummary] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deactivateOpen, setDeactivateOpen] = useState(false);
+  const [inviteConfirmOpen, setInviteConfirmOpen] = useState(false);
 
   // Once a batch is finalized, this page gives it the same browse/select/notify/edit
   // capability as All Candidates, just pre-scoped to this one batch_id (wireframe parity -
   // previously this branch was a bare 4-column stub with a hardcoded Result column).
-  const [filters, setFilters] = useState(EMPTY_FILTERS);
+  const [filters, setFilters] = useState(EMPTY_CANDIDATE_FILTERS);
   const [candidates, setCandidates] = useState([]);
   const [page, setPage] = useState(1);
   const [pageMeta, setPageMeta] = useState({ count: 0, next: null, previous: null });
@@ -38,6 +39,7 @@ export default function BatchDetail() {
   const [selected, setSelected] = useState(new Set());
   const [editingCandidate, setEditingCandidate] = useState(null);
   const [notifyOpen, setNotifyOpen] = useState(false);
+  const [certificationOpen, setCertificationOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
 
   async function refresh() {
@@ -50,11 +52,6 @@ export default function BatchDetail() {
       setLoading(false);
     }
   }
-
-  useEffect(() => {
-    refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
 
   async function refreshCandidates(f = filters, p = page) {
     setCandidatesLoading(true);
@@ -70,15 +67,24 @@ export default function BatchDetail() {
     }
   }
 
+  // Both requests fire together rather than chaining. The candidate list is keyed off the URL's
+  // batch id, not anything in the batch response, so waiting for the batch to arrive first was
+  // pure latency - a whole extra round-trip on a page that already costs two. A draft batch
+  // renders the staging table instead, so its candidate results are simply unused.
   useEffect(() => {
-    if (batch && batch.status !== 'draft') refreshCandidates();
+    refresh();
+    refreshCandidates();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [batch?.status, id]);
+  }, [id]);
 
+  // Invites are sent to the checked rows only - never a blanket "everyone still pending",
+  // which would sweep up anyone deliberately skipped during upload review.
   async function handleSendInvites() {
+    setInviteConfirmOpen(false);
     try {
-      const res = await batchApi.sendInvites(batch.batch_id);
+      const res = await batchApi.sendInvites(batch.batch_id, Array.from(selected));
       toast.success(res.detail);
+      setSelected(new Set());
       refresh();
       refreshCandidates();
     } catch (err) {
@@ -100,17 +106,27 @@ export default function BatchDetail() {
 
   if (loading || !batch) return <div>Loading…</div>;
 
+  const isDraft = batch.status === 'draft';
+  const isCancelled = batch.status === 'cancelled';
+
   return (
-    <div style={{ maxWidth: 900 }}>
+    <div className="page-wide">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <h3>
           Batch Details — {batch.batch_name}{' '}
           <span className={`pill ${STATUS_PILL[batch.status] || 'gray'}`}>{batch.status_display}</span>
         </h3>
-        {batch.status !== 'cancelled' && (
-          <button className="btn danger" onClick={() => setDeleteOpen(true)}>🗑 Delete / Deactivate Batch</button>
+        {!isCancelled && (
+          <button className="btn danger" onClick={() => setDeactivateOpen(true)}>Deactivate Batch</button>
         )}
       </div>
+
+      {isCancelled && (
+        <div className="alert error">
+          This batch is deactivated. Its candidates and results remain available, but no further
+          invites can be sent and its configuration is locked.
+        </div>
+      )}
 
       <div className="grid-4" style={{ marginBottom: 20 }}>
         <div className="stat-card"><div className="stat-num">{batch.total_candidates}</div><div className="stat-lbl">Candidates</div></div>
@@ -119,42 +135,34 @@ export default function BatchDetail() {
         <div className="stat-card"><div className="stat-num">{batch.borderline_count}</div><div className="stat-lbl">Borderline</div></div>
       </div>
 
+      {/* Wireframe order for this screen is Filters, then Configure Batch, then the candidate
+          table. A draft batch has no candidates to filter yet, so the filter box only appears
+          once the batch is finalized. */}
+      {!isDraft && (
+        <CandidateFilters
+          filters={filters}
+          onChange={setFilters}
+          batches={[]}
+          onApply={() => refreshCandidates(filters, 1)}
+          onClear={() => { setFilters(EMPTY_CANDIDATE_FILTERS); refreshCandidates(EMPTY_CANDIDATE_FILTERS, 1); }}
+          showBatchFilter={false}
+        />
+      )}
+
       <ConfigureBatchStep
         existingBatch={batch}
         onCreated={(updated) => setBatch(updated)}
-        readOnly={batch.status !== 'draft'}
+        readOnly={!isDraft}
+        locked={isCancelled}
       />
 
-      {batch.status === 'draft' ? (
+      {isDraft && !finalizeSummary ? (
         <>
           <UploadStep batch={batch} onUploaded={refresh} />
-          <ReviewStep
-            batch={batch}
-            onFinalized={(summary) => {
-              setFinalizeSummary(summary);
-              refresh();
-            }}
-          />
+          <ReviewStep batch={batch} onFinalized={setFinalizeSummary} />
         </>
-      ) : (
+      ) : isDraft ? null : (
         <>
-          {batch.status !== 'cancelled' && (
-            <div className="btn-row" style={{ margin: '16px 0' }}>
-              <button className="btn primary" style={{ width: 'auto' }} onClick={handleSendInvites}>
-                📧 Send Invite Link(s)
-              </button>
-            </div>
-          )}
-
-          <CandidateFilters
-            filters={filters}
-            onChange={setFilters}
-            batches={[]}
-            onApply={() => refreshCandidates(filters, 1)}
-            onClear={() => { setFilters(EMPTY_FILTERS); refreshCandidates(EMPTY_FILTERS, 1); }}
-            showBatchFilter={false}
-          />
-
           <CandidateTable
             candidates={candidates}
             loading={candidatesLoading}
@@ -163,6 +171,8 @@ export default function BatchDetail() {
             onToggleSelectAll={toggleSelectAll}
             onEdit={setEditingCandidate}
             onOpenNotify={() => setNotifyOpen(true)}
+            onOpenCertification={() => setCertificationOpen(true)}
+            onOpenInvite={() => setInviteConfirmOpen(true)}
             onOpenExport={() => setExportOpen(true)}
           />
 
@@ -182,6 +192,13 @@ export default function BatchDetail() {
               onSaved={() => { setEditingCandidate(null); refreshCandidates(); }}
             />
           )}
+          {certificationOpen && (
+            <CertificationModal
+              candidateIds={Array.from(selected)}
+              onClose={() => setCertificationOpen(false)}
+              onSent={() => { setCertificationOpen(false); setSelected(new Set()); }}
+            />
+          )}
           {notifyOpen && (
             <NotifyModal
               candidateIds={Array.from(selected)}
@@ -193,19 +210,36 @@ export default function BatchDetail() {
         </>
       )}
 
-      {finalizeSummary && <InviteConfirmationStep summary={finalizeSummary} />}
+      {finalizeSummary && (
+        <InviteConfirmationStep
+          summary={finalizeSummary}
+          onBack={() => setFinalizeSummary(null)}
+          onSent={() => { setFinalizeSummary(null); refresh(); refreshCandidates(); }}
+        />
+      )}
 
-      {deleteOpen && (
-        <DeleteBatchModal
+      {inviteConfirmOpen && (
+        <ConfirmModal
+          title="Send invite links?"
+          message={`This emails the assessment link to the ${selected.size} selected candidate(s) on
+                    "${batch.batch_name}". Anyone already invited is skipped. Invitation emails
+                    cannot be recalled once sent.`}
+          confirmLabel={`Send ${selected.size} Invite(s)`}
+          onConfirm={handleSendInvites}
+          onCancel={() => setInviteConfirmOpen(false)}
+        />
+      )}
+
+      {deactivateOpen && (
+        <DeactivateBatchModal
           batch={batch}
-          onClose={() => setDeleteOpen(false)}
-          onDeleted={(res) => {
-            setDeleteOpen(false);
-            // "deactivated" outcome leaves the batch row intact (just marked Cancelled) -
-            // stay on the page and show the new status. A real delete removes the row, so
-            // there's nothing left here to show.
-            if (res.detail.includes('deactivated')) refresh();
-            else navigate('/batches');
+          onClose={() => setDeactivateOpen(false)}
+          onDeactivated={(res) => {
+            setDeactivateOpen(false);
+            // The batch row survives deactivation, so stay here and show its new state
+            // rather than navigating away.
+            if (res.batch) setBatch(res.batch);
+            else refresh();
           }}
         />
       )}

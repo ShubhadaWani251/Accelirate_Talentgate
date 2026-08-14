@@ -18,6 +18,8 @@ const NAV_LINKS = {
   ],
 };
 
+const ROLE_HOME = { admin: '/admin/dashboard', ta: '/ta/dashboard' };
+
 function initials(user) {
   if (!user) return '';
   return `${user.first_name?.[0] || ''}${user.last_name?.[0] || ''}`.toUpperCase();
@@ -40,6 +42,18 @@ export default function AppNav() {
   }, []);
 
   const links = NAV_LINKS[user?.role_code] || [];
+  const home = ROLE_HOME[user?.role_code] || '/';
+
+  // react-router stamps an incrementing `idx` onto history.state for every entry it pushes.
+  // idx === 0 means this is the first entry in the session's history, so navigate(-1) would
+  // leave the app entirely (or dead-end on a blank page) - fall back to Home in that case,
+  // and on the dashboard itself, where "back" has nowhere useful to go.
+  function handleBack() {
+    const atHome = location.pathname === home;
+    const hasPrevious = (window.history.state?.idx ?? 0) > 0;
+    if (atHome || !hasPrevious) navigate(home);
+    else navigate(-1);
+  }
 
   async function handleLogout() {
     try {
@@ -47,14 +61,19 @@ export default function AppNav() {
     } catch {
       // proceed to clear client-side session regardless
     }
+    // Capture the role before the store is cleared so the Signed Out screen can name the
+    // console the user just left, per the wireframe.
+    const roleCode = user?.role_code;
     dispatch(sessionCleared());
-    navigate('/login', { replace: true });
+    navigate('/logged-out', { replace: true, state: { roleCode } });
   }
 
   return (
     <nav className="app-nav">
       <div className="nav-left">
-        <span className="nav-brand">CEP {user?.role_code === 'admin' ? 'Administrator' : 'Staffing User'}</span>
+        <button className="btn small nav-back" onClick={handleBack}>← Back</button>
+        <button className="btn small primary nav-home" onClick={() => navigate(home)}>🏠 Home</button>
+        <span className="nav-brand">CEP — {user?.role_code === 'admin' ? 'Administrator' : 'Staffing User'}</span>
         <div className="nav-links">
           {links.map((link) =>
             link.to ? (
@@ -70,7 +89,10 @@ export default function AppNav() {
         </div>
       </div>
 
+      {/* The wireframe shows a always-visible Logout button *alongside* the profile dropdown,
+          not only inside it - logging out shouldn't need a menu to be opened first. */}
       <div className="profile-wrap" ref={menuRef}>
+        <button className="btn" onClick={handleLogout}>Logout</button>
         <button className="profile-trigger" onClick={() => setMenuOpen((o) => !o)}>
           <span className="avatar">{initials(user)}</span>
           <span>{user?.first_name} {user?.last_name}</span>
@@ -79,6 +101,9 @@ export default function AppNav() {
           <div className="profile-menu">
             <button className="pitem" onClick={() => { setMenuOpen(false); navigate('/profile'); }}>
               Profile
+            </button>
+            <button className="pitem" onClick={() => { setMenuOpen(false); navigate('/profile#reset-password'); }}>
+              Reset Password
             </button>
             <button className="pitem logout" onClick={handleLogout}>
               Logout

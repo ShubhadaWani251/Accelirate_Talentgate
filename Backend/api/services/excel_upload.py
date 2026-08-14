@@ -40,11 +40,15 @@ EXPORT_COLUMNS = [
 ]
 
 
-def generate_candidates_workbook(candidates, latest_attempt_fn):
+def generate_candidates_workbook(candidates, latest_attempt_fn, status_display_fn=None):
     """Export for the All Candidates screen. latest_attempt_fn resolves a candidate's
     latest ExamAttempt (or None) - passed in rather than imported, to avoid a serializers
-    -> services import cycle.
+    -> services import cycle. status_display_fn is passed the same way and resolves the
+    same derived Status the on-screen table shows (exam attempt, else latest outreach);
+    without it the export would fall back to the raw stored status and disagree with the UI.
     """
+    if status_display_fn is None:
+        status_display_fn = lambda c: c.get_status_display()  # noqa: E731
     wb = Workbook()
     ws = wb.active
     ws.title = 'Candidates'
@@ -62,7 +66,7 @@ def generate_candidates_workbook(candidates, latest_attempt_fn):
             float(candidate.percentage) if candidate.percentage is not None else None,
             candidate.passing_out_year,
             candidate.location,
-            candidate.get_status_display(),
+            status_display_fn(candidate),
             candidate.get_result_display(),
             float(overall_score) if overall_score is not None else None,
         ])

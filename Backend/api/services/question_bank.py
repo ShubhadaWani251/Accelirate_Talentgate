@@ -2,7 +2,7 @@ from django.db import transaction
 from openpyxl import Workbook, load_workbook
 
 from api.models import Question, QuestionBankSection
-from api.serializers.question import generate_question_code
+from api.serializers.question import generate_question_code, normalize_question_text
 
 TEMPLATE_COLUMNS = [
     'Section', 'Question Text', 'Option A', 'Option B', 'Option C', 'Option D',
@@ -81,12 +81,18 @@ def _parse_question_workbook(file_obj):
 
 
 @transaction.atomic
-def import_questions_from_workbook(file_obj, user):
+def import_questions_from_workbook(file_obj, user, force_section=None):
     """Parse the uploaded workbook and create one active Question per valid data row.
     Unlike the candidate bulk-upload pipeline, there's no staging/duplicate-review step -
     a bad row is just reported back as an error and skipped, everything else is created
     immediately. Wrapped in one transaction so a mid-file DB error rolls back cleanly rather
     than leaving a half-imported file.
+
+    `force_section` (a QuestionBankSection) files every row into that section and ignores the
+    sheet's own Section column entirely - the upload is launched from inside a section in the
+    UI, so that section is the author's stated intent. Rows that named a different section are
+    still counted and reported back, so "20 imported, 3 of which named another section" is
+    visible rather than silent.
     """
     # Keyed by both the internal section_key ("verbal") and the human-readable section_name
     # ("verbal ability", lowercased) - the template/UI shows section_name everywhere, so a user
@@ -96,15 +102,33 @@ def import_questions_from_workbook(file_obj, user):
         sections_by_key[s.section_key.lower()] = s
         sections_by_key[s.section_name.lower()] = s
 
+    # Existing question texts, normalised, loaded once - a per-row query would be one round-trip
+    # each against a remote database. Rows created during this import are added as we go, so a
+    # file that repeats a question inside itself is caught too, not just clashes with the bank.
+    seen_texts = {
+        normalize_question_text(text): code
+        for text, code in Question.objects.values_list('question_text', 'question_code')
+    }
+
     created = []
     errors = []
+    reassigned = []
     for data in _parse_question_workbook(file_obj):
         row_number = data['row_number']
         section_key = (data.get('section_key') or '').strip().lower()
-        section = sections_by_key.get(section_key)
-        if not section:
-            errors.append({'row': row_number, 'message': f'Unknown section "{section_key}".'})
-            continue
+
+        if force_section is not None:
+            section = force_section
+            # Note rows whose Section cell named something else, so the response can say so.
+            # An empty Section cell isn't worth flagging - there was no intent to override.
+            named = sections_by_key.get(section_key)
+            if section_key and (named is None or named.pk != force_section.pk):
+                reassigned.append({'row': row_number, 'named': data.get('section_key')})
+        else:
+            section = sections_by_key.get(section_key)
+            if not section:
+                errors.append({'row': row_number, 'message': f'Unknown section "{section_key}".'})
+                continue
 
         question_text = data.get('question_text') or ''
         option_a = data.get('option_a') or ''
@@ -112,6 +136,14 @@ def import_questions_from_workbook(file_obj, user):
         if not question_text or not option_a or not option_b:
             errors.append({'row': row_number,
                             'message': 'Question Text, Option A, and Option B are required.'})
+            continue
+
+        normalized = normalize_question_text(question_text)
+        if normalized in seen_texts:
+            errors.append({
+                'row': row_number,
+                'message': f'Duplicate question - already in the bank as {seen_texts[normalized]}.',
+            })
             continue
 
         correct_option = (data.get('correct_option') or '').strip().upper()
@@ -154,5 +186,7 @@ def import_questions_from_workbook(file_obj, user):
             created_by=user,
         )
         created.append(question)
+        # Register immediately so a later row repeating this text is caught within the file.
+        seen_texts[normalized] = question.question_code
 
-    return created, errors
+    return created, errors, reassigned

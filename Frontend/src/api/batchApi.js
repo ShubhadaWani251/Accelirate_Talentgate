@@ -18,7 +18,9 @@ export const createBatch = (payload) => axiosClient.post('/batches/', payload).t
 export const updateBatch = (id, payload) =>
   axiosClient.patch(`/batches/${id}/`, payload).then((r) => r.data);
 
-export const deleteBatch = (id) => axiosClient.delete(`/batches/${id}/`).then((r) => r.data);
+// Batches are deactivated, never deleted - candidate and result history stays intact.
+export const deactivateBatch = (id) =>
+  axiosClient.post(`/batches/${id}/deactivate/`).then((r) => r.data);
 
 export const getBatchDefaults = () => axiosClient.get('/batches/defaults/').then((r) => r.data);
 
@@ -58,11 +60,16 @@ export const deleteCandidates = (batchId, candidateIds) =>
     .post(`/batches/${batchId}/candidates/delete/`, { candidate_ids: candidateIds })
     .then((r) => r.data);
 
-export const clearDuplicate = (batchId, candidateId) =>
-  axiosClient.post(`/batches/${batchId}/candidates/${candidateId}/clear-duplicate/`).then((r) => r.data);
+// candidateIds is the reviewer's checkbox selection - finalizing creates the batch and
+// emails the invite to exactly those candidates, and nobody else.
+export const finalizeBatch = (batchId, candidateIds) =>
+  axiosClient
+    .post(`/batches/${batchId}/finalize/`, { candidate_ids: candidateIds })
+    .then((r) => r.data);
 
-export const finalizeBatch = (batchId) =>
-  axiosClient.post(`/batches/${batchId}/finalize/`).then((r) => r.data);
-
-export const sendInvites = (batchId) =>
-  axiosClient.post(`/batches/${batchId}/send-invites/`).then((r) => r.data);
+// Always an explicit selection - the backend rejects a send with no candidate_ids so a
+// blanket "invite everyone still pending" can't happen by accident.
+export const sendInvites = (batchId, candidateIds) =>
+  axiosClient
+    .post(`/batches/${batchId}/send-invites/`, { candidate_ids: candidateIds })
+    .then((r) => r.data);

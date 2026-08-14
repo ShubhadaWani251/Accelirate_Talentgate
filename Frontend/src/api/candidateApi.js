@@ -28,9 +28,25 @@ export const updateCandidate = (id, payload) =>
 
 export const resendInvite = (id) => axiosClient.post(`/candidates/${id}/resend-invite/`).then((r) => r.data);
 
-export const notifyCandidates = (candidateIds, subject, message) =>
+export const getCandidateHistory = (id) =>
+  axiosClient.get(`/candidates/${id}/history/`).then((r) => r.data);
+
+export const listNotificationTemplates = () =>
+  axiosClient.get('/candidates/notify/templates/').then((r) => r.data);
+
+// `template` is the approved-template key; `message` is only sent when the TA has edited the
+// body, in which case it overrides the template's own copy server-side.
+export const notifyCandidates = (candidateIds, { template, message, subject } = {}) =>
   axiosClient
-    .post('/candidates/notify/', { candidate_ids: candidateIds, subject, message })
+    .post('/candidates/notify/', { candidate_ids: candidateIds, template, message, subject })
+    .then((r) => r.data);
+
+// The certification copy is fixed server-side - only the two links travel from the UI.
+export const sendCertificationLinks = (candidateIds, { linkOne, linkTwo }) =>
+  axiosClient
+    .post('/candidates/send-certification/', {
+      candidate_ids: candidateIds, link_one: linkOne, link_two: linkTwo,
+    })
     .then((r) => r.data);
 
 // Same authenticated-blob-download pattern as batchApi.downloadTemplate.

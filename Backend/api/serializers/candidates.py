@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from api.models import Candidate, ExamAttempt
+from api.models import AuditLog, Candidate, ExamAttempt
 from api.serializers.common import mask_aadhaar
 
 SECTION_LABELS = {
@@ -36,13 +36,60 @@ def _latest_attempt(candidate):
     return candidate._latest_attempt_cache
 
 
+# Outreach actions that should be visible in the Status column. Candidate.status itself only
+# ever moves pending_invite -> invited, so without this a TA sees no difference between a
+# candidate they've merely invited and one they've since notified or sent certification links
+# to. These are display-only: the stored status stays the pipeline value, so a bulk send can't
+# overwrite real state.
+_ACTIVITY_STATUS_LABELS = {
+    'certification_sent': 'Certification Sent',
+    'notify_sent': 'Notification Sent',
+    'invite_sent': 'Invited',
+}
+
+
+def _latest_activity(candidate):
+    """Most recent outreach audit row for this candidate.
+
+    Prefers the bulk-attached `prefetched_latest_activity` (set by views/candidates.py's
+    `attach_latest_activity`) so a list response doesn't fire one query per row - the same
+    N+1 guard `_latest_attempt` uses.
+    """
+    if hasattr(candidate, 'prefetched_latest_activity'):
+        return candidate.prefetched_latest_activity
+    if not hasattr(candidate, '_latest_activity_cache'):
+        candidate._latest_activity_cache = (
+            AuditLog.objects
+            .filter(entity_type='candidate', entity_id=candidate.candidate_id,
+                    action_type__in=_ACTIVITY_STATUS_LABELS)
+            .order_by('-created_at')
+            .first()
+        )
+    return candidate._latest_activity_cache
+
+
 def _effective_status(candidate):
-    """(status, status_display) - reflects the candidate's latest exam attempt when one
-    exists, since that's more current than the static Candidate.status field.
+    """(status, status_display) for the Status column.
+
+    Precedence: a real exam attempt beats everything, because where the candidate actually got
+    to matters more than what we last emailed them. Failing that, the most recent outreach
+    action is shown, so notifications and certification sends are visible rather than silently
+    leaving the row reading "Invited". The returned status *code* stays the stored pipeline
+    value - only the label changes - so the pill colour and any client-side filtering on
+    status keep working.
     """
     attempt = _latest_attempt(candidate)
     if attempt and attempt.status in _ATTEMPT_STATUS_TO_CANDIDATE_STATUS:
         return _ATTEMPT_STATUS_TO_CANDIDATE_STATUS[attempt.status]
+
+    activity = _latest_activity(candidate)
+    if activity:
+        label = _ACTIVITY_STATUS_LABELS.get(activity.action_type)
+        if activity.action_type == 'invite_sent' and (activity.action_details or {}).get('re_invite'):
+            label = 'Invite Re-sent'
+        if label:
+            return candidate.status, label
+
     return candidate.status, candidate.get_status_display()
 
 
@@ -124,6 +171,7 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
     result_display = serializers.CharField(source='get_result_display', read_only=True)
     section_results = serializers.SerializerMethodField()
     overall_score = serializers.SerializerMethodField()
+    overall_total = serializers.SerializerMethodField()
     evidence = serializers.SerializerMethodField()
     timeline = serializers.SerializerMethodField()
 
@@ -133,7 +181,8 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
             'candidate_id', 'full_name', 'email', 'phone',
             'college_name', 'degree', 'stream', 'percentage', 'passing_out_year', 'location',
             'aadhaar_masked', 'batch_id', 'batch_name', 'status', 'status_display',
-            'result', 'result_display', 'overall_score', 'section_results', 'evidence', 'timeline',
+            'result', 'result_display', 'overall_score', 'overall_total', 'section_results',
+            'evidence', 'timeline',
         ]
 
     def get_aadhaar_masked(self, candidate):
@@ -148,6 +197,14 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
     def get_overall_score(self, candidate):
         attempt = _latest_attempt(candidate)
         return attempt.overall_score if attempt else candidate.overall_score
+
+    def get_overall_total(self, candidate):
+        """Denominator for the "14/40" reading on Candidate Details - one mark per question,
+        so it's the batch's four section counts added up.
+        """
+        batch = candidate.batch
+        return (batch.logical_questions + batch.quantitative_questions
+                + batch.verbal_questions + batch.programming_questions)
 
     def get_section_results(self, candidate):
         attempt = _latest_attempt(candidate)
@@ -227,4 +284,10 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
                 })
 
         events.sort(key=lambda e: e['timestamp'])
+        # Every event on this screen belongs to the candidate's own batch (unlike the upload
+        # History modal, which spans the duplicate-matched record too). Stamped once here so
+        # the table's Batch column doesn't need it repeated at each append site above.
+        batch_name = candidate.batch.batch_name
+        for event in events:
+            event['batch_name'] = batch_name
         return events

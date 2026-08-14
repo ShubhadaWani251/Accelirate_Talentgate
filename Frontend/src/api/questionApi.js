@@ -29,8 +29,11 @@ export const downloadQuestionTemplate = async () => {
   window.URL.revokeObjectURL(url);
 };
 
-export const uploadQuestionsExcel = (file) => {
+// `sectionKey` files every row into that section, ignoring the sheet's own Section column -
+// the upload is always launched from inside a section.
+export const uploadQuestionsExcel = (file, sectionKey) => {
   const form = new FormData();
   form.append('file', file);
+  if (sectionKey) form.append('section', sectionKey);
   return axiosClient.post('/questions/upload/', form).then((r) => r.data);
 };

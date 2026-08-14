@@ -79,11 +79,22 @@ export default function QuestionBank() {
         </div>
 
         <div>
-          <div className="btn-row" style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
-            <button className="btn primary" style={{ width: 'auto' }} onClick={() => setEditing('new')}>
-              + Add Question
-            </button>
-            <button className="btn" onClick={() => setBulkUploadOpen(true)}>Bulk Upload (Excel)</button>
+          <div className="btn-row" style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            {/* Only offered with a section selected, so a new question always lands in the
+                section being browsed. Under "All Sections" there's no section to add to - the
+                form used to silently fall back to the first one in the list. */}
+            {selectedSection ? (
+              <>
+                <button className="btn primary" style={{ width: 'auto' }} onClick={() => setEditing('new')}>
+                  + Add Question to {selectedSection.section_name}
+                </button>
+                <button className="btn" onClick={() => setBulkUploadOpen(true)}>Bulk Upload (Excel)</button>
+              </>
+            ) : (
+              <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+                Pick a section on the left to add questions to it.
+              </span>
+            )}
             <button className="btn" onClick={questionApi.downloadQuestionTemplate}>⬇ Download Sample Template</button>
           </div>
 
@@ -166,6 +177,7 @@ export default function QuestionBank() {
       )}
       {bulkUploadOpen && (
         <QuestionBulkUploadModal
+          section={selectedSection}
           onClose={() => setBulkUploadOpen(false)}
           onUploaded={() => refresh(1)}
         />
