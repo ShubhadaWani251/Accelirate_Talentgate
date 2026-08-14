@@ -2,13 +2,13 @@ import logging
 import secrets
 import threading
 
-from anymail.exceptions import AnymailError
 from django.conf import settings
 from django.core.mail import send_mail
 from django.db import connections
 from django.utils import timezone
 
 from api.models import Candidate, Invitation
+from api.services.email_errors import EMAIL_SEND_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +99,7 @@ def send_invites_async(invitations, base_url):
                     invitation.email_status = Invitation.EmailStatus.SENT
                     invitation.email_sent_at = timezone.now()
                     invitation.save(update_fields=['email_status', 'email_sent_at'])
-                except AnymailError:
+                except EMAIL_SEND_ERRORS:
                     logger.exception(
                         'Failed to send invite email for invitation_id=%s', invitation.invitation_id
                     )
@@ -144,7 +144,7 @@ def send_notification_emails(candidates, subject, body_for):
                         recipient_list=[candidate.email],
                         fail_silently=False,
                     )
-                except AnymailError:
+                except EMAIL_SEND_ERRORS:
                     logger.exception(
                         'Failed to send notification email to candidate_id=%s', candidate.candidate_id
                     )

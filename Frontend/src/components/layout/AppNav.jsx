@@ -72,7 +72,7 @@ export default function AppNav() {
     <nav className="app-nav">
       <div className="nav-left">
         <button className="btn small nav-back" onClick={handleBack}>← Back</button>
-        <button className="btn small primary nav-home" onClick={() => navigate(home)}>🏠 Home</button>
+        <button className="btn small primary nav-home" onClick={() => navigate(home)}>Home</button>
         <span className="nav-brand">CEP — {user?.role_code === 'admin' ? 'Administrator' : 'Staffing User'}</span>
         <div className="nav-links">
           {links.map((link) =>

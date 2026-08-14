@@ -2,7 +2,6 @@ import logging
 import secrets
 import threading
 
-from anymail.exceptions import AnymailError
 from django.conf import settings
 from django.contrib.auth.hashers import make_password
 from django.core.mail import send_mail
@@ -10,6 +9,7 @@ from django.db import connections, transaction
 from django.utils import timezone
 
 from api.models import OTPVerification
+from api.services.email_errors import EMAIL_SEND_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +75,7 @@ def issue_otp(user, purpose=OTPVerification.Purpose.PASSWORD_RESET, async_send=F
                 expires_at=timezone.now() + timezone.timedelta(minutes=settings.OTP_EXPIRY_MINUTES),
             )
             send_otp_email(user, code)
-    except AnymailError:
+    except EMAIL_SEND_ERRORS:
         logger.exception('Failed to send OTP email to user_id=%s', user.user_id)
         raise OtpDeliveryError('Could not send the verification email. Please try again later.')
     return otp
@@ -85,7 +85,7 @@ def _send_otp_email_background(user, code):
     def _worker():
         try:
             send_otp_email(user, code)
-        except AnymailError:
+        except EMAIL_SEND_ERRORS:
             logger.exception('Background OTP email send failed for user_id=%s', user.user_id)
         finally:
             connections.close_all()

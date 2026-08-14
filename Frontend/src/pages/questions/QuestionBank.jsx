@@ -51,10 +51,7 @@ export default function QuestionBank() {
   return (
     <div>
       <h3>Question Bank Management</h3>
-      <p style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: -6 }}>
-        Click a section to browse questions; filter by difficulty or status, and edit questions,
-        options, or active/inactive status.
-      </p>
+      
 
       <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: 18 }}>
         <div className="card" style={{ padding: 12 }}>
@@ -111,7 +108,7 @@ export default function QuestionBank() {
               <option value="Inactive">Inactive</option>
             </select>
             <input
-              placeholder="🔍 Search questions by keyword or ID…"
+              placeholder="Search questions by keyword or ID…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && refresh(1)}

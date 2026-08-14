@@ -17,3 +17,6 @@ Thumbs.db
 
 # --- Claude Code local state ---
 .claude/settings.local.json
+
+# Local DB backups - recovery artifacts, not source
+backups/

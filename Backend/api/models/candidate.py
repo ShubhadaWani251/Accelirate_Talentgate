@@ -85,6 +85,9 @@ class DuplicateCheck(models.Model):
     """Result of matching a newly-uploaded candidate's Aadhaar against historical records."""
     class CheckStatus(models.TextChoices):
         NEW = 'new', 'New'
+        # Seen before, but never sat the assessment - so the cooling-off window hasn't started.
+        # Worth flagging (they may be mid-process in another batch) without blocking anything.
+        PREVIOUSLY_INVITED = 'previously_invited', 'Invited Before - Not Attempted'
         DUPLICATE_CLEARED = 'duplicate_cleared', 'Duplicate Cleared'
         DUPLICATE_WITHIN_WINDOW = 'duplicate_within_window', 'Duplicate Within Window'
 

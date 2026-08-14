@@ -179,6 +179,6 @@ def stage_candidates_from_workbook(batch, file_obj, user, cooling_off_months=3):
             # Keep the lookup current so a later row in this SAME upload that repeats an
             # Aadhaar number is still caught as a duplicate against this one, not just against
             # candidates that existed before the upload started.
-            duplicate_lookup[candidate.aadhaar_number] = candidate
+            duplicate_lookup.setdefault(candidate.aadhaar_number, []).insert(0, candidate)
         created.append(candidate)
     return created

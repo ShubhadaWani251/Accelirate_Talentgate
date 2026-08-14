@@ -197,8 +197,22 @@ OTP_RESEND_COOLDOWN_SECONDS = int(os.environ.get('OTP_RESEND_COOLDOWN_SECONDS', 
 REFRESH_COOKIE_NAME = 'refresh_token'
 REFRESH_COOKIE_PATH = '/api/auth/'
 
-# Email (SendGrid via django-anymail)
-EMAIL_BACKEND = 'anymail.backends.sendgrid.EmailBackend'
+# Email - Microsoft Graph (app-only). Sending from inside the M365 tenant avoids the
+# external-sender quarantine that held @accelirate.com invites when this went via SendGrid.
+# EMAIL_BACKEND stays overridable so a deployment can fall back to SendGrid or to the console
+# backend for local work without a code change.
+EMAIL_BACKEND = os.environ.get('EMAIL_BACKEND', 'api.services.graph_email.GraphEmailBackend')
+
+GRAPH_TENANT_ID = os.environ.get('GRAPH_TENANT_ID', '')
+GRAPH_CLIENT_ID = os.environ.get('GRAPH_CLIENT_ID', '')
+GRAPH_CLIENT_SECRET = os.environ.get('GRAPH_CLIENT_SECRET', '')
+# Mailbox the app sends as. Must be a real mailbox in the tenant that the app registration is
+# permitted to send on behalf of.
+GRAPH_SENDER = os.environ.get('GRAPH_SENDER', '')
+# Keeping a copy of every candidate invite in the service mailbox is rarely wanted.
+GRAPH_SAVE_TO_SENT_ITEMS = os.environ.get('GRAPH_SAVE_TO_SENT_ITEMS', 'false').lower() == 'true'
+
+# Retained so EMAIL_BACKEND can be pointed back at SendGrid if Graph is unavailable.
 ANYMAIL = {
     'SENDGRID_API_KEY': os.environ.get('SENDGRID_API_KEY', ''),
 }

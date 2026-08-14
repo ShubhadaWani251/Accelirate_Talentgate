@@ -8,6 +8,8 @@ import { extractErrorMessage } from '../../utils/passwordSchema';
 const VALIDATION_PILL = { ok: 'green' };
 const DUPLICATE_PILL = {
   new: 'gray',
+  // Seen before but never sat the assessment - informational, not a blocker.
+  previously_invited: 'amber',
   duplicate_cleared: 'amber',
   duplicate_within_window: 'red',
 };
@@ -91,6 +93,7 @@ export default function ReviewStep({ batch, onFinalized }) {
 
   const okCount = candidates.filter((c) => c.validation_status === 'ok').length;
   const duplicateCount = candidates.filter((c) => c.duplicate_status === 'duplicate_within_window').length;
+  const previouslyInvitedCount = candidates.filter((c) => c.duplicate_status === 'previously_invited').length;
 
   return (
     <div className="card">
@@ -156,8 +159,15 @@ export default function ReviewStep({ batch, onFinalized }) {
         </table>
       </div>
 
-      {duplicateCount > 0 && (
+      {previouslyInvitedCount > 0 && (
         <div className="alert" style={{ marginTop: 14 }}>
+          {previouslyInvitedCount} row(s) appear in an earlier batch but never sat the
+          assessment — no cooling-off period applies. Safe to invite.
+        </div>
+      )}
+
+      {duplicateCount > 0 && (
+        <div className="alert error" style={{ marginTop: 14 }}>
           {duplicateCount} row(s) sat the assessment inside the cooling-off window. Leave them
           unchecked to skip them, or check them to invite anyway — it&apos;s your call.
         </div>

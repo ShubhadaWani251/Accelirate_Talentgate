@@ -3,12 +3,12 @@ import secrets
 import string
 import threading
 
-from anymail.exceptions import AnymailError
 from django.conf import settings
 from django.core.mail import send_mail
 from django.db import connections
 
 from api.models import User
+from api.services.email_errors import EMAIL_SEND_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +81,7 @@ def _send_credentials_email_background(user, temp_password):
     def _worker():
         try:
             send_new_user_credentials_email(user, temp_password)
-        except AnymailError:
+        except EMAIL_SEND_ERRORS:
             logger.exception('Failed to send new-user credentials email to user_id=%s', user.user_id)
         finally:
             connections.close_all()
