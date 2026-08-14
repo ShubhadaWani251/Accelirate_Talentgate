@@ -34,7 +34,9 @@ from api.services.email_templates import (
     CERTIFICATION_TEMPLATE, NOTIFICATION_TEMPLATES, render_certification_email, render_template,
 )
 from api.services.excel_upload import generate_candidates_workbook
-from api.services.invites import create_single_reinvite, send_invites_async, send_notification_emails
+from api.services.invites import (
+    create_single_reinvite, partition_by_deliverable, send_invites_async, send_notification_emails,
+)
 from api.utils.net import ratelimit_user_key
 
 logger = logging.getLogger(__name__)
@@ -262,12 +264,26 @@ class CandidateNotifyView(APIView):
             subject = request.data.get('subject') or 'Accelirate TalentGate - Update'
             body_for = lambda c: message  # noqa: E731 - trivial constant-body case
 
-        send_notification_emails(candidates, subject.strip(), body_for)
-        for candidate in candidates:
+        sendable, skipped = partition_by_deliverable(candidates)
+        if not sendable:
+            return Response(
+                {'detail': f'None of the {len(skipped)} selected candidate(s) have an email '
+                            f'address on record, so nothing was sent.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        send_notification_emails(sendable, subject.strip(), body_for)
+        for candidate in sendable:
             log_action(request, request.user, 'notify_sent', 'candidate', candidate.candidate_id,
                        details={'subject': subject, 'template': template_key or 'custom'})
 
-        return Response({'notified_count': len(candidates)})
+        detail = f'{len(sendable)} notification(s) queued for sending.'
+        if skipped:
+            detail += (f' {len(skipped)} skipped - no email address on record '
+                       f'({", ".join(c.full_name or f"#{c.candidate_id}" for c in skipped[:3])}'
+                       f'{"..." if len(skipped) > 3 else ""}).')
+        return Response({'notified_count': len(sendable), 'skipped_count': len(skipped),
+                         'detail': detail})
 
 
 @method_decorator(ratelimit(key=ratelimit_user_key, rate='10/m', method='POST', block=False), name='post')
@@ -310,16 +326,28 @@ class CandidateCertificationView(APIView):
             return Response({'detail': 'No matching candidates found.'},
                              status=status.HTTP_400_BAD_REQUEST)
 
+        sendable, skipped = partition_by_deliverable(candidates)
+        if not sendable:
+            return Response(
+                {'detail': f'None of the {len(skipped)} selected candidate(s) have an email '
+                            f'address on record, so nothing was sent.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         subject = CERTIFICATION_TEMPLATE['subject']
         send_notification_emails(
-            candidates, subject,
+            sendable, subject,
             lambda c: render_certification_email(c, link_one, link_two)[1],
         )
-        for candidate in candidates:
+        for candidate in sendable:
             log_action(request, request.user, 'certification_sent', 'candidate', candidate.candidate_id,
                        details={'subject': subject})
 
-        return Response({'notified_count': len(candidates)})
+        detail = f'Certification links queued for {len(sendable)} candidate(s).'
+        if skipped:
+            detail += f' {len(skipped)} skipped - no email address on record.'
+        return Response({'notified_count': len(sendable), 'skipped_count': len(skipped),
+                         'detail': detail})
 
 
 @method_decorator(ratelimit(key=ratelimit_user_key, rate='10/m', method='GET', block=False), name='get')

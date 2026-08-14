@@ -116,9 +116,18 @@ class CandidateStagingSerializer(serializers.ModelSerializer):
         return mask_aadhaar(candidate.aadhaar_number)
 
     def _latest_check(self, candidate):
+        """Most recent duplicate check for this candidate.
+
+        Picks the max out of the prefetched list rather than calling `.order_by().first()`:
+        any queryset method builds a NEW queryset and silently bypasses the prefetch cache,
+        which turned this into one query per row (63 rows -> 66 queries, ~16s against a remote
+        database). `.all()` on a prefetched related manager reuses the cache.
+        """
         if not hasattr(candidate, '_latest_dup_check'):
-            candidate._latest_dup_check = (
-                candidate.duplicate_checks.order_by('-checked_at').first()
+            candidate._latest_dup_check = max(
+                candidate.duplicate_checks.all(),
+                key=lambda check: check.checked_at,
+                default=None,
             )
         return candidate._latest_dup_check
 

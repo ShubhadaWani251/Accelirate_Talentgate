@@ -111,6 +111,20 @@ def send_invites_async(invitations, base_url):
     threading.Thread(target=_worker, daemon=True).start()
 
 
+def partition_by_deliverable(candidates):
+    """Split into (sendable, skipped) on whether there's an address to send to.
+
+    Django's send_mail accepts a blank recipient and returns success without raising, so a
+    candidate with no email produces no exception, no FAILED status, and a UI that cheerfully
+    reports "sent" - the failure is completely invisible. Callers filter with this first and
+    report the skipped ones back explicitly.
+    """
+    sendable, skipped = [], []
+    for candidate in candidates:
+        (sendable if (candidate.email or '').strip() else skipped).append(candidate)
+    return sendable, skipped
+
+
 def send_notification_emails(candidates, subject, body_for):
     """Send a notification (e.g. 'On Hold', 'Shortlisted', 'Not Selected') to a shortlist of
     candidates, on a single background thread - same fire-and-forget pattern as

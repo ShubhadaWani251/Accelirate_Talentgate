@@ -115,13 +115,18 @@ export default function Dashboard() {
               <p style={{ color: 'var(--muted)', fontSize: 12.5 }}>No sections configured yet.</p>
             ) : (
               <table className="data-table">
-                <thead><tr><th>Section</th><th>Active</th><th>Status</th></tr></thead>
+                <thead><tr><th>Section</th><th>Unique Active</th><th>Duplicates</th><th>Status</th></tr></thead>
                 <tbody>
                   {qbankHealth.map((s) => (
                     <tr key={s.section_name}>
                       <td>{s.section_name}</td>
-                      <td>{s.active_count}</td>
-                      <td><span className={`pill ${s.is_ok ? 'green' : 'amber'}`}>{s.is_ok ? 'OK' : 'Low'}</span></td>
+                      {/* Distinct questions, not row count - a section can hold 84 rows of 6
+                          questions, which won't fill a 10-question section. */}
+                      <td>{s.active_count} / {s.min_required_active}</td>
+                      <td>{s.duplicate_count > 0
+                        ? <span className="pill amber">{s.duplicate_count}</span>
+                        : '—'}</td>
+                      <td><span className={`pill ${s.is_ok ? 'green' : 'red'}`}>{s.is_ok ? 'OK' : 'Low'}</span></td>
                     </tr>
                   ))}
                 </tbody>
