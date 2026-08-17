@@ -4,8 +4,12 @@ from openpyxl import Workbook, load_workbook
 from api.models import Question, QuestionBankSection
 from api.serializers.question import generate_question_code, normalize_question_text
 
+# The generated template puts each section on its own SHEET, named after the section, so the
+# Section column isn't needed - one sheet per section is how these files are actually prepared.
+# A Section column is still honoured if a sheet carries one (older files, or a single sheet
+# mixing sections), and it overrides the sheet name for that row.
 TEMPLATE_COLUMNS = [
-    'Section', 'Question Text', 'Option A', 'Option B', 'Option C', 'Option D',
+    'Question Text', 'Option A', 'Option B', 'Option C', 'Option D',
     'Correct Option', 'Difficulty', 'Marks',
 ]
 
@@ -27,26 +31,62 @@ _VALID_DIFFICULTIES = {c[0] for c in Question.Difficulty.choices}
 _VALID_OPTIONS = {'A', 'B', 'C', 'D'}
 
 
+_SAMPLE_ROWS = {
+    'logical': [
+        'If all Bloops are Razzies and all Razzies are Lazzies, are all Bloops definitely '
+        'Lazzies?',
+        'Yes', 'No', 'Cannot be determined', 'Only sometimes', 'A', 'Medium', 1,
+    ],
+    'quantitative': [
+        'What is 15% of 240?',
+        '36', '32', '40', '24', 'A', 'Easy', 1,
+    ],
+    'verbal': [
+        'Choose the word most similar in meaning to "Candid".',
+        'Honest', 'Secretive', 'Aggressive', 'Cautious', 'A', 'Easy', 1,
+    ],
+    'programming': [
+        'Which Python keyword is used to define a function?',
+        'def', 'func', 'lambda', 'define', 'A', 'Easy', 1,
+    ],
+}
+
+
 def generate_question_template_workbook():
+    """One sheet per section, each named after the section.
+
+    Sheet-per-section is how these files are actually prepared, so the template matches: fill
+    the Programming sheet with programming questions and they're filed there, with no Section
+    column to keep in sync row by row.
+    """
     wb = Workbook()
-    ws = wb.active
-    ws.title = 'Questions'
-    ws.append(TEMPLATE_COLUMNS)
-    # Sample rows deliberately span two different sections: one sheet may carry questions for
-    # any number of sections, and each row is filed by whatever its own Section cell names.
-    ws.append([
-        'logical', 'If all Bloops are Razzies and all Razzies are Lazzies, are all Bloops '
-                   'definitely Lazzies?',
-        'Yes', 'No', 'Cannot be determined', 'Only sometimes',
-        'A', 'Medium', '1',
-    ])
-    # The Section column also accepts the full display name shown in the app, not just the
-    # short internal key used in the row above.
-    ws.append([
-        'Verbal Ability', 'Choose the word most similar in meaning to "Candid".',
-        'Honest', 'Secretive', 'Aggressive', 'Cautious',
-        'A', 'Easy', '1',
-    ])
+    wb.remove(wb.active)  # replaced by the per-section sheets below
+
+    sections = list(QuestionBankSection.objects.all())
+    for section in sections:
+        # Excel caps sheet names at 31 characters and forbids : \ / ? * [ ]. A truncated or
+        # scrubbed name would no longer match its section on the way back in, so fall back to
+        # the short section_key - which the parser accepts as a sheet name too - rather than
+        # shipping a template whose own sheets fail validation.
+        title = section.section_name
+        scrubbed = title
+        for bad in ':\\/?*[]':
+            scrubbed = scrubbed.replace(bad, ' ')
+        if len(scrubbed) > 31 or scrubbed != title:
+            title = section.section_key[:31]
+        ws = wb.create_sheet(title=title.strip() or section.section_key[:31])
+        ws.append(TEMPLATE_COLUMNS)
+        sample = _SAMPLE_ROWS.get(section.section_key)
+        if sample:
+            ws.append(sample)
+        ws.freeze_panes = 'A2'
+
+    if not sections:
+        # No sections configured yet - still hand back a usable single sheet rather than an
+        # empty workbook Excel refuses to open.
+        ws = wb.create_sheet(title='Questions')
+        ws.append(TEMPLATE_COLUMNS)
+        ws.freeze_panes = 'A2'
     return wb
 
 
@@ -55,31 +95,48 @@ def _normalize_header(value):
 
 
 def _parse_question_workbook(file_obj):
-    """Yields one dict per data row (1-indexed row_number matching the spreadsheet,
-    header = row 1) - same shape/behavior as services/excel_upload.py's candidate parser.
+    """Yields one dict per data row, across EVERY sheet in the workbook.
+
+    Each sheet's name names the section its rows belong to, so a four-section upload is four
+    sheets with no Section column to maintain. A row that does carry a Section value overrides
+    its sheet, which keeps older single-sheet files working unchanged.
+
+    Row identity: `row_number` is a running index across the whole workbook, because row 2
+    exists in every sheet and the validation screen needs one stable id per row to edit and
+    remove against. `sheet` and `sheet_row` carry the real location for display.
     """
     wb = load_workbook(file_obj, data_only=True, read_only=True)
-    ws = wb.active
-    rows = ws.iter_rows(values_only=True)
+    row_number = 0
 
-    header_row = next(rows, None)
-    if not header_row:
-        return
-
-    field_by_col = {}
-    for idx, header in enumerate(header_row):
-        field = _HEADER_MAP.get(_normalize_header(header))
-        if field:
-            field_by_col[idx] = field
-
-    for row_number, row in enumerate(rows, start=2):
-        if row is None or all(cell in (None, '') for cell in row):
+    for ws in wb.worksheets:
+        rows = ws.iter_rows(values_only=True)
+        header_row = next(rows, None)
+        if not header_row:
             continue
-        data = {'row_number': row_number}
-        for idx, field in field_by_col.items():
-            value = row[idx] if idx < len(row) else None
-            data[field] = str(value).strip() if value is not None else ''
-        yield data
+
+        field_by_col = {}
+        for idx, header in enumerate(header_row):
+            field = _HEADER_MAP.get(_normalize_header(header))
+            if field:
+                field_by_col[idx] = field
+        if 'question_text' not in field_by_col.values():
+            # Not a question sheet (an instructions tab, a stray blank sheet) - skip it rather
+            # than reporting a screenful of "Question Text is required" against it.
+            continue
+
+        for sheet_row, row in enumerate(rows, start=2):
+            if row is None or all(cell in (None, '') for cell in row):
+                continue
+            row_number += 1
+            data = {
+                'row_number': row_number,
+                'sheet': ws.title,
+                'sheet_row': sheet_row,
+            }
+            for idx, field in field_by_col.items():
+                value = row[idx] if idx < len(row) else None
+                data[field] = str(value).strip() if value is not None else ''
+            yield data
 
 
 def _validate_row(data, sections_by_key, valid_section_names, seen_texts):
@@ -90,13 +147,21 @@ def _validate_row(data, sections_by_key, valid_section_names, seen_texts):
         errors.append(message)
         error_fields.append(field)
 
-    section_name = (data.get('section_key') or '').strip()
+    # A row's own Section cell wins; otherwise the sheet it came from names its section. That
+    # ordering keeps older single-sheet files (Section column, one sheet) working while making
+    # the Section column unnecessary for the sheet-per-section template.
+    sheet_name = (data.get('sheet') or '').strip()
+    section_name = (data.get('section_key') or '').strip() or sheet_name
     section = sections_by_key.get(section_name.lower())
     if not section_name:
         fail('Section is required.', 'Section')
     elif not section:
-        fail(f'Unknown section "{section_name}". Valid sections: {valid_section_names}.',
-             'Section')
+        if section_name == sheet_name:
+            fail(f'Sheet "{sheet_name}" does not match any section. Rename the sheet to one of: '
+                 f'{valid_section_names} - or add a Section column.', 'Section')
+        else:
+            fail(f'Unknown section "{section_name}". Valid sections: {valid_section_names}.',
+                 'Section')
 
     question_text = (data.get('question_text') or '').strip()
     if not question_text:
@@ -145,6 +210,8 @@ def _validate_row(data, sections_by_key, valid_section_names, seen_texts):
 
     return {
         'row_number': data['row_number'],
+        'sheet': sheet_name or None,
+        'sheet_row': data.get('sheet_row'),
         'section': section_name,
         'section_name': section.section_name if section else None,
         'question_text': question_text,
@@ -206,9 +273,13 @@ def validate_question_rows(raw_rows, user=None, dry_run=True):
     sections_by_key, valid_section_names, seen_texts = _validation_context()
 
     rows = []
-    for index, raw in enumerate(raw_rows, start=2):
+    for index, raw in enumerate(raw_rows, start=1):
         data = {
             'row_number': raw.get('row_number') or index,
+            # Carried through so a row keeps showing where it came from after being edited,
+            # and so a row whose section comes from its sheet still resolves on revalidation.
+            'sheet': raw.get('sheet') or '',
+            'sheet_row': raw.get('sheet_row'),
             'section_key': raw.get('section') or '',
             'question_text': raw.get('question_text') or '',
             'option_a': raw.get('option_a') or '',
@@ -265,10 +336,11 @@ def validate_question_workbook(file_obj, user=None, dry_run=True):
     columns at fault - everything the Question Validation table renders. `summary` counts
     total/valid/invalid/duplicate.
 
-    Section comes from each row's own Section column, so ONE sheet may carry questions for
-    several sections and they're grouped automatically by whatever each row names. An
-    unrecognised section name is a row-level validation error, never a silently-created wrong
-    record.
+    Every sheet in the workbook is read, and each sheet's NAME names the section its rows
+    belong to - so a four-section upload is four sheets and needs no Section column. A row that
+    does carry a Section value overrides its sheet, which keeps older single-sheet files (one
+    sheet, Section column per row) working unchanged. A sheet name matching no section is a
+    row-level validation error naming the sheet, never a silently-created wrong record.
 
     Validation is identical for the dry run and the real import - the import re-reads and
     re-checks the file rather than trusting anything the client sends back, so a tampered

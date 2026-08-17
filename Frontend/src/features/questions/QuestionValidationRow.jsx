@@ -18,7 +18,7 @@ const EDITABLE = [
   { key: 'marks', label: 'Marks', type: 'number' },
 ];
 
-export default function QuestionValidationRow({ row, sections, onSave, saving }) {
+export default function QuestionValidationRow({ row, sections, onSave, onRemove, saving }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(row);
 
@@ -33,11 +33,14 @@ export default function QuestionValidationRow({ row, sections, onSave, saving })
   }
 
   const errorFields = new Set(row.error_fields || []);
+  // Where the row actually came from. row_number is a running index across the whole workbook
+  // (needed as a stable id, since row 2 exists on every sheet), so it isn't what to show.
+  const location = row.sheet ? `${row.sheet} · ${row.sheet_row}` : (row.sheet_row ?? row.row_number);
 
   if (!editing) {
     return (
       <tr>
-        <td>{row.row_number}</td>
+        <td style={{ whiteSpace: 'nowrap' }}>{location}</td>
         <td className={errorFields.has('Section') ? 'cell-error' : ''}>
           {row.section_name || row.section || '—'}
         </td>
@@ -55,7 +58,14 @@ export default function QuestionValidationRow({ row, sections, onSave, saving })
                      color: row.errors?.length ? 'var(--brand-red)' : undefined }}>
           {row.errors?.length ? row.errors.join(' ') : '—'}
         </td>
-        <td><button className="btn small" onClick={startEdit} disabled={saving}>Edit</button></td>
+        <td style={{ whiteSpace: 'nowrap' }}>
+          <button className="btn small" onClick={startEdit} disabled={saving}>Edit</button>{' '}
+          {/* Drops the row from this upload only - nothing has been written to the bank yet,
+              so there is nothing to delete from the database. */}
+          <button className="btn small danger" onClick={() => onRemove(row)} disabled={saving}>
+            Remove
+          </button>
+        </td>
       </tr>
     );
   }
