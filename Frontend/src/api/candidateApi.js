@@ -42,10 +42,12 @@ export const notifyCandidates = (candidateIds, { template, message, subject } = 
     .then((r) => r.data);
 
 // The certification copy is fixed server-side - only the two links travel from the UI.
-export const sendCertificationLinks = (candidateIds, { linkOne, linkTwo }) =>
+// The two UiPath course links are part of the approved copy server-side, so the only
+// per-send value is the completion deadline.
+export const sendCertificationEmail = (candidateIds, { deadline }) =>
   axiosClient
     .post('/candidates/send-certification/', {
-      candidate_ids: candidateIds, link_one: linkOne, link_two: linkTwo,
+      candidate_ids: candidateIds, deadline,
     })
     .then((r) => r.data);
 

@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from api.models import Batch, Candidate, Invitation
 from api.services.email_errors import EMAIL_SEND_ERRORS
+from api.services.email_templates import render_invitation_email
 
 logger = logging.getLogger(__name__)
 
@@ -102,21 +103,18 @@ def create_single_reinvite(candidate, user):
 
 
 def send_invite_email(invitation, base_url):
+    """Send the approved invitation copy for one invitation.
+
+    The wording lives in services/email_templates.py with the rest of the candidate-facing
+    copy - it used to be inline here, which meant the one email candidates actually receive
+    was the only one not covered by the approved-template registry.
+    """
     candidate = invitation.candidate
-    batch = invitation.batch
     link = f"{base_url.rstrip('/')}/t/{invitation.unique_link_token}"
+    subject, body = render_invitation_email(candidate, invitation.batch, link)
     send_mail(
-        subject=f'Accelirate TalentGate - Assessment Invitation ({batch.batch_name})',
-        message=(
-            f"Hello {candidate.full_name},\n\n"
-            f"You have been invited to complete an online assessment for {batch.college_name}.\n\n"
-            f"Link: {link}\n"
-            f"Available: {batch.link_valid_from.strftime('%d-%b-%Y %I:%M %p')} - "
-            f"{batch.link_valid_until.strftime('%d-%b-%Y %I:%M %p')}\n"
-            f"Duration: {batch.exam_duration_minutes} minutes\n\n"
-            "Please have a government ID ready and ensure a working camera before you begin.\n"
-            "If you have questions, contact your recruiting coordinator."
-        ),
+        subject=subject,
+        message=body,
         from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=[candidate.email],
         fail_silently=False,

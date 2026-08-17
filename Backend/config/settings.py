@@ -218,6 +218,11 @@ ANYMAIL = {
 }
 DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'noreply@accelirate.com')
 
+# Address candidates are told to contact for help with the assessment. Printed in the
+# invitation email, so it must be a monitored mailbox - DEFAULT_FROM_EMAIL is a noreply
+# address and is only the fallback so the invite never goes out with a blank contact.
+SUPPORT_EMAIL = os.environ.get('SUPPORT_EMAIL', '')
+
 # Request body / file upload size caps. BatchUploadView additionally enforces its own tighter
 # 5MB limit on the candidate spreadsheet specifically (see MAX_UPLOAD_SIZE_BYTES) - these are the
 # app-wide backstop so no endpoint can be made to buffer an unbounded request body into memory.

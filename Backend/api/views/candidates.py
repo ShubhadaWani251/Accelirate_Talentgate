@@ -5,8 +5,6 @@ import urllib.request
 import zipfile
 
 from django.conf import settings
-from django.core.exceptions import ValidationError as DjangoValidationError
-from django.core.validators import URLValidator
 from django.db.models import Prefetch, Q
 from django.http import Http404, HttpResponse
 from django.utils.decorators import method_decorator
@@ -290,12 +288,19 @@ class CandidateNotifyView(APIView):
 
 @method_decorator(ratelimit(key=ratelimit_user_key, rate='10/m', method='POST', block=False), name='post')
 class CandidateCertificationView(APIView):
-    """Send the fixed certification email to a checked shortlist, with two TA-supplied links.
+    """Send the fixed certification email to a checked shortlist.
 
-    The copy lives in email_templates.CERTIFICATION_TEMPLATE and is not editable from the UI -
-    the TA supplies only the two URLs, so approved wording can't drift per-send.
+    The copy lives in email_templates.CERTIFICATION_TEMPLATE and is not editable from the UI.
+    The two UiPath course URLs are part of the approved wording, so the TA supplies only the
+    deadline - they cannot email the wrong course link, and the instructions can't drift
+    per-send.
     """
     permission_classes = [IsAdminOrTA]
+
+    # The deadline is free text on purpose: the approved copy reads "Deadline: <date>" and the
+    # TA may legitimately write "5 March 2026" or "Friday, 5 March (EOD)". It's rendered into
+    # the email verbatim, so it's length-capped and newline-stripped rather than parsed.
+    MAX_DEADLINE_LENGTH = 80
 
     def post(self, request):
         if getattr(request, 'limited', False):
@@ -303,25 +308,20 @@ class CandidateCertificationView(APIView):
                              status=status.HTTP_429_TOO_MANY_REQUESTS)
 
         candidate_ids = request.data.get('candidate_ids', [])
-        link_one = (request.data.get('link_one') or '').strip()
-        link_two = (request.data.get('link_two') or '').strip()
+        deadline = ' '.join((request.data.get('deadline') or '').split())
 
         if not isinstance(candidate_ids, list) or not candidate_ids:
             return Response({'detail': 'Select at least one candidate first.'},
                              status=status.HTTP_400_BAD_REQUEST)
-        if not link_one or not link_two:
-            return Response({'detail': 'Both certification links are required.'},
+        if not deadline:
+            return Response({'detail': 'A completion deadline is required.'},
                              status=status.HTTP_400_BAD_REQUEST)
-
-        validate_url = URLValidator(schemes=['http', 'https'])
-        for label, link in (('Link 1', link_one), ('Link 2', link_two)):
-            try:
-                validate_url(link)
-            except DjangoValidationError:
-                return Response(
-                    {'detail': f'{label} is not a valid URL - it should start with https://'},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+        if len(deadline) > self.MAX_DEADLINE_LENGTH:
+            return Response(
+                {'detail': f'The deadline is too long (max {self.MAX_DEADLINE_LENGTH} '
+                            f'characters).'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         candidates = list(visible_candidates_qs(request.user).filter(candidate_id__in=candidate_ids))
         if not candidates:
@@ -339,7 +339,7 @@ class CandidateCertificationView(APIView):
         subject = CERTIFICATION_TEMPLATE['subject']
         send_notification_emails(
             sendable, subject,
-            lambda c: render_certification_email(c, link_one, link_two)[1],
+            lambda c: render_certification_email(c, deadline)[1],
         )
         for candidate in sendable:
             log_action(request, request.user, 'certification_sent', 'candidate', candidate.candidate_id,

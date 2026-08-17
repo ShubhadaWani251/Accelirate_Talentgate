@@ -7,6 +7,7 @@ import { extractErrorMessage } from '../../utils/passwordSchema';
 // the approved wording lives in exactly one place.
 const TEMPLATE_ICONS = {
   hold: '🕒', cutoff: '📉', shortlisted: '✅', fail: '❌',
+  review: '🔍', technical_issue: '🛠',
 };
 
 export default function NotifyModal({ candidateIds, onClose, onSent }) {
@@ -25,7 +26,7 @@ export default function NotifyModal({ candidateIds, onClose, onSent }) {
   function pickTemplate(template) {
     setActiveKey(template.key);
     // {name} is substituted per recipient server-side - show it as a readable placeholder.
-    setMessage(template.body.replace('{name}', '[Candidate Name]'));
+    setMessage(template.body.replaceAll('{name}', '[Candidate Name]'));
     setEdited(false);
   }
 
