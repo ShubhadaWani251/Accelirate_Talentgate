@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import * as questionApi from '../../api/questionApi';
 import PaginationControls from '../../components/common/PaginationControls';
 import QuestionFormModal from '../../features/questions/QuestionFormModal';
-import QuestionBulkUploadModal from '../../features/questions/QuestionBulkUploadModal';
 import { extractErrorMessage } from '../../utils/passwordSchema';
 
 const STATUS_PILL = { Active: 'green', Inactive: 'gray' };
@@ -19,7 +19,6 @@ export default function QuestionBank() {
   const [pageMeta, setPageMeta] = useState({ count: 0, next: null, previous: null });
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(null); // question object, or 'new'
-  const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
 
   useEffect(() => {
     questionApi.getSections().then(setSections).catch((err) => toast.error(extractErrorMessage(err)));
@@ -90,8 +89,12 @@ export default function QuestionBank() {
               </span>
             )}
             {/* Bulk upload is section-agnostic: each row is filed by its own Section column,
-                so one sheet can carry questions for several sections at once. */}
-            <button className="btn" onClick={() => setBulkUploadOpen(true)}>Bulk Upload (Excel)</button>
+                so one sheet can carry questions for several sections at once. Its own page
+                rather than a modal - the validation table it leads to is far too wide for one. */}
+            <Link to="/admin/question-bank/upload" className="btn"
+                  style={{ width: 'auto', textDecoration: 'none' }}>
+              Bulk Upload (Excel)
+            </Link>
             <button className="btn" onClick={questionApi.downloadQuestionTemplate}>⬇ Download Sample Template</button>
           </div>
 
@@ -170,13 +173,6 @@ export default function QuestionBank() {
           defaultSectionId={selectedSection?.section_id}
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); refresh(page); }}
-        />
-      )}
-      {bulkUploadOpen && (
-        <QuestionBulkUploadModal
-          sections={sections}
-          onClose={() => setBulkUploadOpen(false)}
-          onUploaded={() => refresh(1)}
         />
       )}
     </div>

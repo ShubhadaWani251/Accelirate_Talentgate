@@ -17,6 +17,7 @@ import BatchWizard from '../features/batches/BatchWizard';
 import AllCandidates from '../pages/candidates/AllCandidates';
 import CandidateDetail from '../pages/candidates/CandidateDetail';
 import QuestionBank from '../pages/questions/QuestionBank';
+import QuestionUpload from '../pages/questions/QuestionUpload';
 import UserManagement from '../pages/users/UserManagement';
 import EditUser from '../pages/users/EditUser';
 
@@ -82,6 +83,12 @@ export default function AppRouter() {
           <Route
             path="/admin/question-bank"
             element={<ProtectedRoute allowedRoles={['admin']}><QuestionBank /></ProtectedRoute>}
+          />
+          {/* Bulk upload + validation is its own page, not a modal - the validation table is
+              too wide and its rows expand too far to work inside a dialog. */}
+          <Route
+            path="/admin/question-bank/upload"
+            element={<ProtectedRoute allowedRoles={['admin']}><QuestionUpload /></ProtectedRoute>}
           />
           <Route
             path="/admin/users"
