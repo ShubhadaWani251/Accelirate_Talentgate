@@ -3,9 +3,16 @@ import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import * as batchApi from '../../api/batchApi';
 import PaginationControls from '../../components/common/PaginationControls';
+import BatchStatusFilter from '../../components/common/BatchStatusFilter';
 import { extractErrorMessage } from '../../utils/passwordSchema';
 
 const STATUS_PILL = { draft: 'gray', in_progress: 'blue', completed: 'green', cancelled: 'red' };
+const EMPTY_MESSAGE = {
+  active: 'No active batches found.',
+  draft: 'No Draft batches found.',
+  cancelled: 'No Cancelled batches found.',
+  all: 'No batches yet.',
+};
 
 export default function BatchList() {
   const [batches, setBatches] = useState([]);
@@ -13,14 +20,20 @@ export default function BatchList() {
   const [pageMeta, setPageMeta] = useState({ count: 0, next: null, previous: null });
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  // Same unified Batch Status filter as the Dashboard - "Active" (In Progress + Completed) by
+  // default. Draft and Cancelled aren't hidden, just not shown until asked for: a Draft has no
+  // candidates or results yet, and a Cancelled one isn't live work, so neither belongs in the
+  // default working view.
+  const [batchStatus, setBatchStatus] = useState('active');
 
-  async function refresh(q = search, p = page) {
+  async function refresh(q = search, p = page, status = batchStatus) {
     setLoading(true);
     try {
-      const data = await batchApi.listBatches(q, { page: p });
+      const data = await batchApi.listBatches(q, { page: p, status });
       setBatches(data.results);
       setPageMeta({ count: data.count, next: data.next, previous: data.previous });
       setPage(p);
+      setBatchStatus(status);
     } catch (err) {
       toast.error(extractErrorMessage(err));
     } finally {
@@ -42,16 +55,33 @@ export default function BatchList() {
         </Link>
       </div>
 
-      <div className="search-bar" style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-        <input
-          placeholder="Search by batch name or college…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && refresh(search, 1)}
-          style={{ flex: 1, padding: '9px 12px', borderRadius: 8, border: '1px solid var(--line-soft)' }}
-        />
-        <button className="btn" onClick={() => refresh(search, 1)}>Search</button>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                   flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
+        <div className="search-bar" style={{ display: 'flex', gap: 8, flex: 1, minWidth: 260 }}>
+          <input
+            placeholder="Search by batch name or college…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && refresh(search, 1)}
+            style={{ flex: 1, padding: '9px 12px', borderRadius: 8, border: '1px solid var(--line-soft)' }}
+          />
+          <button className="btn" onClick={() => refresh(search, 1)}>Search</button>
+        </div>
+        <BatchStatusFilter value={batchStatus} onChange={(status) => refresh(search, 1, status)} />
       </div>
+
+      {batchStatus === 'draft' && (
+        <div className="alert" style={{ marginBottom: 12 }}>
+          These uploads were started but never completed — no batch has been created and no
+          invites have been sent. Opening one resumes it at the step it was left on.
+        </div>
+      )}
+      {batchStatus === 'cancelled' && (
+        <div className="alert" style={{ marginBottom: 12 }}>
+          These batches have been deactivated. Their candidates and results remain available for
+          reference, but they can no longer send invites or accept new candidates.
+        </div>
+      )}
 
       <div className="table-scroll">
         <table className="data-table">
@@ -71,7 +101,7 @@ export default function BatchList() {
             {loading ? (
               <tr><td colSpan={8}>Loading…</td></tr>
             ) : batches.length === 0 ? (
-              <tr><td colSpan={8}>No batches yet.</td></tr>
+              <tr><td colSpan={8}>{EMPTY_MESSAGE[batchStatus] || 'No batches yet.'}</td></tr>
             ) : (
               batches.map((b) => (
                 <tr key={b.batch_id}>
@@ -82,7 +112,16 @@ export default function BatchList() {
                   <td><span className={`pill ${STATUS_PILL[b.status] || 'gray'}`}>{b.status_display}</span></td>
                   <td>{b.pass_count}</td>
                   <td>{b.fail_count}</td>
-                  <td><Link to={`/batches/${b.batch_id}`} className="link-text">View</Link></td>
+                  {/* A draft reopens the upload wizard at its outstanding step; anything
+                      finalized goes to its Batch Details page. */}
+                  <td>
+                    <Link
+                      to={b.status === 'draft' ? `/batches/${b.batch_id}/continue` : `/batches/${b.batch_id}`}
+                      className="link-text"
+                    >
+                      {b.status === 'draft' ? 'Continue' : 'View'}
+                    </Link>
+                  </td>
                 </tr>
               ))
             )}

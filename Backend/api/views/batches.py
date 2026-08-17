@@ -21,9 +21,18 @@ from api.serializers.batch import (
 from api.services.access import can_access_batch
 from api.services.audit import log_action
 from api.services.batch_defaults import get_batch_defaults, save_batch_defaults
-from api.services.duplicate_check import clear_duplicate
-from api.services.excel_upload import generate_template_workbook, stage_candidates_from_workbook
-from api.services.invites import create_invitations, send_invites_async
+from api.services.batch_status_filter import filter_batches_by_status_group
+from api.services.candidate_validation import (
+    EDITABLE_FIELDS, revalidate_batch_candidates, summarize_candidates,
+)
+from api.services.duplicate_check import clear_duplicate, run_duplicate_check
+from api.services.excel_upload import (
+    generate_template_workbook, generate_validation_report_workbook,
+    stage_candidates_from_workbook,
+)
+from api.services.invites import (
+    BatchNotInvitableError, assert_batch_can_invite, create_invitations, send_invites_async,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +59,12 @@ class BatchListCreateView(APIView):
     def get(self, request):
         # Unscoped by owner on purpose - every TA sees every batch (see services/access.py).
         qs = Batch.objects.select_related('primary_ta_user').filter(is_deleted=False)
+
+        # Unified Batch Status filter - 'active' (In Progress + Completed) by default, or
+        # 'draft' / 'cancelled' / 'all' on request. Same grouping the dashboard uses, via the
+        # shared helper, so "Active" means the same set of statuses in both places.
+        qs = filter_batches_by_status_group(qs, request.query_params.get('status'))
+
         search = request.query_params.get('search', '').strip()
         if search:
             qs = qs.filter(Q(batch_name__icontains=search) | Q(college_name__icontains=search))
@@ -195,7 +210,9 @@ class BatchUploadView(APIView):
         cooling_off_months = max(1, min(cooling_off_months, 24))
 
         try:
-            created = stage_candidates_from_workbook(batch, upload, request.user, cooling_off_months)
+            created, missing_columns, staged = stage_candidates_from_workbook(
+                batch, upload, request.user, cooling_off_months,
+            )
         except (zipfile.BadZipFile, InvalidFileException, KeyError, DataError):
             # These specifically indicate a malformed/corrupt/mistyped-data upload (not a valid
             # xlsx container, or a cell value that doesn't fit its column) - genuinely the
@@ -210,17 +227,45 @@ class BatchUploadView(APIView):
         if not created:
             return Response({'detail': 'No data rows found in that file.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        batch.total_candidates = batch.candidate_set.filter(is_deleted=False).count()
+        batch.total_candidates = len(staged)
         batch.save(update_fields=['total_candidates'])
         log_action(request, request.user, 'upload', 'batch', batch.batch_id,
-                   details={'rows_created': len(created)})
+                   details={'rows_created': len(created), 'missing_columns': missing_columns})
 
-        ok_count = sum(1 for c in created if c.validation_status == Candidate.ValidationStatus.OK)
+        summary = summarize_candidates(staged)
         return Response({
             'rows_created': len(created),
-            'ok_count': ok_count,
-            'validation_error_count': len(created) - ok_count,
+            'ok_count': summary['valid'],
+            'validation_error_count': summary['invalid'],
+            'summary': summary,
+            # Named so the review screen can say "this sheet has no Aadhaar Number column"
+            # instead of showing every row as missing it and leaving the reviewer to guess.
+            'missing_columns': missing_columns,
         }, status=status.HTTP_201_CREATED)
+
+
+def _staging_queryset(batch):
+    return (
+        batch.candidate_set
+        .filter(is_deleted=False)
+        .prefetch_related('duplicate_checks', 'duplicate_checks__existing_candidate__batch')
+        .order_by('upload_row_number', 'candidate_id')
+    )
+
+
+def _staging_payload(batch):
+    """The whole review table plus its summary counts.
+
+    Every response that changes a row returns the FULL set rather than just the row touched:
+    one correction can flip another row's verdict (fixing a mistyped address can turn a
+    later row into a duplicate of it, or clear one), so returning a single row would leave
+    the rest of the table - and the counts above it - showing stale results.
+    """
+    candidates = list(_staging_queryset(batch))
+    return {
+        'rows': CandidateStagingSerializer(candidates, many=True).data,
+        'summary': summarize_candidates(candidates),
+    }
 
 
 class BatchCandidatesStagingView(APIView):
@@ -228,13 +273,112 @@ class BatchCandidatesStagingView(APIView):
 
     def get(self, request, batch_id):
         batch = _get_batch_or_404(request.user, batch_id)
-        candidates = (
-            batch.candidate_set
-            .filter(is_deleted=False)
-            .prefetch_related('duplicate_checks', 'duplicate_checks__existing_candidate__batch')
-            .order_by('upload_row_number', 'candidate_id')
+        if batch.status == Batch.Status.DRAFT:
+            # A draft uploaded before per-field validation existed carries only the old
+            # single-error status and an empty error list, which would render as a red row
+            # with nothing in the Errors column. Re-checking on read makes the screen
+            # self-correcting; revalidate_batch_candidates only writes rows whose verdict
+            # actually moved, so for an up-to-date batch this costs nothing. Drafts only -
+            # a finalized batch keeps the verdicts it was finalized under.
+            revalidate_batch_candidates(batch)
+        return Response(_staging_payload(batch))
+
+
+class BatchCandidateRowView(APIView):
+    """Correct one uploaded row in place, on the Upload Review screen.
+
+    Editing here rather than in the spreadsheet is the point of the validation step: a
+    mistyped address or a missing college shouldn't cost a re-upload. Saving re-runs the
+    identical validation the upload ran, so a row cannot be edited into a state the upload
+    itself would have rejected - and the finalize gate reads the same stored result, so
+    nothing invalid reaches the batch even if this endpoint is called directly.
+    """
+    permission_classes = [IsAdminOrTA]
+
+    def patch(self, request, batch_id, candidate_id):
+        batch = _get_batch_or_404(request.user, batch_id)
+        if batch.status != Batch.Status.DRAFT:
+            return Response({'detail': 'This batch has already been finalized; its candidates '
+                                       'can no longer be edited.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            candidate = batch.candidate_set.get(candidate_id=candidate_id, is_deleted=False)
+        except Candidate.DoesNotExist:
+            raise Http404
+
+        original_aadhaar = candidate.aadhaar_number
+        updates = []
+        for field in EDITABLE_FIELDS:
+            if field not in request.data:
+                continue
+            value = request.data[field]
+            value = value.strip() if isinstance(value, str) else value
+
+            if field == 'aadhaar_number' and not value:
+                # The browser only ever receives the masked number, so a blank Aadhaar box
+                # means "leave it as it is" - not "erase it". Clearing it deliberately isn't
+                # something the review screen needs to support.
+                continue
+            if field in ('percentage', 'passing_out_year'):
+                value = _to_number(value, field)
+            elif field in ('last_name', 'phone', 'college_name', 'degree', 'stream', 'location'):
+                value = value or None
+
+            setattr(candidate, field, value)
+            updates.append(field)
+
+        if not updates:
+            return Response({'detail': 'No editable fields were supplied.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        candidate.save(update_fields=updates)
+
+        # A corrected Aadhaar is a different person as far as the duplicate history goes, so
+        # the previous check's verdict no longer describes this row.
+        if candidate.aadhaar_number != original_aadhaar:
+            run_duplicate_check(candidate)
+
+        revalidate_batch_candidates(batch)
+        log_action(request, request.user, 'update', 'candidate', candidate.candidate_id,
+                   details={'batch_id': batch.batch_id, 'fields': updates})
+        return Response(_staging_payload(batch))
+
+
+def _to_number(value, field):
+    if value in (None, ''):
+        return None
+    try:
+        return int(float(value)) if field == 'passing_out_year' else float(value)
+    except (TypeError, ValueError):
+        # Neither field is validated by candidate_validation (they're optional and not used
+        # for anything gating), so an unparseable value is dropped rather than rejected.
+        return None
+
+
+class BatchValidationReportView(APIView):
+    """Download the rows that failed validation, with their errors, as .xlsx.
+
+    The reviewer usually isn't the person who produced the sheet - this is what gets sent
+    back to whoever did.
+    """
+    permission_classes = [IsAdminOrTA]
+
+    def get(self, request, batch_id):
+        batch = _get_batch_or_404(request.user, batch_id)
+        invalid = [c for c in _staging_queryset(batch)
+                   if c.validation_status != Candidate.ValidationStatus.OK]
+        wb = generate_validation_report_workbook(invalid)
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
+        response = HttpResponse(
+            buffer.read(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         )
-        return Response(CandidateStagingSerializer(candidates, many=True).data)
+        response['Content-Disposition'] = (
+            f'attachment; filename="batch-{batch.batch_id}-validation-errors.xlsx"'
+        )
+        return response
 
 
 class BatchCandidateDeleteView(APIView):
@@ -285,12 +429,21 @@ class BatchFinalizeView(APIView):
 
     def post(self, request, batch_id):
         batch = _get_batch_or_404(request.user, batch_id)
+        if batch.status == Batch.Status.CANCELLED:
+            return Response(
+                {'detail': 'This batch has been cancelled. New candidates cannot be processed '
+                           'or invited for this batch.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if batch.status != Batch.Status.DRAFT:
             return Response({'detail': 'This batch has already been finalized.'},
                              status=status.HTTP_400_BAD_REQUEST)
 
-        candidates = batch.candidate_set.filter(is_deleted=False)
-        total = candidates.count()
+        # Re-run validation from scratch here rather than trusting what the review screen last
+        # stored. This is the gate that keeps invalid records out of a live batch, so it has to
+        # hold for a caller that never opened that screen at all.
+        all_candidates = revalidate_batch_candidates(batch)
+        total = len(all_candidates)
         if total == 0:
             return Response({'detail': 'Upload at least one candidate before finalizing.'},
                              status=status.HTTP_400_BAD_REQUEST)
@@ -306,7 +459,10 @@ class BatchFinalizeView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        selected = list(candidates.filter(candidate_id__in=candidate_ids))
+        # Filtered in Python against the just-revalidated list rather than re-querying, so the
+        # rows checked below carry the verdicts that were just computed.
+        wanted = {int(cid) for cid in candidate_ids if str(cid).lstrip('-').isdigit()}
+        selected = [c for c in all_candidates if c.candidate_id in wanted]
         if not selected:
             return Response({'detail': 'None of the selected candidates belong to this batch.'},
                              status=status.HTTP_400_BAD_REQUEST)
@@ -358,12 +514,14 @@ class BatchSendInvitesView(APIView):
 
     def post(self, request, batch_id):
         batch = _get_batch_or_404(request.user, batch_id)
-        if batch.status == Batch.Status.DRAFT:
-            return Response({'detail': 'Finalize this batch before sending invites.'},
-                             status=status.HTTP_400_BAD_REQUEST)
-        if batch.status == Batch.Status.CANCELLED:
-            return Response({'detail': 'This batch has been cancelled and can no longer send invites.'},
-                             status=status.HTTP_400_BAD_REQUEST)
+        # Checked up front so a Draft/Cancelled batch is reported as such rather than as
+        # "select the candidates first". services/invites.py owns which statuses may invite and
+        # the exact wording, and enforces it again at Invitation creation - this is the same
+        # rule, applied early for a clearer message, not a second copy of it.
+        try:
+            assert_batch_can_invite(batch)
+        except BatchNotInvitableError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         # Invites are always sent to an explicit selection - never "everyone still pending".
         # A blanket send would sweep up rows the reviewer deliberately skipped (a duplicate

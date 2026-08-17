@@ -29,11 +29,26 @@ export const downloadQuestionTemplate = async () => {
   window.URL.revokeObjectURL(url);
 };
 
-// `sectionKey` files every row into that section, ignoring the sheet's own Section column -
-// the upload is always launched from inside a section.
-export const uploadQuestionsExcel = (file, sectionKey) => {
+// Two-phase upload. Validate returns per-row results without writing anything; import runs
+// the same server-side validation again and writes only the rows that pass. Section comes from
+// each row's own Section column, so one sheet may span several sections.
+const questionUploadForm = (file, validateOnly) => {
   const form = new FormData();
   form.append('file', file);
-  if (sectionKey) form.append('section', sectionKey);
-  return axiosClient.post('/questions/upload/', form).then((r) => r.data);
+  if (validateOnly) form.append('validate_only', 'true');
+  return form;
 };
+
+export const validateQuestionsExcel = (file) =>
+  axiosClient.post('/questions/upload/', questionUploadForm(file, true)).then((r) => r.data);
+
+export const importQuestionsExcel = (file) =>
+  axiosClient.post('/questions/upload/', questionUploadForm(file, false)).then((r) => r.data);
+
+// Re-validate rows edited on the validation screen (or import them once they pass). The server
+// runs the same validation either way, so an edited-to-invalid row still can't be written.
+export const validateQuestionRows = (rows) =>
+  axiosClient.post('/questions/validate-rows/', { rows, validate_only: true }).then((r) => r.data);
+
+export const importQuestionRows = (rows) =>
+  axiosClient.post('/questions/validate-rows/', { rows, validate_only: false }).then((r) => r.data);

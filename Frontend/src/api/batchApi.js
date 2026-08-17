@@ -3,11 +3,16 @@ import axiosClient from './axiosClient';
 // Returns the paginated envelope {count, next, previous, results} - callers that just want
 // every batch for a dropdown (not a browsable list) should pass a page_size big enough to
 // cover realistic batch counts in one page (e.g. { pageSize: 200 }).
-export const listBatches = (search = '', { page, pageSize } = {}) => {
+//
+// Drafts are excluded unless you ask for them by status: an unfinished upload has no
+// candidates or results yet, so it isn't a batch anyone can act on. Pass { status: 'draft' }
+// for the "Unfinished uploads" view.
+export const listBatches = (search = '', { page, pageSize, status } = {}) => {
   const params = {};
   if (search) params.search = search;
   if (page) params.page = page;
   if (pageSize) params.page_size = pageSize;
+  if (status) params.status = status;
   return axiosClient.get('/batches/', { params }).then((r) => r.data);
 };
 
@@ -52,8 +57,33 @@ export const uploadCandidates = (batchId, file, coolingOffMonths) => {
   return axiosClient.post(`/batches/${batchId}/upload/`, form).then((r) => r.data);
 };
 
+// Returns { rows, summary: { total, valid, invalid } }. The summary comes from the server
+// rather than being counted in the browser so the review screen and the finalize gate can
+// never disagree about how many rows are valid.
 export const getStagingCandidates = (batchId) =>
   axiosClient.get(`/batches/${batchId}/candidates/`).then((r) => r.data);
+
+// Correct one row in place. Responds with the WHOLE table again, not just this row: fixing a
+// mistyped address can turn another row into a duplicate of it (or clear one), so every row's
+// verdict and the summary counts have to be refreshed together.
+export const updateStagingCandidate = (batchId, candidateId, payload) =>
+  axiosClient
+    .patch(`/batches/${batchId}/candidates/${candidateId}/`, payload)
+    .then((r) => r.data);
+
+export const downloadValidationReport = async (batchId) => {
+  const response = await axiosClient.get(
+    `/batches/${batchId}/candidates/validation-report/`, { responseType: 'blob' },
+  );
+  const url = window.URL.createObjectURL(new Blob([response.data]));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `batch-${batchId}-validation-errors.xlsx`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+};
 
 export const deleteCandidates = (batchId, candidateIds) =>
   axiosClient

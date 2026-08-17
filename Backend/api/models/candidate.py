@@ -7,11 +7,21 @@ from .batch import Batch
 class Candidate(models.Model):
     """One row per candidate profile within a batch."""
     class ValidationStatus(models.TextChoices):
+        """Headline verdict for one uploaded row.
+
+        A row can fail several checks at once (no name AND a malformed email AND a repeated
+        address); this field carries only the FIRST one, for the status pill and for the
+        `!= OK` gate that blocks finalizing. The full list lives in `validation_errors`.
+        """
         OK = 'ok', 'OK'
         MISSING_EMAIL = 'missing_email', 'Missing Email'
         MISSING_AADHAAR = 'missing_aadhaar', 'Missing Aadhaar'
         MISSING_NAME = 'missing_name', 'Missing Name'
         MISSING_COLLEGE = 'missing_college', 'Missing College'
+        INVALID_EMAIL = 'invalid_email', 'Invalid Email'
+        DUPLICATE_EMAIL = 'duplicate_email', 'Duplicate Email'
+        INVALID_AADHAAR = 'invalid_aadhaar', 'Invalid Aadhaar'
+        INVALID_MOBILE = 'invalid_mobile', 'Invalid Mobile'
 
     class Status(models.TextChoices):
         PENDING_INVITE = 'pending_invite', 'Pending Invite'
@@ -49,6 +59,13 @@ class Candidate(models.Model):
     validation_status = models.CharField(max_length=20,
                                          choices=ValidationStatus.choices,
                                          default=ValidationStatus.OK)
+    validation_errors = models.JSONField(
+        default=list, blank=True,
+        help_text="Every problem found with this uploaded row: "
+                  "[{'field': 'Email', 'message': '...'}, ...]. Empty when the row is valid. "
+                  "Stored rather than recomputed so the review screen and the finalize check "
+                  "can never disagree about why a row was rejected.",
+    )
     status = models.CharField(max_length=15, choices=Status.choices,
                               default=Status.PENDING_INVITE)
     result = models.CharField(max_length=10, choices=Result.choices,

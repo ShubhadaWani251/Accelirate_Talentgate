@@ -69,7 +69,11 @@ class UserDetailView(APIView):
         user = _get_user_or_404(user_id)
 
         if user.user_id == request.user.user_id:
-            return Response({'detail': "You can't delete your own account."},
+            return Response({'detail': "You can't deactivate your own account."},
+                             status=status.HTTP_400_BAD_REQUEST)
+
+        if not user.is_active:
+            return Response({'detail': f'{user.full_name} is already inactive.'},
                              status=status.HTTP_400_BAD_REQUEST)
 
         open_batches = user.primary_batches.filter(
@@ -79,16 +83,19 @@ class UserDetailView(APIView):
             batch_names = ', '.join(open_batches.values_list('batch_name', flat=True))
             return Response(
                 {'detail': f'{user.full_name} still owns open batch(es) ({batch_names}). '
-                            f'Finalize/complete them, or reassign, before deleting this account.'},
+                            f'Finalize/complete them, or reassign, before deactivating this '
+                            f'account.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Soft delete only - User.is_deleted mirrors the app's Candidate/Batch pattern, and
-        # Batch.primary_ta_user is on_delete=PROTECT, so a real .delete() would fail anyway
-        # once any batch (even a completed one) still references this user.
-        user.is_deleted = True
+        # Deactivate, never delete. The row and all its history stay intact and the account
+        # keeps appearing in User Management as Inactive, so it can be reactivated from Edit
+        # User. is_deleted is deliberately NOT set - that would hide the record from the list
+        # and, because Batch.primary_ta_user is on_delete=PROTECT, orphan the batches it owns
+        # from an admin's view.
         user.is_active = False
-        user.save(update_fields=['is_deleted', 'is_active'])
+        user.save(update_fields=['is_active'])
 
-        log_action(request, request.user, 'delete', 'user', user.user_id, requires_review=True)
-        return Response({'detail': f"{user.full_name}'s access has been deactivated and removed."})
+        log_action(request, request.user, 'deactivate', 'user', user.user_id, requires_review=True)
+        return Response({'detail': f'{user.full_name} has been deactivated and can no longer '
+                                    f'sign in. Their records and history are preserved.'})

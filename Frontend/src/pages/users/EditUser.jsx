@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import * as userApi from '../../api/userApi';
-import DeleteUserModal from '../../features/users/DeleteUserModal';
+import DeactivateUserModal from '../../features/users/DeactivateUserModal';
 import ToggleSwitch from '../../components/common/ToggleSwitch';
 import { selectUser } from '../../features/auth/authSlice';
 import { useSelector } from 'react-redux';
@@ -18,7 +18,7 @@ export default function EditUser() {
   const [form, setForm] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deactivateOpen, setDeactivateOpen] = useState(false);
 
   async function refresh() {
     setLoading(true);
@@ -122,17 +122,18 @@ export default function EditUser() {
           {saving ? 'Saving…' : '💾 Save Changes'}
         </button>
         {!isSelf && (
-          <button className="btn danger" style={{ marginLeft: 'auto' }} onClick={() => setDeleteOpen(true)}>
-            🗑 Delete User
+          <button className="btn danger" style={{ marginLeft: 'auto' }}
+                  onClick={() => setDeactivateOpen(true)} disabled={!user.is_active}>
+            {user.is_active ? 'Deactivate User' : 'Already Inactive'}
           </button>
         )}
       </div>
 
-      {deleteOpen && (
-        <DeleteUserModal
+      {deactivateOpen && (
+        <DeactivateUserModal
           user={user}
-          onClose={() => setDeleteOpen(false)}
-          onDeleted={() => navigate('/admin/users')}
+          onClose={() => setDeactivateOpen(false)}
+          onDeactivated={() => navigate('/admin/users')}
         />
       )}
     </div>

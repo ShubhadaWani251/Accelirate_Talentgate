@@ -31,7 +31,13 @@ export default function AllCandidates() {
     // page_size covers every realistic batch count in one page - this dropdown needs all of
     // them, not just the first page (unlike the candidate table below, which is deliberately
     // paginated since candidate volume is the actual unbounded-growth concern).
-    batchApi.listBatches('', { pageSize: 200 })
+    //
+    // status: 'all' - the batch list defaults to Active-only, but a Cancelled batch's
+    // candidates stay fully visible here (only Draft staging rows are excluded, since a draft
+    // has nothing to filter by yet). Without this override, a cancelled batch would vanish
+    // from the dropdown while its candidates remained in the table with no way to filter to
+    // just them.
+    batchApi.listBatches('', { pageSize: 200, status: 'all' })
       .then((data) => setBatches(data.results))
       .catch((err) => toast.error(extractErrorMessage(err)));
   }, []);

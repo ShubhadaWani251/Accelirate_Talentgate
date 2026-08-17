@@ -9,4 +9,5 @@ class DashboardSummaryView(APIView):
     permission_classes = [IsAdminOrTA]
 
     def get(self, request):
-        return Response(build_dashboard_summary(request.user))
+        batch_status = request.query_params.get('batch_status', 'active')
+        return Response(build_dashboard_summary(request.user, batch_status))

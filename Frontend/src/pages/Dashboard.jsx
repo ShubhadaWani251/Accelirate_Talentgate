@@ -6,22 +6,45 @@ import { selectRoleCode } from '../features/auth/authSlice';
 import * as dashboardApi from '../api/dashboardApi';
 import * as candidateApi from '../api/candidateApi';
 import ExportModal from '../features/candidates/ExportModal';
+import BatchStatusFilter from '../components/common/BatchStatusFilter';
 import { extractErrorMessage } from '../utils/passwordSchema';
 
 const STATUS_PILL = { draft: 'gray', in_progress: 'blue', completed: 'green', cancelled: 'red' };
+const EMPTY_MESSAGE = {
+  active: 'No active batches found.',
+  draft: 'No Draft batches found.',
+  cancelled: 'No Cancelled batches found.',
+  all: 'No batches yet.',
+};
 
 export default function Dashboard() {
   const roleCode = useSelector(selectRoleCode);
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [batchStatus, setBatchStatus] = useState('active');
+  const [tableLoading, setTableLoading] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
 
+  async function loadSummary(status, { initial = false } = {}) {
+    if (initial) setLoading(true); else setTableLoading(true);
+    try {
+      setSummary(await dashboardApi.getDashboardSummary(status));
+    } catch (err) {
+      toast.error(extractErrorMessage(err));
+    } finally {
+      if (initial) setLoading(false); else setTableLoading(false);
+    }
+  }
+
   useEffect(() => {
-    dashboardApi.getDashboardSummary()
-      .then((data) => setSummary(data))
-      .catch((err) => toast.error(extractErrorMessage(err)))
-      .finally(() => setLoading(false));
+    loadSummary('active', { initial: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function handleStatusChange(status) {
+    setBatchStatus(status);
+    loadSummary(status);
+  }
 
   async function handleExportBatch(batchId) {
     try {
@@ -60,8 +83,14 @@ export default function Dashboard() {
       {exportOpen && <ExportModal onClose={() => setExportOpen(false)} />}
 
       <div className="card" style={{ marginBottom: 20 }}>
-        <div className="box-label">Batches Overview — status &amp; results in one place</div>
-        <div className="table-scroll">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                     flexWrap: 'wrap', gap: 10, marginBottom: 10 }}>
+          <div className="box-label" style={{ marginBottom: 0 }}>
+            Batches Overview — status &amp; results in one place
+          </div>
+          <BatchStatusFilter value={batchStatus} onChange={handleStatusChange} />
+        </div>
+        <div className="table-scroll" style={{ opacity: tableLoading ? 0.6 : 1 }}>
           <table className="data-table">
             <thead>
               <tr>
@@ -79,7 +108,7 @@ export default function Dashboard() {
             </thead>
             <tbody>
               {batches.length === 0 ? (
-                <tr><td colSpan={isAdmin ? 9 : 8}>No batches yet.</td></tr>
+                <tr><td colSpan={isAdmin ? 9 : 8}>{EMPTY_MESSAGE[batchStatus] || 'No batches yet.'}</td></tr>
               ) : (
                 batches.map((b) => (
                   <tr key={b.batch_id}>
@@ -93,8 +122,16 @@ export default function Dashboard() {
                     <td>{b.borderline_count}</td>
                     <td>
                       {/* Opens that batch's own page, not a filtered All Candidates view -
-                          Batch Details is where the batch's config, actions and candidates live. */}
-                      <Link className="link-text" to={`/batches/${b.batch_id}`}>View</Link>
+                          Batch Details is where the batch's config, actions and candidates live.
+                          Drafts are filtered out server-side; the fallback is here so that if one
+                          ever surfaces it resumes the upload wizard rather than opening an empty
+                          details page. */}
+                      <Link
+                        className="link-text"
+                        to={b.status === 'draft' ? `/batches/${b.batch_id}/continue` : `/batches/${b.batch_id}`}
+                      >
+                        {b.status === 'draft' ? 'Continue' : 'View'}
+                      </Link>
                     </td>
                     <td>
                       <span className="link-text" onClick={() => handleExportBatch(b.batch_id)}>Export</span>

@@ -32,14 +32,16 @@ def generate_question_template_workbook():
     ws = wb.active
     ws.title = 'Questions'
     ws.append(TEMPLATE_COLUMNS)
+    # Sample rows deliberately span two different sections: one sheet may carry questions for
+    # any number of sections, and each row is filed by whatever its own Section cell names.
     ws.append([
         'logical', 'If all Bloops are Razzies and all Razzies are Lazzies, are all Bloops '
                    'definitely Lazzies?',
         'Yes', 'No', 'Cannot be determined', 'Only sometimes',
         'A', 'Medium', '1',
     ])
-    # Second sample row demonstrates that the Section column also accepts the full display
-    # name (as seen in the app), not just the short internal key used in the row above.
+    # The Section column also accepts the full display name shown in the app, not just the
+    # short internal key used in the row above.
     ws.append([
         'Verbal Ability', 'Choose the word most similar in meaning to "Candid".',
         'Honest', 'Secretive', 'Aggressive', 'Cautious',
@@ -80,113 +82,201 @@ def _parse_question_workbook(file_obj):
         yield data
 
 
-@transaction.atomic
-def import_questions_from_workbook(file_obj, user, force_section=None):
-    """Parse the uploaded workbook and create one active Question per valid data row.
-    Unlike the candidate bulk-upload pipeline, there's no staging/duplicate-review step -
-    a bad row is just reported back as an error and skipped, everything else is created
-    immediately. Wrapped in one transaction so a mid-file DB error rolls back cleanly rather
-    than leaving a half-imported file.
+def _validate_row(data, sections_by_key, valid_section_names, seen_texts):
+    """Validate one parsed row. Returns the row dict the Question Validation table renders."""
+    errors, error_fields = [], []
 
-    `force_section` (a QuestionBankSection) files every row into that section and ignores the
-    sheet's own Section column entirely - the upload is launched from inside a section in the
-    UI, so that section is the author's stated intent. Rows that named a different section are
-    still counted and reported back, so "20 imported, 3 of which named another section" is
-    visible rather than silent.
-    """
-    # Keyed by both the internal section_key ("verbal") and the human-readable section_name
-    # ("verbal ability", lowercased) - the template/UI shows section_name everywhere, so a user
-    # typing what they actually see should match just as well as the internal key.
+    def fail(message, field):
+        errors.append(message)
+        error_fields.append(field)
+
+    section_name = (data.get('section_key') or '').strip()
+    section = sections_by_key.get(section_name.lower())
+    if not section_name:
+        fail('Section is required.', 'Section')
+    elif not section:
+        fail(f'Unknown section "{section_name}". Valid sections: {valid_section_names}.',
+             'Section')
+
+    question_text = (data.get('question_text') or '').strip()
+    if not question_text:
+        fail('Question Text is required.', 'Question Text')
+
+    option_a = (data.get('option_a') or '').strip()
+    option_b = (data.get('option_b') or '').strip()
+    option_c = (data.get('option_c') or '').strip()
+    option_d = (data.get('option_d') or '').strip()
+    if not option_a:
+        fail('Option A is required.', 'Option A')
+    if not option_b:
+        fail('Option B is required.', 'Option B')
+
+    correct_option = (data.get('correct_option') or '').strip().upper()
+    if correct_option not in _VALID_OPTIONS:
+        fail('Correct Answer must be A, B, C, or D.', 'Correct Answer')
+    elif correct_option == 'C' and not option_c:
+        fail('Correct Answer is C but Option C is empty.', 'Option C')
+    elif correct_option == 'D' and not option_d:
+        fail('Correct Answer is D but Option D is empty.', 'Option D')
+
+    difficulty = (data.get('difficulty') or '').strip().title()
+    if difficulty not in _VALID_DIFFICULTIES:
+        fail(f'Difficulty must be one of {", ".join(sorted(_VALID_DIFFICULTIES))}.', 'Difficulty')
+
+    marks = None
+    try:
+        marks = int(float(data.get('marks') or 1))
+        if marks < 1:
+            fail('Marks must be 1 or more.', 'Marks')
+    except (TypeError, ValueError):
+        fail('Marks must be a number.', 'Marks')
+
+    # A duplicate is reported separately from a hard validation failure: the row is well-formed,
+    # it just already exists, which reads differently to an administrator deciding what to fix.
+    duplicate_of = None
+    normalized = normalize_question_text(question_text)
+    if question_text and normalized in seen_texts:
+        duplicate_of = seen_texts[normalized]
+        fail(f'Duplicate question - already in the bank as {duplicate_of}.', 'Question Text')
+
+    status = 'valid'
+    if errors:
+        status = 'duplicate' if duplicate_of and len(errors) == 1 else 'invalid'
+
+    return {
+        'row_number': data['row_number'],
+        'section': section_name,
+        'section_name': section.section_name if section else None,
+        'question_text': question_text,
+        'question_type': 'MCQ',
+        'option_a': option_a, 'option_b': option_b,
+        'option_c': option_c, 'option_d': option_d,
+        'correct_option': correct_option,
+        'difficulty': difficulty,
+        'marks': marks,
+        'status': status,
+        'errors': errors,
+        'error_fields': error_fields,
+        'duplicate_of': duplicate_of,
+        'question_code': None,
+        '_section_obj': section,
+        '_normalized': normalized,
+    }
+
+
+def _validation_context():
+    """Section lookup + existing-question index, built once per validation run."""
     sections_by_key = {}
-    for s in QuestionBankSection.objects.all():
-        sections_by_key[s.section_key.lower()] = s
-        sections_by_key[s.section_name.lower()] = s
+    for section_obj in QuestionBankSection.objects.all():
+        # Keyed by both the internal section_key ("verbal") and the human-readable section_name
+        # ("verbal ability"), since the template and UI show the display name everywhere.
+        sections_by_key[section_obj.section_key.lower()] = section_obj
+        sections_by_key[section_obj.section_name.lower()] = section_obj
+    valid_section_names = ', '.join(sorted({s.section_name for s in sections_by_key.values()}))
 
-    # Existing question texts, normalised, loaded once - a per-row query would be one round-trip
-    # each against a remote database. Rows created during this import are added as we go, so a
-    # file that repeats a question inside itself is caught too, not just clashes with the bank.
+    # Existing question texts, normalised, loaded once - a per-row query would be one network
+    # round-trip each. Rows accepted during this run are added as we go, so a file that repeats
+    # a question inside itself is caught too, not just clashes with what's already in the bank.
     seen_texts = {
         normalize_question_text(text): code
         for text, code in Question.objects.values_list('question_text', 'question_code')
     }
+    return sections_by_key, valid_section_names, seen_texts
 
-    created = []
-    errors = []
-    reassigned = []
-    for data in _parse_question_workbook(file_obj):
-        row_number = data['row_number']
-        section_key = (data.get('section_key') or '').strip().lower()
 
-        if force_section is not None:
-            section = force_section
-            # Note rows whose Section cell named something else, so the response can say so.
-            # An empty Section cell isn't worth flagging - there was no intent to override.
-            named = sections_by_key.get(section_key)
-            if section_key and (named is None or named.pk != force_section.pk):
-                reassigned.append({'row': row_number, 'named': data.get('section_key')})
-        else:
-            section = sections_by_key.get(section_key)
-            if not section:
-                errors.append({'row': row_number, 'message': f'Unknown section "{section_key}".'})
-                continue
+def _summarize(rows):
+    return {
+        'total': len(rows),
+        'valid': sum(1 for r in rows if r['status'] == 'valid'),
+        'invalid': sum(1 for r in rows if r['status'] == 'invalid'),
+        'duplicate': sum(1 for r in rows if r['status'] == 'duplicate'),
+    }
 
-        question_text = data.get('question_text') or ''
-        option_a = data.get('option_a') or ''
-        option_b = data.get('option_b') or ''
-        if not question_text or not option_a or not option_b:
-            errors.append({'row': row_number,
-                            'message': 'Question Text, Option A, and Option B are required.'})
-            continue
 
-        normalized = normalize_question_text(question_text)
-        if normalized in seen_texts:
-            errors.append({
-                'row': row_number,
-                'message': f'Duplicate question - already in the bank as {seen_texts[normalized]}.',
-            })
-            continue
+@transaction.atomic
+def validate_question_rows(raw_rows, user=None, dry_run=True):
+    """Same validation as validate_question_workbook, but over rows supplied as JSON rather
+    than parsed from a file.
 
-        correct_option = (data.get('correct_option') or '').strip().upper()
-        if correct_option not in _VALID_OPTIONS:
-            errors.append({'row': row_number, 'message': 'Correct Option must be A, B, C, or D.'})
-            continue
-        option_c = data.get('option_c') or ''
-        option_d = data.get('option_d') or ''
-        if correct_option == 'C' and not option_c:
-            errors.append({'row': row_number, 'message': 'Correct Option is C but Option C is empty.'})
-            continue
-        if correct_option == 'D' and not option_d:
-            errors.append({'row': row_number, 'message': 'Correct Option is D but Option D is empty.'})
-            continue
+    This is what backs per-field editing on the Question Validation screen: the reviewer
+    corrects a section name or a correct-answer letter and the edited rows are sent back here
+    to be re-checked. Import re-validates through this same path, so a row that was edited into
+    an invalid state - or hand-crafted by calling the API directly - still cannot be written.
+    """
+    sections_by_key, valid_section_names, seen_texts = _validation_context()
 
-        difficulty = (data.get('difficulty') or '').strip().title()
-        if difficulty not in _VALID_DIFFICULTIES:
-            errors.append({'row': row_number,
-                            'message': f'Difficulty must be one of {", ".join(sorted(_VALID_DIFFICULTIES))}.'})
-            continue
+    rows = []
+    for index, raw in enumerate(raw_rows, start=2):
+        data = {
+            'row_number': raw.get('row_number') or index,
+            'section_key': raw.get('section') or '',
+            'question_text': raw.get('question_text') or '',
+            'option_a': raw.get('option_a') or '',
+            'option_b': raw.get('option_b') or '',
+            'option_c': raw.get('option_c') or '',
+            'option_d': raw.get('option_d') or '',
+            'correct_option': raw.get('correct_option') or '',
+            'difficulty': raw.get('difficulty') or '',
+            'marks': raw.get('marks') if raw.get('marks') not in (None, '') else '',
+        }
+        rows.append(_process_row(data, sections_by_key, valid_section_names, seen_texts,
+                                 user, dry_run))
+    return rows, _summarize(rows)
 
-        try:
-            marks = int(float(data.get('marks') or 1))
-        except ValueError:
-            errors.append({'row': row_number, 'message': 'Marks must be a number.'})
-            continue
 
+def _process_row(data, sections_by_key, valid_section_names, seen_texts, user, dry_run):
+    """Validate one row and, unless this is a dry run, create it when it passes."""
+    row = _validate_row(data, sections_by_key, valid_section_names, seen_texts)
+
+    if row['status'] == 'valid' and not dry_run:
         question = Question.objects.create(
             question_code=generate_question_code(),
-            section=section,
-            question_text=question_text,
-            option_a=option_a,
-            option_b=option_b,
-            option_c=option_c or None,
-            option_d=option_d or None,
-            correct_option=correct_option,
-            difficulty=difficulty,
-            marks=marks,
+            section=row['_section_obj'],
+            question_text=row['question_text'],
+            option_a=row['option_a'],
+            option_b=row['option_b'],
+            option_c=row['option_c'] or None,
+            option_d=row['option_d'] or None,
+            correct_option=row['correct_option'],
+            difficulty=row['difficulty'],
+            marks=row['marks'],
             status=Question.Status.ACTIVE,
             created_by=user,
         )
-        created.append(question)
-        # Register immediately so a later row repeating this text is caught within the file.
-        seen_texts[normalized] = question.question_code
+        row['question_code'] = question.question_code
 
-    return created, errors, reassigned
+    if row['status'] == 'valid':
+        # Registered even on a dry run, so a later row repeating this text is flagged as an
+        # in-file duplicate exactly as it would be on the real import.
+        seen_texts[row['_normalized']] = row['question_code'] or 'another row in this file'
+
+    row.pop('_section_obj')
+    row.pop('_normalized')
+    return row
+
+
+@transaction.atomic
+def validate_question_workbook(file_obj, user=None, dry_run=True):
+    """Validate every row of an uploaded question workbook, importing the valid ones unless
+    this is a dry run.
+
+    Returns (rows, summary). `rows` is one dict per spreadsheet row carrying the parsed values
+    plus `status` ('valid' | 'invalid' | 'duplicate'), `errors`, and `error_fields` naming the
+    columns at fault - everything the Question Validation table renders. `summary` counts
+    total/valid/invalid/duplicate.
+
+    Section comes from each row's own Section column, so ONE sheet may carry questions for
+    several sections and they're grouped automatically by whatever each row names. An
+    unrecognised section name is a row-level validation error, never a silently-created wrong
+    record.
+
+    Validation is identical for the dry run and the real import - the import re-reads and
+    re-checks the file rather than trusting anything the client sends back, so a tampered
+    payload can't slip an invalid row through.
+    """
+    sections_by_key, valid_section_names, seen_texts = _validation_context()
+    rows = [
+        _process_row(data, sections_by_key, valid_section_names, seen_texts, user, dry_run)
+        for data in _parse_question_workbook(file_obj)
+    ]
+    return rows, _summarize(rows)

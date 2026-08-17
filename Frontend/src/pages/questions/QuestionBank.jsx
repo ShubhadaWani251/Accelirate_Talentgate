@@ -81,17 +81,17 @@ export default function QuestionBank() {
                 section being browsed. Under "All Sections" there's no section to add to - the
                 form used to silently fall back to the first one in the list. */}
             {selectedSection ? (
-              <>
-                <button className="btn primary" style={{ width: 'auto' }} onClick={() => setEditing('new')}>
-                  + Add Question to {selectedSection.section_name}
-                </button>
-                <button className="btn" onClick={() => setBulkUploadOpen(true)}>Bulk Upload (Excel)</button>
-              </>
+              <button className="btn primary" style={{ width: 'auto' }} onClick={() => setEditing('new')}>
+                + Add Question to {selectedSection.section_name}
+              </button>
             ) : (
               <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-                Pick a section on the left to add questions to it.
+                Pick a section on the left to add a single question to it.
               </span>
             )}
+            {/* Bulk upload is section-agnostic: each row is filed by its own Section column,
+                so one sheet can carry questions for several sections at once. */}
+            <button className="btn" onClick={() => setBulkUploadOpen(true)}>Bulk Upload (Excel)</button>
             <button className="btn" onClick={questionApi.downloadQuestionTemplate}>⬇ Download Sample Template</button>
           </div>
 
@@ -174,7 +174,7 @@ export default function QuestionBank() {
       )}
       {bulkUploadOpen && (
         <QuestionBulkUploadModal
-          section={selectedSection}
+          sections={sections}
           onClose={() => setBulkUploadOpen(false)}
           onUploaded={() => refresh(1)}
         />

@@ -6,6 +6,7 @@ import { extractErrorMessage } from '../../utils/passwordSchema';
 export default function UploadStep({ batch, onUploaded }) {
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [headerWarning, setHeaderWarning] = useState(null);
   const inputRef = useRef(null);
 
   function handleDrop(e) {
@@ -23,12 +24,47 @@ export default function UploadStep({ batch, onUploaded }) {
     try {
       const result = await batchApi.uploadCandidates(batch.batch_id, file);
       toast.success(`${result.rows_created} row(s) uploaded (${result.ok_count} OK, ${result.validation_error_count} need attention).`);
+      // A column the sheet doesn't carry imports as blank for every single row, which shows up
+      // on the next screen as "every candidate is missing a name" rather than as one wrong
+      // header cell. Hold here and name the columns instead of letting that happen silently.
+      if (result.missing_columns?.length) {
+        setHeaderWarning(result.missing_columns);
+        return;
+      }
       onUploaded();
     } catch (err) {
       toast.error(extractErrorMessage(err));
     } finally {
       setUploading(false);
     }
+  }
+
+  if (headerWarning) {
+    return (
+      <div className="card">
+        <div className="box-label">Check the column headers</div>
+        <div className="alert error">
+          This sheet has no column for <b>{headerWarning.join(', ')}</b>, so every row was
+          imported with {headerWarning.length > 1 ? 'those fields' : 'that field'} blank.
+          <div style={{ marginTop: 8 }}>
+            Rename the header row to match the template and upload it again, or continue and
+            fill the missing values in row by row on the next screen.
+          </div>
+        </div>
+        <div className="btn-row" style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => batchApi.downloadTemplate().catch(() => toast.error('Could not download the template.'))}
+          >
+            ⬇ Download Template
+          </button>
+          <button className="btn primary" style={{ width: 'auto' }} onClick={onUploaded}>
+            Continue to Validation
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (

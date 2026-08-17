@@ -339,3 +339,11 @@ table.data-table tbody tr:hover td { background: var(--accent-soft); }
 /* "No history found" state inside the candidate History modal, per the wireframe. */
 .hist-empty { text-align: center; padding: 22px 6px; color: var(--muted); font-size: 12.5px; }
 .hist-empty .hist-icon { font-size: 22px; margin-bottom: 6px; }
+
+/* Validation tables: tint the specific cell whose column the server flagged, so a reviewer can
+   see WHICH field is wrong without reading the error text on every row. */
+.data-table td.cell-error {
+  background: var(--red-bg);
+  color: var(--brand-red-dark);
+  font-weight: 600;
+}

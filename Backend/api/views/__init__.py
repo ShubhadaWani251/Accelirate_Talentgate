@@ -17,8 +17,10 @@ from .batches import (
     BatchTemplateDownloadView,
     BatchUploadView,
     BatchCandidatesStagingView,
+    BatchCandidateRowView,
     BatchCandidateDeleteView,
     BatchCandidateClearDuplicateView,
+    BatchValidationReportView,
     BatchFinalizeView,
     BatchSendInvitesView,
 )
@@ -40,6 +42,7 @@ from .questions import (
     QuestionDetailView,
     QuestionTemplateDownloadView,
     QuestionBulkUploadView,
+    QuestionRowValidationView,
 )
 from .users import UserListCreateView, UserDetailView
 
@@ -50,13 +53,14 @@ __all__ = [
     'ChangePasswordView', 'MeView',
     'BatchListCreateView', 'BatchDetailView', 'BatchDeactivateView', 'BatchDefaultsView',
     'BatchTemplateDownloadView',
-    'BatchUploadView', 'BatchCandidatesStagingView', 'BatchCandidateDeleteView',
-    'BatchCandidateClearDuplicateView', 'BatchFinalizeView', 'BatchSendInvitesView',
+    'BatchUploadView', 'BatchCandidatesStagingView', 'BatchCandidateRowView',
+    'BatchCandidateDeleteView', 'BatchCandidateClearDuplicateView',
+    'BatchValidationReportView', 'BatchFinalizeView', 'BatchSendInvitesView',
     'CandidateListView', 'CandidateDetailView', 'CandidateHistoryView', 'CandidateResendInviteView',
     'CandidateNotifyView', 'CandidateCertificationView', 'NotificationTemplateListView',
     'CandidateExportView',
     'CandidateEvidenceZipView', 'DashboardSummaryView',
     'QuestionSectionListView', 'QuestionListCreateView', 'QuestionDetailView',
-    'QuestionTemplateDownloadView', 'QuestionBulkUploadView',
+    'QuestionTemplateDownloadView', 'QuestionBulkUploadView', 'QuestionRowValidationView',
     'UserListCreateView', 'UserDetailView',
 ]

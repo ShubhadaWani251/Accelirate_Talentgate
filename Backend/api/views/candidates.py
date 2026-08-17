@@ -35,6 +35,7 @@ from api.services.email_templates import (
 )
 from api.services.excel_upload import generate_candidates_workbook
 from api.services.invites import (
+    BatchNotInvitableError,
     create_single_reinvite, partition_by_deliverable, send_invites_async, send_notification_emails,
 )
 from api.utils.net import ratelimit_user_key
@@ -200,11 +201,12 @@ class CandidateResendInviteView(APIView):
 
     def post(self, request, candidate_id):
         candidate = _get_candidate_or_404(request.user, candidate_id)
-        if candidate.batch.status == Batch.Status.DRAFT:
-            return Response({'detail': 'Finalize this batch before sending invites.'},
-                             status=status.HTTP_400_BAD_REQUEST)
-
-        invitation = create_single_reinvite(candidate, request.user)
+        # Draft and Cancelled both block sending; the service is the authority on which
+        # statuses may invite and on the wording, so it isn't restated here.
+        try:
+            invitation = create_single_reinvite(candidate, request.user)
+        except BatchNotInvitableError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         send_invites_async([invitation], settings.FRONTEND_ORIGIN)
         log_action(request, request.user, 'invite_sent', 'candidate', candidate.candidate_id,
                    details={'re_invite': True})

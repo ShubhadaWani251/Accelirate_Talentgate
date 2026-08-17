@@ -15,7 +15,11 @@ from api.pagination import StandardResultsPagination
 from api.permissions import IsAdmin
 from api.serializers.question import QuestionBankSectionSerializer, QuestionSerializer
 from api.services.audit import log_action
-from api.services.question_bank import generate_question_template_workbook, import_questions_from_workbook
+from api.services.question_bank import (
+    generate_question_template_workbook,
+    validate_question_rows,
+    validate_question_workbook,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +103,50 @@ class QuestionTemplateDownloadView(APIView):
         return response
 
 
+class QuestionRowValidationView(APIView):
+    """Re-validate (and optionally import) rows edited on the Question Validation screen.
+
+    Backs per-field correction: the reviewer fixes a bad section name or correct-answer letter
+    and the edited rows come back here rather than forcing a spreadsheet re-upload. Import runs
+    the identical validation, so a row edited into an invalid state - or posted directly to the
+    API - still cannot be written to the bank.
+    """
+    permission_classes = [IsAdmin]
+
+    def post(self, request):
+        raw_rows = request.data.get('rows')
+        if not isinstance(raw_rows, list) or not raw_rows:
+            return Response({'detail': 'rows must be a non-empty list.'},
+                             status=status.HTTP_400_BAD_REQUEST)
+
+        validate_only = bool(request.data.get('validate_only', True))
+        rows, summary = validate_question_rows(raw_rows, user=request.user, dry_run=validate_only)
+
+        if not validate_only and summary['valid'] == 0:
+            return Response({'detail': 'No valid questions to import.'},
+                             status=status.HTTP_400_BAD_REQUEST)
+
+        by_section = {}
+        for row in rows:
+            if row['status'] == 'valid':
+                by_section[row['section_name']] = by_section.get(row['section_name'], 0) + 1
+
+        if not validate_only:
+            log_action(request, request.user, 'bulk_upload', 'question', 0,
+                       details={'created_count': summary['valid'],
+                                'invalid_count': summary['invalid'],
+                                'duplicate_count': summary['duplicate'],
+                                'sections': by_section, 'source': 'edited_rows'})
+
+        return Response({
+            'validate_only': validate_only,
+            'summary': summary,
+            'rows': rows,
+            'by_section': by_section,
+            'created_count': 0 if validate_only else summary['valid'],
+        }, status=status.HTTP_200_OK if validate_only else status.HTTP_201_CREATED)
+
+
 class QuestionBulkUploadView(APIView):
     permission_classes = [IsAdmin]
     parser_classes = [MultiPartParser]
@@ -119,19 +167,14 @@ class QuestionBulkUploadView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # The upload is launched from inside a section, so that section wins over whatever the
-        # sheet's Section column says - see import_questions_from_workbook's force_section.
-        force_section = None
-        section_key = (request.data.get('section') or '').strip()
-        if section_key:
-            force_section = QuestionBankSection.objects.filter(section_key__iexact=section_key).first()
-            if not force_section:
-                return Response({'detail': f'Unknown section "{section_key}".'},
-                                 status=status.HTTP_400_BAD_REQUEST)
+        # Two-phase: the UI validates first (validate_only=true) and shows the results table,
+        # then imports the same file. The import re-reads and re-validates from scratch rather
+        # than trusting the reviewed payload, so nothing invalid can be posted back in.
+        validate_only = str(request.data.get('validate_only', '')).lower() in ('1', 'true', 'yes')
 
         try:
-            created, errors, reassigned = import_questions_from_workbook(
-                upload, request.user, force_section=force_section,
+            rows, summary = validate_question_workbook(
+                upload, user=request.user, dry_run=validate_only,
             )
         except (zipfile.BadZipFile, InvalidFileException, KeyError, DataError):
             logger.exception('Failed to parse uploaded question workbook')
@@ -140,19 +183,28 @@ class QuestionBulkUploadView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if not created and not errors:
-            return Response({'detail': 'No data rows found in that file.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not rows:
+            return Response({'detail': 'No data rows found in that file.'},
+                             status=status.HTTP_400_BAD_REQUEST)
 
-        log_action(request, request.user, 'bulk_upload', 'question', 0,
-                   details={'created_count': len(created), 'error_count': len(errors),
-                            'forced_section': force_section.section_key if force_section else None,
-                            'reassigned_count': len(reassigned)})
+        # Section counts let the UI show what a multi-section sheet actually resolved to, so a
+        # misfiled row is obvious before anything is written.
+        by_section = {}
+        for row in rows:
+            if row['status'] == 'valid':
+                by_section[row['section_name']] = by_section.get(row['section_name'], 0) + 1
+
+        if not validate_only:
+            log_action(request, request.user, 'bulk_upload', 'question', 0,
+                       details={'created_count': summary['valid'],
+                                'invalid_count': summary['invalid'],
+                                'duplicate_count': summary['duplicate'],
+                                'sections': by_section})
 
         return Response({
-            'created_count': len(created),
-            'error_count': len(errors),
-            'errors': errors,
-            'section_name': force_section.section_name if force_section else None,
-            'reassigned_count': len(reassigned),
-            'reassigned': reassigned,
-        }, status=status.HTTP_201_CREATED)
+            'validate_only': validate_only,
+            'summary': summary,
+            'rows': rows,
+            'by_section': by_section,
+            'created_count': 0 if validate_only else summary['valid'],
+        }, status=status.HTTP_200_OK if validate_only else status.HTTP_201_CREATED)

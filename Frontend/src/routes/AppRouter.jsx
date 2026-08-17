@@ -73,6 +73,8 @@ export default function AppRouter() {
           {/* Shared between Admin and TA - same page/component per the wireframe's design intent */}
           <Route path="/batches" element={<BatchList />} />
           <Route path="/batches/new" element={<BatchWizard />} />
+          {/* Resuming an unfinished draft - the wizard, not Batch Details. */}
+          <Route path="/batches/:id/continue" element={<BatchWizard />} />
           <Route path="/batches/:id" element={<BatchDetail />} />
           <Route path="/candidates" element={<AllCandidates />} />
           <Route path="/candidates/:id" element={<CandidateDetail />} />

@@ -96,13 +96,22 @@ class BatchDefaultsSerializer(serializers.Serializer):
 
 
 class CandidateStagingSerializer(serializers.ModelSerializer):
-    """One row in the Upload Review table."""
+    """One row in the Upload Review table.
+
+    Carries the editable template fields as well as the display ones, because each row can be
+    corrected in place on this screen rather than by fixing the spreadsheet and re-uploading.
+    The one exception is Aadhaar: it stays masked here exactly as it is everywhere else, and
+    the edit form takes a fresh full number instead of round-tripping the real one to the
+    browser.
+    """
     full_name = serializers.CharField(read_only=True)
     aadhaar_masked = serializers.SerializerMethodField()
     validation_status_display = serializers.CharField(source='get_validation_status_display', read_only=True)
     duplicate_status = serializers.SerializerMethodField()
     duplicate_status_display = serializers.SerializerMethodField()
     last_attempt = serializers.SerializerMethodField()
+    errors = serializers.SerializerMethodField()
+    error_fields = serializers.SerializerMethodField()
 
     class Meta:
         model = Candidate
@@ -110,10 +119,20 @@ class CandidateStagingSerializer(serializers.ModelSerializer):
             'candidate_id', 'upload_row_number', 'full_name', 'email', 'aadhaar_masked',
             'validation_status', 'validation_status_display',
             'duplicate_status', 'duplicate_status_display', 'last_attempt',
+            'errors', 'error_fields',
+            # Editable template fields, for the in-place edit form.
+            'first_name', 'last_name', 'phone', 'college_name', 'degree', 'stream',
+            'percentage', 'passing_out_year', 'location',
         ]
 
     def get_aadhaar_masked(self, candidate):
         return mask_aadhaar(candidate.aadhaar_number)
+
+    def get_errors(self, candidate):
+        return [e['message'] for e in (candidate.validation_errors or [])]
+
+    def get_error_fields(self, candidate):
+        return [e['field'] for e in (candidate.validation_errors or [])]
 
     def _latest_check(self, candidate):
         """Most recent duplicate check for this candidate.

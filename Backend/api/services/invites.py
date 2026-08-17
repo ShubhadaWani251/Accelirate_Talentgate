@@ -7,10 +7,41 @@ from django.core.mail import send_mail
 from django.db import connections
 from django.utils import timezone
 
-from api.models import Candidate, Invitation
+from api.models import Batch, Candidate, Invitation
 from api.services.email_errors import EMAIL_SEND_ERRORS
 
 logger = logging.getLogger(__name__)
+
+
+class BatchNotInvitableError(Exception):
+    """A batch's status forbids issuing invitations. Carries the message shown to the user."""
+
+
+# Only a live batch may issue invitations. A Draft hasn't been activated yet, and a Cancelled
+# batch is closed - both stay fully visible and readable, they just can't send.
+INVITE_BLOCKED_REASONS = {
+    Batch.Status.DRAFT: (
+        'This batch is currently in Draft status. Candidates can be validated, but invitations '
+        'cannot be sent until the batch is activated.'
+    ),
+    Batch.Status.CANCELLED: (
+        'This batch has been cancelled. New candidates cannot be processed or invited for this '
+        'batch.'
+    ),
+}
+
+
+def assert_batch_can_invite(batch):
+    """Raise BatchNotInvitableError if this batch's status forbids sending invitations.
+
+    Enforced here rather than only in the views because this module is the single place
+    Invitation rows are created. Per-view checks had already drifted once - the re-invite
+    endpoint blocked Draft but not Cancelled, so a closed batch could still email a fresh
+    assessment link. Guarding the choke point means a new caller cannot reintroduce that gap.
+    """
+    reason = INVITE_BLOCKED_REASONS.get(batch.status)
+    if reason:
+        raise BatchNotInvitableError(reason)
 
 
 def _generate_token():
@@ -25,7 +56,10 @@ def create_invitations(batch, user, candidate_ids=None):
 
     `candidate_ids` narrows this to an explicit subset - the reviewer's checkbox selection on
     the upload screen. Omit it to invite every still-pending candidate on the batch.
+
+    Raises BatchNotInvitableError if the batch is Draft or Cancelled.
     """
+    assert_batch_can_invite(batch)
     invitations = []
     candidates = batch.candidate_set.filter(
         status=Candidate.Status.PENDING_INVITE,
@@ -53,7 +87,10 @@ def create_single_reinvite(candidate, user):
     (e.g. "Send Invite Again" from All Candidates / Candidate Details). Unlike
     create_invitations, this doesn't touch candidate.status - a re-invite doesn't change
     where the candidate is in the pipeline, it just gives them a new link/token.
+
+    Raises BatchNotInvitableError if the candidate's batch is Draft or Cancelled.
     """
+    assert_batch_can_invite(candidate.batch)
     return Invitation.objects.create(
         candidate=candidate,
         batch=candidate.batch,

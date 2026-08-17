@@ -1,13 +1,10 @@
 import { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Navigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import * as batchApi from '../../api/batchApi';
 import * as candidateApi from '../../api/candidateApi';
 import ConfigureBatchStep from '../../features/batches/ConfigureBatchStep';
 import DeactivateBatchModal from '../../features/batches/DeactivateBatchModal';
-import UploadStep from '../../features/batches/UploadStep';
-import ReviewStep from '../../features/batches/ReviewStep';
-import InviteConfirmationStep from '../../features/batches/InviteConfirmationStep';
 import CandidateFilters, { EMPTY_CANDIDATE_FILTERS } from '../../features/candidates/CandidateFilters';
 import CandidateTable from '../../features/candidates/CandidateTable';
 import EditCandidateModal from '../../features/candidates/EditCandidateModal';
@@ -23,7 +20,6 @@ const STATUS_PILL = { draft: 'gray', in_progress: 'blue', completed: 'green', ca
 export default function BatchDetail() {
   const { id } = useParams();
   const [batch, setBatch] = useState(null);
-  const [finalizeSummary, setFinalizeSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [deactivateOpen, setDeactivateOpen] = useState(false);
   const [inviteConfirmOpen, setInviteConfirmOpen] = useState(false);
@@ -106,7 +102,11 @@ export default function BatchDetail() {
 
   if (loading || !batch) return <div>Loading…</div>;
 
-  const isDraft = batch.status === 'draft';
+  // A draft has no candidates, no results and no invites - every panel on this page would be
+  // empty or zero. It's an unfinished upload, so it belongs in the wizard, resumed at whatever
+  // step is still outstanding. This also covers arriving here by typing the URL directly.
+  if (batch.status === 'draft') return <Navigate to={`/batches/${id}/continue`} replace />;
+
   const isCancelled = batch.status === 'cancelled';
 
   return (
@@ -123,8 +123,9 @@ export default function BatchDetail() {
 
       {isCancelled && (
         <div className="alert error">
-          This batch is deactivated. Its candidates and results remain available, but no further
-          invites can be sent and its configuration is locked.
+          This batch has been cancelled. New candidates cannot be processed or invited for this
+          batch. Its existing candidates and results remain available for reference, but its
+          configuration is locked.
         </div>
       )}
 
@@ -136,87 +137,70 @@ export default function BatchDetail() {
       </div>
 
       {/* Wireframe order for this screen is Filters, then Configure Batch, then the candidate
-          table. A draft batch has no candidates to filter yet, so the filter box only appears
-          once the batch is finalized. */}
-      {!isDraft && (
-        <CandidateFilters
-          filters={filters}
-          onChange={setFilters}
-          batches={[]}
-          onApply={() => refreshCandidates(filters, 1)}
-          onClear={() => { setFilters(EMPTY_CANDIDATE_FILTERS); refreshCandidates(EMPTY_CANDIDATE_FILTERS, 1); }}
-          showBatchFilter={false}
-        />
-      )}
+          table. Only finalized batches reach this page - a draft is redirected to the upload
+          wizard above - so all three are always shown. */}
+      <CandidateFilters
+        filters={filters}
+        onChange={setFilters}
+        batches={[]}
+        onApply={() => refreshCandidates(filters, 1)}
+        onClear={() => { setFilters(EMPTY_CANDIDATE_FILTERS); refreshCandidates(EMPTY_CANDIDATE_FILTERS, 1); }}
+        showBatchFilter={false}
+      />
 
+      {/* Read-only: the configuration was locked the moment the batch left Draft, since
+          changing question counts or cutoffs mid-flight would corrupt an exam in progress. */}
       <ConfigureBatchStep
         existingBatch={batch}
         onCreated={(updated) => setBatch(updated)}
-        readOnly={!isDraft}
+        readOnly
         locked={isCancelled}
       />
 
-      {isDraft && !finalizeSummary ? (
-        <>
-          <UploadStep batch={batch} onUploaded={refresh} />
-          <ReviewStep batch={batch} onFinalized={setFinalizeSummary} />
-        </>
-      ) : isDraft ? null : (
-        <>
-          <CandidateTable
-            candidates={candidates}
-            loading={candidatesLoading}
-            selected={selected}
-            onToggleRow={toggleRow}
-            onToggleSelectAll={toggleSelectAll}
-            onEdit={setEditingCandidate}
-            onOpenNotify={() => setNotifyOpen(true)}
-            onOpenCertification={() => setCertificationOpen(true)}
-            onOpenInvite={() => setInviteConfirmOpen(true)}
-            onOpenExport={() => setExportOpen(true)}
-          />
+      <CandidateTable
+        candidates={candidates}
+        loading={candidatesLoading}
+        selected={selected}
+        onToggleRow={toggleRow}
+        onToggleSelectAll={toggleSelectAll}
+        onEdit={setEditingCandidate}
+        onOpenNotify={() => setNotifyOpen(true)}
+        onOpenCertification={() => setCertificationOpen(true)}
+        onOpenInvite={() => setInviteConfirmOpen(true)}
+        onOpenExport={() => setExportOpen(true)}
+      />
 
-          <PaginationControls
-            page={page}
-            count={pageMeta.count}
-            hasPrevious={Boolean(pageMeta.previous)}
-            hasNext={Boolean(pageMeta.next)}
-            onPrev={() => refreshCandidates(filters, page - 1)}
-            onNext={() => refreshCandidates(filters, page + 1)}
-          />
+      <PaginationControls
+        page={page}
+        count={pageMeta.count}
+        hasPrevious={Boolean(pageMeta.previous)}
+        hasNext={Boolean(pageMeta.next)}
+        onPrev={() => refreshCandidates(filters, page - 1)}
+        onNext={() => refreshCandidates(filters, page + 1)}
+      />
 
-          {editingCandidate && (
-            <EditCandidateModal
-              candidate={editingCandidate}
-              onClose={() => setEditingCandidate(null)}
-              onSaved={() => { setEditingCandidate(null); refreshCandidates(); }}
-            />
-          )}
-          {certificationOpen && (
-            <CertificationModal
-              candidateIds={Array.from(selected)}
-              onClose={() => setCertificationOpen(false)}
-              onSent={() => { setCertificationOpen(false); setSelected(new Set()); }}
-            />
-          )}
-          {notifyOpen && (
-            <NotifyModal
-              candidateIds={Array.from(selected)}
-              onClose={() => setNotifyOpen(false)}
-              onSent={() => { setNotifyOpen(false); setSelected(new Set()); }}
-            />
-          )}
-          {exportOpen && <ExportModal onClose={() => setExportOpen(false)} batchId={batch.batch_id} />}
-        </>
-      )}
-
-      {finalizeSummary && (
-        <InviteConfirmationStep
-          summary={finalizeSummary}
-          onBack={() => setFinalizeSummary(null)}
-          onSent={() => { setFinalizeSummary(null); refresh(); refreshCandidates(); }}
+      {editingCandidate && (
+        <EditCandidateModal
+          candidate={editingCandidate}
+          onClose={() => setEditingCandidate(null)}
+          onSaved={() => { setEditingCandidate(null); refreshCandidates(); }}
         />
       )}
+      {certificationOpen && (
+        <CertificationModal
+          candidateIds={Array.from(selected)}
+          onClose={() => setCertificationOpen(false)}
+          onSent={() => { setCertificationOpen(false); setSelected(new Set()); }}
+        />
+      )}
+      {notifyOpen && (
+        <NotifyModal
+          candidateIds={Array.from(selected)}
+          onClose={() => setNotifyOpen(false)}
+          onSent={() => { setNotifyOpen(false); setSelected(new Set()); }}
+        />
+      )}
+      {exportOpen && <ExportModal onClose={() => setExportOpen(false)} batchId={batch.batch_id} />}
 
       {inviteConfirmOpen && (
         <ConfirmModal

@@ -6,6 +6,7 @@ from api.models import Batch, Candidate, Question, QuestionBankSection, User
 from api.serializers.batch import annotate_batch_counts
 from api.serializers.question import normalize_question_text
 from api.services.access import visible_candidates_qs
+from api.services.batch_status_filter import filter_batches_by_status_group
 
 
 def _batches_qs_for(user):
@@ -29,12 +30,19 @@ def _build_stats(batches_qs, candidates_qs):
     }
 
 
-def _build_batches_overview(batches_qs, is_admin):
-    # Deactivated batches sink to the bottom rather than being hidden - they still hold real
-    # candidates and results a TA may need to look up, but they're not live work, so they
-    # shouldn't push active batches down the list.
+def _build_batches_overview(batches_qs, is_admin, status_group='active'):
+    # Filtered by the unified Batch Status control - 'active' (In Progress + Completed) by
+    # default, so an unfinished Draft upload or a deactivated batch don't sit in the normal
+    # view reporting zero candidates and zero results. Both remain fully visible by
+    # switching the filter (see filter_batches_by_status_group) - nothing here is hidden
+    # outright, only excluded from the default view.
+    #
+    # When the group mixes statuses together (status_group='all'), cancelled batches still
+    # sink to the bottom rather than interleaving with active ones by date - they're not live
+    # work even though they're shown.
     qs = annotate_batch_counts(
-        batches_qs.select_related('primary_ta_user')
+        filter_batches_by_status_group(batches_qs, status_group)
+        .select_related('primary_ta_user')
         .annotate(is_cancelled=Case(
             When(status=Batch.Status.CANCELLED, then=Value(1)),
             default=Value(0), output_field=IntegerField(),
@@ -104,9 +112,14 @@ def _build_ta_accounts():
     ]
 
 
-def build_dashboard_summary(user):
+def build_dashboard_summary(user, batch_status='active'):
     """Shapes the /api/dashboard/ response: stat cards + batches overview for every caller,
     plus question-bank-health and TA-account summaries for admins only.
+
+    `batch_status` (the dashboard's unified Batch Status filter - active/draft/cancelled/all)
+    only scopes the batches_overview table, not the stat cards above it: "Active Batches",
+    "Total Candidates" etc. describe the org's overall state and shouldn't change just because
+    the reviewer is looking at the Draft or Cancelled list underneath.
     """
     is_admin = user.role.role_code == 'admin'
     batches_qs = _batches_qs_for(user)
@@ -114,7 +127,8 @@ def build_dashboard_summary(user):
 
     response = {
         'stats': _build_stats(batches_qs, candidates_qs),
-        'batches_overview': _build_batches_overview(batches_qs, is_admin),
+        'batches_overview': _build_batches_overview(batches_qs, is_admin, batch_status),
+        'batch_status_group': (batch_status or 'active').strip().lower(),
     }
     if is_admin:
         response['question_bank_health'] = _build_question_bank_health()

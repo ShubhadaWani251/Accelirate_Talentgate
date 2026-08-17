@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import * as userApi from '../../api/userApi';
-import DeleteUserModal from '../../features/users/DeleteUserModal';
+import DeactivateUserModal from '../../features/users/DeactivateUserModal';
 import PaginationControls from '../../components/common/PaginationControls';
 import { extractErrorMessage } from '../../utils/passwordSchema';
 
@@ -15,7 +15,7 @@ export default function UserManagement() {
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({ first_name: '', last_name: '', email: '', role: 'ta' });
   const [creating, setCreating] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deactivateTarget, setDeactivateTarget] = useState(null);
 
   async function refresh(p = page) {
     setLoading(true);
@@ -110,8 +110,8 @@ export default function UserManagement() {
                   <td><span className={`pill ${u.is_active ? 'green' : 'gray'}`}>{u.is_active ? 'Active' : 'Inactive'}</span></td>
                   <td style={{ display: 'flex', gap: 12 }}>
                     <Link to={`/admin/users/${u.user_id}`} className="link-text">Edit access</Link>
-                    <button className="link-text" style={{ color: 'var(--brand-red)' }} onClick={() => setDeleteTarget(u)}>
-                      Delete
+                    <button className="link-text" style={{ color: 'var(--brand-red)' }} onClick={() => setDeactivateTarget(u)}>
+                      Deactivate
                     </button>
                   </td>
                 </tr>
@@ -130,11 +130,11 @@ export default function UserManagement() {
         onNext={() => refresh(page + 1)}
       />
 
-      {deleteTarget && (
-        <DeleteUserModal
-          user={deleteTarget}
-          onClose={() => setDeleteTarget(null)}
-          onDeleted={() => { setDeleteTarget(null); refresh(); }}
+      {deactivateTarget && (
+        <DeactivateUserModal
+          user={deactivateTarget}
+          onClose={() => setDeactivateTarget(null)}
+          onDeactivated={() => { setDeactivateTarget(null); refresh(); }}
         />
       )}
     </div>
