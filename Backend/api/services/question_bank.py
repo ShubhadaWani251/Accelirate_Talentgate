@@ -30,6 +30,10 @@ _HEADER_MAP = {
 _VALID_DIFFICULTIES = {c[0] for c in Question.Difficulty.choices}
 _VALID_OPTIONS = {'A', 'B', 'C', 'D'}
 
+# Sentinel used in the seen-texts index for a question first seen in THIS upload rather than
+# already in the bank - the two cases read differently to the reviewer.
+_REPEATED_IN_FILE = '__repeated_in_file__'
+
 
 _SAMPLE_ROWS = {
     'logical': [
@@ -198,11 +202,19 @@ def _validate_row(data, sections_by_key, valid_section_names, seen_texts):
 
     # A duplicate is reported separately from a hard validation failure: the row is well-formed,
     # it just already exists, which reads differently to an administrator deciding what to fix.
+    #
+    # Only ONE copy is ever imported. The first occurrence stays valid and is written; every
+    # later copy lands here and is skipped, so a sheet listing the same question twice adds it
+    # once. The message distinguishes the two cases, because "repeated inside this file" needs
+    # no action from the reviewer while "already in the bank" might.
     duplicate_of = None
     normalized = normalize_question_text(question_text)
     if question_text and normalized in seen_texts:
         duplicate_of = seen_texts[normalized]
-        fail(f'Duplicate question - already in the bank as {duplicate_of}.', 'Question Text')
+        if duplicate_of == _REPEATED_IN_FILE:
+            fail('Repeated in this file - only the first copy is imported.', 'Question Text')
+        else:
+            fail(f'Duplicate question - already in the bank as {duplicate_of}.', 'Question Text')
 
     status = 'valid'
     if errors:
@@ -318,8 +330,9 @@ def _process_row(data, sections_by_key, valid_section_names, seen_texts, user, d
 
     if row['status'] == 'valid':
         # Registered even on a dry run, so a later row repeating this text is flagged as an
-        # in-file duplicate exactly as it would be on the real import.
-        seen_texts[row['_normalized']] = row['question_code'] or 'another row in this file'
+        # in-file duplicate exactly as it would be on the real import - and, because only
+        # this first copy is registered, only this one is ever written.
+        seen_texts[row['_normalized']] = row['question_code'] or _REPEATED_IN_FILE
 
     row.pop('_section_obj')
     row.pop('_normalized')

@@ -80,7 +80,7 @@ export default function QuestionBank() {
                 section being browsed. Under "All Sections" there's no section to add to - the
                 form used to silently fall back to the first one in the list. */}
             {selectedSection ? (
-              <button className="btn primary" style={{ width: 'auto' }} onClick={() => setEditing('new')}>
+              <button className="btn primary" onClick={() => setEditing('new')}>
                 + Add Question to {selectedSection.section_name}
               </button>
             ) : (
@@ -92,7 +92,7 @@ export default function QuestionBank() {
                 so one sheet can carry questions for several sections at once. Its own page
                 rather than a modal - the validation table it leads to is far too wide for one. */}
             <Link to="/admin/question-bank/upload" className="btn"
-                  style={{ width: 'auto', textDecoration: 'none' }}>
+                 >
               Bulk Upload (Excel)
             </Link>
             <button className="btn" onClick={questionApi.downloadQuestionTemplate}>⬇ Download Sample Template</button>

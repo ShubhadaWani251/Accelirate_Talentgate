@@ -24,6 +24,13 @@ export default function UploadStep({ batch, onUploaded }) {
     try {
       const result = await batchApi.uploadCandidates(batch.batch_id, file);
       toast.success(`${result.rows_created} row(s) uploaded (${result.ok_count} OK, ${result.validation_error_count} need attention).`);
+      // Repeated entries collapse to one. Say so rather than leaving the reviewer to wonder
+      // why a 40-row sheet became 38 candidates.
+      if (result.skipped_duplicates?.length) {
+        const n = result.skipped_duplicates.length;
+        toast(`${n} repeated ${n === 1 ? 'entry' : 'entries'} skipped — only one row per `
+              + 'candidate was kept.', { duration: 6000, icon: 'ℹ️' });
+      }
       // A column the sheet doesn't carry imports as blank for every single row, which shows up
       // on the next screen as "every candidate is missing a name" rather than as one wrong
       // header cell. Hold here and name the columns instead of letting that happen silently.
@@ -59,7 +66,7 @@ export default function UploadStep({ batch, onUploaded }) {
           >
             ⬇ Download Template
           </button>
-          <button className="btn primary" style={{ width: 'auto' }} onClick={onUploaded}>
+          <button className="btn primary" onClick={onUploaded}>
             Continue to Validation
           </button>
         </div>
@@ -98,7 +105,7 @@ export default function UploadStep({ batch, onUploaded }) {
         >
           ⬇ Download Template
         </button>
-        <button className="btn primary" style={{ width: 'auto' }} onClick={handleUpload} disabled={uploading}>
+        <button className="btn primary" onClick={handleUpload} disabled={uploading}>
           {uploading ? 'Uploading…' : 'Review & Upload'}
         </button>
       </div>

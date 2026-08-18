@@ -4,15 +4,19 @@ import toast from 'react-hot-toast';
 import * as batchApi from '../../api/batchApi';
 import ConfigureBatchStep from './ConfigureBatchStep';
 import UploadStep from './UploadStep';
+import FixErrorsStep from './FixErrorsStep';
 import ReviewStep from './ReviewStep';
 import InviteConfirmationStep from './InviteConfirmationStep';
 import { extractErrorMessage } from '../../utils/passwordSchema';
 
+// Validation and review are separate steps on purpose: step 3 lists only the rows that failed
+// and is finished when that list is empty, which is what lets step 4 drop its Validation column.
 const STEPS = [
   { key: 'configure', label: '1. Configure Batch' },
   { key: 'upload', label: '2. Upload Excel' },
-  { key: 'review', label: '3. Validate Candidates' },
-  { key: 'invite', label: '4. Send Invite' },
+  { key: 'validate', label: '3. Validate Candidates' },
+  { key: 'review', label: '4. Upload Review' },
+  { key: 'invite', label: '5. Send Invite' },
 ];
 
 // Serves two routes:
@@ -45,7 +49,7 @@ export default function BatchWizard() {
         setBatch(existing);
         // Resume at the first step that still has work: if candidates were uploaded before
         // this draft was abandoned, they're waiting to be validated.
-        setStepKey(existing.total_candidates > 0 ? 'review' : 'upload');
+        setStepKey(existing.total_candidates > 0 ? 'validate' : 'upload');
       } catch (err) {
         if (!cancelled) {
           toast.error(extractErrorMessage(err));
@@ -90,7 +94,7 @@ export default function BatchWizard() {
 
       {/* A resumed draft can still have its configuration corrected - it's a draft, nothing is
           committed. A brand-new one has just come through this step, so it isn't shown twice. */}
-      {id && batch && (stepKey === 'upload' || stepKey === 'review') && (
+      {id && batch && stepKey !== 'invite' && (
         <ConfigureBatchStep existingBatch={batch} onCreated={setBatch} />
       )}
 
@@ -102,19 +106,30 @@ export default function BatchWizard() {
               // Re-read the batch so the review step sees the new candidate count.
               try {
                 setBatch(await batchApi.getBatch(batch.batch_id));
-              } catch { /* the review step refetches its own rows regardless */ }
-              setStepKey('review');
+              } catch { /* the validate step refetches its own rows regardless */ }
+              setStepKey('validate');
             }}
           />
           {/* A resumed draft may already hold rows from an earlier upload - always offer the
               way forward rather than making another upload the only exit from this step. */}
           {id && (
             <div className="btn-row" style={{ marginTop: 12 }}>
-              <button className="btn" onClick={() => setStepKey('review')}>
+              <button className="btn" onClick={() => setStepKey('validate')}>
                 Skip upload — validate the candidates already on this batch →
               </button>
             </div>
           )}
+        </>
+      )}
+
+      {stepKey === 'validate' && batch && (
+        <>
+          <FixErrorsStep batch={batch} onDone={() => setStepKey('review')} />
+          <div className="btn-row" style={{ marginTop: 12 }}>
+            <button className="btn" onClick={() => setStepKey('upload')}>
+              ← Upload another file
+            </button>
+          </div>
         </>
       )}
 
@@ -128,8 +143,8 @@ export default function BatchWizard() {
             }}
           />
           <div className="btn-row" style={{ marginTop: 12 }}>
-            <button className="btn" onClick={() => setStepKey('upload')}>
-              ← Upload another file
+            <button className="btn" onClick={() => setStepKey('validate')}>
+              ← Back to validation
             </button>
           </div>
         </>

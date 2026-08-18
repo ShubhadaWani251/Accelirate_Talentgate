@@ -16,8 +16,7 @@ export default function BatchStatusFilter({ value, onChange }) {
         <button
           key={o.value}
           type="button"
-          className={value === o.value ? 'btn primary' : 'btn'}
-          style={{ width: 'auto', padding: '6px 14px' }}
+          className={`btn small ${value === o.value ? 'primary' : ''}`}
           onClick={() => onChange(o.value)}
         >
           {o.label}

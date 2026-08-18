@@ -73,7 +73,7 @@ export default function EditCandidateModal({ candidate, onClose, onSaved }) {
           <div className="btn-row" style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
             <button className="btn" onClick={onClose}>Cancel</button>
             <button className="btn" onClick={() => setResendConfirming(true)}>📧 Send Invite Again</button>
-            <button className="btn primary" style={{ width: 'auto' }} onClick={handleSave} disabled={saving}>
+            <button className="btn primary" onClick={handleSave} disabled={saving}>
               {saving ? 'Saving…' : '💾 Save'}
             </button>
           </div>
@@ -87,7 +87,7 @@ export default function EditCandidateModal({ candidate, onClose, onSaved }) {
             <p>This will re-send the assessment invite link to {candidate.email}. Continue?</p>
             <div className="btn-row" style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
               <button className="btn" onClick={() => setResendConfirming(false)}>Cancel</button>
-              <button className="btn primary" style={{ width: 'auto' }} onClick={handleResendInvite}>Confirm &amp; Send</button>
+              <button className="btn primary" onClick={handleResendInvite}>Confirm &amp; Send</button>
             </div>
           </div>
         </div>

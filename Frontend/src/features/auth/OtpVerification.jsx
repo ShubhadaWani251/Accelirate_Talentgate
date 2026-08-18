@@ -165,7 +165,7 @@ export default function OtpVerification() {
               {errors.confirm_password && <div className="field-error">{errors.confirm_password.message}</div>}
             </div>
 
-            <button className="btn primary" type="submit" disabled={submitting}>
+            <button className="btn primary block" type="submit" disabled={submitting}>
               {submitting ? 'Verifying…' : 'Verify & Reset Password'}
             </button>
           </form>

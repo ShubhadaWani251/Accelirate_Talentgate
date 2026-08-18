@@ -189,7 +189,7 @@ export default function CandidateDetail() {
       </div>
 
       <div className="btn-row no-print" style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-        <button className="btn primary" style={{ width: 'auto' }} onClick={handleSendInvite} disabled={sending}>
+        <button className="btn primary" onClick={handleSendInvite} disabled={sending}>
           {sending ? 'Sending…' : 'Send Invite Link'}
         </button>
         <button className="btn" onClick={() => window.print()}>🖨 Export Candidate Details (PDF)</button>

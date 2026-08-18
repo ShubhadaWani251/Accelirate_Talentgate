@@ -113,7 +113,7 @@ export default function QuestionValidationRow({ row, sections, onSave, onRemove,
         </div>
         <div className="btn-row" style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
           <button className="btn" onClick={() => setEditing(false)}>Cancel</button>
-          <button className="btn primary" style={{ width: 'auto' }} onClick={save} disabled={saving}>
+          <button className="btn primary" onClick={save} disabled={saving}>
             {saving ? 'Revalidating…' : 'Save & Revalidate'}
           </button>
         </div>

@@ -72,7 +72,7 @@ export default function Login() {
               />
               {errors.password && <div className="field-error">{errors.password.message}</div>}
             </div>
-            <button className="btn primary" type="submit" disabled={submitting}>
+            <button className="btn primary block" type="submit" disabled={submitting}>
               {submitting ? 'Logging in…' : 'Log In'}
             </button>
           </form>

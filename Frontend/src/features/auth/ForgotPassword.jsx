@@ -66,7 +66,7 @@ export default function ForgotPassword() {
               />
               {errors.email && <div className="field-error">{errors.email.message}</div>}
             </div>
-            <button className="btn primary" type="submit" disabled={submitting}>
+            <button className="btn primary block" type="submit" disabled={submitting}>
               {submitting ? 'Sending…' : 'Send OTP'}
             </button>
           </form>

@@ -252,8 +252,16 @@ def stage_candidates_from_workbook(batch, file_obj, user, cooling_off_months=3):
     """Parse the uploaded workbook and create one Candidate row per data row, attached
     to `batch` (expected to be in Batch.Status.DRAFT), each validated and duplicate-checked.
 
-    Returns (created, missing_columns) - the staged Candidate rows, and any required template
-    column the sheet's header row didn't carry.
+    Returns (created, missing_columns, staged, skipped_duplicates).
+
+    Repeated entries collapse to ONE. A sheet listing the same person twice - same Aadhaar, or
+    same email - stages only the first occurrence; later copies are skipped and reported rather
+    than becoming candidate rows that both get invited and both sit the assessment. Matching is
+    seeded from the rows already on the batch too, so adding a second file to the same draft
+    dedupes against the first rather than only within itself.
+
+    Only non-empty keys collapse: plenty of rows can legitimately share a blank email, and
+    treating "no email" as a match would silently merge unrelated people.
 
     Wrapped in one transaction so a failure partway through (e.g. a bad row triggering an
     unexpected DB error) can't leave a batch half-populated - the caller's `except Exception`
@@ -271,12 +279,44 @@ def stage_candidates_from_workbook(batch, file_obj, user, cooling_off_months=3):
         (row.get('aadhaar_number') or '').strip() for row in rows
     )
 
+    # Seeded from what's already on the batch so a second upload into the same draft collapses
+    # against the first, not just against itself.
+    seen_aadhaar, seen_email = set(), set()
+    for existing in batch.candidate_set.filter(is_deleted=False).only('aadhaar_number', 'email'):
+        if existing.aadhaar_number.strip():
+            seen_aadhaar.add(existing.aadhaar_number.strip())
+        if existing.email.strip():
+            seen_email.add(existing.email.strip().lower())
+
     created = []
+    skipped_duplicates = []
     for data in rows:
         name = data.get('name', '') or ''
         name_parts = name.split(None, 1)
         first_name = name_parts[0] if name_parts else ''
         last_name = name_parts[1] if len(name_parts) > 1 else ''
+        aadhaar = (data.get('aadhaar_number') or '').strip()
+        email = (data.get('email') or '').strip()
+
+        # Only one row per person. Aadhaar is the identity, so it decides first; a repeated
+        # email is treated the same way, since the same address twice is the same inbox.
+        matched_on = None
+        if aadhaar and aadhaar in seen_aadhaar:
+            matched_on = 'Aadhaar Number'
+        elif email and email.lower() in seen_email:
+            matched_on = 'Email'
+        if matched_on:
+            skipped_duplicates.append({
+                'row_number': data['row_number'],
+                'name': name or '(no name)',
+                'email': email,
+                'matched_on': matched_on,
+            })
+            continue
+        if aadhaar:
+            seen_aadhaar.add(aadhaar)
+        if email:
+            seen_email.add(email.lower())
 
         candidate = Candidate.objects.create(
             batch=batch,
@@ -292,6 +332,13 @@ def stage_candidates_from_workbook(batch, file_obj, user, cooling_off_months=3):
             percentage=_to_float(data.get('percentage')),
             passing_out_year=_to_int(data.get('passing_out_year')),
             location=data.get('location') or None,
+            # Keep the original text for the two numeric columns. Decimal/SmallInteger can't
+            # hold "abc", so it parses to NULL above and would otherwise be indistinguishable
+            # from an empty cell - meaning "must be a number" could never be reported.
+            upload_raw={
+                'percentage': data.get('percentage') or '',
+                'passing_out_year': data.get('passing_out_year') or '',
+            },
             created_by=user,
         )
         run_duplicate_check(candidate, cooling_off_months=cooling_off_months, existing_lookup=duplicate_lookup)
@@ -305,4 +352,4 @@ def stage_candidates_from_workbook(batch, file_obj, user, cooling_off_months=3):
     # Over the whole batch, not just this upload: a second file added to the same draft can
     # repeat an address from the first.
     staged = revalidate_batch_candidates(batch)
-    return created, missing_columns, staged
+    return created, missing_columns, staged, skipped_duplicates

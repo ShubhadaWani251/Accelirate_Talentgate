@@ -100,7 +100,7 @@ export default function CandidateFilters({ filters, onChange, batches, onApply, 
 
       <div className="btn-row" style={{ display: 'flex', gap: 10, marginTop: 12 }}>
         <button className="btn" onClick={onClear}>Clear Filters</button>
-        <button className="btn primary" style={{ width: 'auto' }} onClick={onApply}>Apply Filters</button>
+        <button className="btn primary" onClick={onApply}>Apply Filters</button>
       </div>
       <div className="annot">
         Combine a score band with the row checkboxes below to shortlist candidates (e.g. borderline

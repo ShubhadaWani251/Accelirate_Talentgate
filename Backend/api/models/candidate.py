@@ -21,7 +21,11 @@ class Candidate(models.Model):
         INVALID_EMAIL = 'invalid_email', 'Invalid Email'
         DUPLICATE_EMAIL = 'duplicate_email', 'Duplicate Email'
         INVALID_AADHAAR = 'invalid_aadhaar', 'Invalid Aadhaar'
+        DUPLICATE_AADHAAR = 'duplicate_aadhaar', 'Duplicate Aadhaar'
         INVALID_MOBILE = 'invalid_mobile', 'Invalid Mobile'
+        INVALID_TEXT = 'invalid_text', 'Invalid Text Field'
+        INVALID_PERCENTAGE = 'invalid_percentage', 'Invalid Percentage'
+        INVALID_YEAR = 'invalid_year', 'Invalid Passing Year'
 
     class Status(models.TextChoices):
         PENDING_INVITE = 'pending_invite', 'Pending Invite'
@@ -66,6 +70,13 @@ class Candidate(models.Model):
                   "Stored rather than recomputed so the review screen and the finalize check "
                   "can never disagree about why a row was rejected.",
     )
+    upload_raw = models.JSONField(
+        default=dict, blank=True,
+        help_text="Original spreadsheet text for fields whose model type can't hold a bad "
+                  "value: a Percentage cell reading 'abc' parses to NULL, making it "
+                  "indistinguishable from an empty cell, so 'must be a number' could never be "
+                  "reported. Keyed by field name, e.g. {'percentage': 'abc'}.",
+    )
     status = models.CharField(max_length=15, choices=Status.choices,
                               default=Status.PENDING_INVITE)
     result = models.CharField(max_length=10, choices=Result.choices,
@@ -101,12 +112,15 @@ class Candidate(models.Model):
 class DuplicateCheck(models.Model):
     """Result of matching a newly-uploaded candidate's Aadhaar against historical records."""
     class CheckStatus(models.TextChoices):
-        NEW = 'new', 'New'
+        """Labels match the wireframe's Upload Review wording, and each maps to one colour:
+        green = safe to invite, amber = worth a look, red = needs a decision.
+        """
+        NEW = 'new', 'New Candidate'
         # Seen before, but never sat the assessment - so the cooling-off window hasn't started.
         # Worth flagging (they may be mid-process in another batch) without blocking anything.
         PREVIOUSLY_INVITED = 'previously_invited', 'Invited Before - Not Attempted'
-        DUPLICATE_CLEARED = 'duplicate_cleared', 'Duplicate Cleared'
-        DUPLICATE_WITHIN_WINDOW = 'duplicate_within_window', 'Duplicate Within Window'
+        DUPLICATE_CLEARED = 'duplicate_cleared', 'Duplicate Found - Cleared'
+        DUPLICATE_WITHIN_WINDOW = 'duplicate_within_window', 'Duplicate Found - Within Window'
 
     check_id = models.BigAutoField(primary_key=True)
     candidate = models.ForeignKey(Candidate, on_delete=models.CASCADE,

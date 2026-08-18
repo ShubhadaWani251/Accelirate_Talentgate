@@ -78,14 +78,12 @@ export default function NotifyModal({ candidateIds, onClose, onSent }) {
               <button
                 key={t.key}
                 className={`btn small ${activeKey === t.key ? 'primary' : ''}`}
-                style={activeKey === t.key ? { width: 'auto' } : undefined}
                 onClick={() => pickTemplate(t)}
               >
                 {TEMPLATE_ICONS[t.key] || '✉'} {t.label}
               </button>
             ))}
             <button className={`btn small ${activeKey === null && edited ? 'primary' : ''}`}
-              style={activeKey === null && edited ? { width: 'auto' } : undefined}
               onClick={pickCustom}>
               ✍ Custom Message
             </button>
@@ -109,7 +107,7 @@ export default function NotifyModal({ candidateIds, onClose, onSent }) {
 
         <div className="btn-row" style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
           <button className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn primary" style={{ width: 'auto' }} onClick={handleSend} disabled={sending}>
+          <button className="btn primary" onClick={handleSend} disabled={sending}>
             {sending ? 'Sending…' : '📧 Send Email'}
           </button>
         </div>

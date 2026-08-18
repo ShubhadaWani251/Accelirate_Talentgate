@@ -34,7 +34,7 @@ export default function DeactivateBatchModal({ batch, onClose, onDeactivated }) 
         </p>
         <div className="btn-row" style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
           <button className="btn" onClick={onClose} disabled={busy}>Cancel</button>
-          <button className="btn danger" style={{ width: 'auto' }} onClick={handleDeactivate} disabled={busy}>
+          <button className="btn danger" onClick={handleDeactivate} disabled={busy}>
             {busy ? 'Deactivating…' : 'Deactivate Batch'}
           </button>
         </div>

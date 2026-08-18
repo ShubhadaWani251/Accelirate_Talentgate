@@ -115,7 +115,7 @@ export default function Profile() {
             />
             {errors.confirm_password && <div className="field-error">{errors.confirm_password.message}</div>}
           </div>
-          <button className="btn primary" type="submit" disabled={submitting}>
+          <button className="btn primary block" type="submit" disabled={submitting}>
             {submitting ? 'Updating…' : 'Update Password'}
           </button>
         </form>

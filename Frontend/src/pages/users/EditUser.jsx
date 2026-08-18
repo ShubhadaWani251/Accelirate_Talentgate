@@ -118,7 +118,7 @@ export default function EditUser() {
 
       <div className="btn-row" style={{ display: 'flex', gap: 10, marginTop: 8 }}>
         <button className="btn" onClick={() => navigate('/admin/users')}>Cancel</button>
-        <button className="btn primary" style={{ width: 'auto' }} onClick={handleSave} disabled={saving}>
+        <button className="btn primary" onClick={handleSave} disabled={saving}>
           {saving ? 'Saving…' : '💾 Save Changes'}
         </button>
         {!isSelf && (

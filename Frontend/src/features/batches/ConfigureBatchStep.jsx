@@ -206,7 +206,7 @@ export default function ConfigureBatchStep({ onCreated, existingBatch, readOnly 
             {savingDefaults ? 'Saving…' : 'Save as Default for New Batches'}
           </button>
           {!locked && (
-            <button type="submit" className="btn primary" style={{ width: 'auto' }} disabled={submitting}>
+            <button type="submit" className="btn primary" disabled={submitting}>
               {submitting ? 'Saving…'
                 : cutoffsOnly ? 'Save Cutoffs'
                 : existingBatch ? 'Save Batch Configuration' : 'Continue to Upload →'}

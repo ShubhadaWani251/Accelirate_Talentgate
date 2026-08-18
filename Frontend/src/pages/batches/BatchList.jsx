@@ -50,7 +50,7 @@ export default function BatchList() {
     <div>
       <h3>Batches</h3>
       <div className="btn-row" style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
-        <Link to="/batches/new" className="btn primary" style={{ width: 'auto', textDecoration: 'none' }}>
+        <Link to="/batches/new" className="btn primary">
           + Upload New Candidates
         </Link>
       </div>

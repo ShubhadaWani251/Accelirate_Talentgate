@@ -71,10 +71,10 @@ export default function Dashboard() {
       </div>
 
       <div className="btn-row" style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
-        <Link to="/batches/new" className="btn primary" style={{ width: 'auto', textDecoration: 'none' }}>
+        <Link to="/batches/new" className="btn primary">
           + Upload New Candidates
         </Link>
-        <Link to="/candidates" className="btn" style={{ width: 'auto', textDecoration: 'none' }}>
+        <Link to="/candidates" className="btn">
           View All Candidates
         </Link>
         <button className="btn" onClick={() => setExportOpen(true)}>⬇ Export All Candidates (Excel)</button>

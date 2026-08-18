@@ -132,7 +132,7 @@ export default function QuestionUpload() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                    flexWrap: 'wrap', gap: 10 }}>
         <h3>{validation ? 'Question Validation' : 'Bulk Upload Questions'}</h3>
-        <Link to="/admin/question-bank" className="btn" style={{ width: 'auto', textDecoration: 'none' }}>
+        <Link to="/admin/question-bank" className="btn">
           ← Back to Question Bank
         </Link>
       </div>
@@ -159,7 +159,7 @@ export default function QuestionUpload() {
             )}
             <div className="btn-row" style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
               <button className="btn" onClick={reset}>Upload Another File</button>
-              <button className="btn primary" style={{ width: 'auto' }}
+              <button className="btn primary"
                       onClick={() => navigate('/admin/question-bank')}>
                 Done — View Question Bank
               </button>
@@ -209,7 +209,7 @@ export default function QuestionUpload() {
             <button className="btn" onClick={questionApi.downloadQuestionTemplate}>
               ⬇ Download Sample Template
             </button>
-            <button className="btn primary" style={{ width: 'auto' }} onClick={handleValidate}
+            <button className="btn primary" onClick={handleValidate}
                     disabled={!file || validating}>
               {validating ? 'Validating…' : 'Validate'}
             </button>
@@ -293,7 +293,7 @@ export default function QuestionUpload() {
 
           <div className="btn-row" style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 14 }}>
             <button className="btn" onClick={reset}>← Back / Re-upload</button>
-            <button className="btn primary" style={{ width: 'auto' }} onClick={handleImport}
+            <button className="btn primary" onClick={handleImport}
                     disabled={summary.valid === 0 || importing}>
               {importing ? 'Importing…' : `Import ${summary.valid} Question(s)`}
             </button>

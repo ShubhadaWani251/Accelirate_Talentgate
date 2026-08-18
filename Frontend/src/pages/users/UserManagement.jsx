@@ -85,7 +85,7 @@ export default function UserManagement() {
             </select>
           </div>
         </div>
-        <button className="btn primary" style={{ width: 'auto' }} onClick={handleCreate}
+        <button className="btn primary" onClick={handleCreate}
                 disabled={creating || !form.first_name || !form.email}>
           {creating ? 'Creating…' : '+ Create User'}
         </button>

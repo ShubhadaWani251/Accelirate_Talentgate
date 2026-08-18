@@ -31,7 +31,7 @@ export default function ExportModal({ onClose, batchId }) {
         <div className="field"><label>To Date</label><input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></div>
         <div className="btn-row" style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
           <button className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn primary" style={{ width: 'auto' }} onClick={handleExport} disabled={exporting}>
+          <button className="btn primary" onClick={handleExport} disabled={exporting}>
             {exporting ? 'Exporting…' : 'Export'}
           </button>
         </div>

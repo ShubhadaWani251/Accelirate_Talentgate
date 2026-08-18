@@ -22,7 +22,10 @@ from api.models import Candidate
 # reported in `error_fields`, so the UI can tint the offending cell without a second mapping,
 # and it's the same wording used in the spreadsheet template.
 EDITABLE_FIELDS = {
-    'first_name': 'First Name',
+    # 'Name' rather than 'First Name': the spreadsheet has one Name column, which is split on
+    # the first space, and the reviewer thinks in terms of that column. The label doubles as
+    # the error_fields key the UI highlights cells by, so it has to match the column heading.
+    'first_name': 'Name',
     'last_name': 'Last Name',
     'email': 'Email',
     'phone': 'Mobile',
@@ -38,8 +41,26 @@ EDITABLE_FIELDS = {
 _AADHAAR_RE = re.compile(r'^\d{12}$')
 _MOBILE_STRIP_RE = re.compile(r'[\s\-().]')
 _MOBILE_RE = re.compile(r'^\+?\d{10,15}$')
+# A text field that is nothing but digits/punctuation is a mis-shifted column, not a real name
+# or college - "12345" as a name means the spreadsheet's columns don't line up.
+_HAS_LETTER_RE = re.compile(r'[^\W\d_]', re.UNICODE)
+_NUMERIC_RE = re.compile(r'^\d+(\.\d+)?$')
+
+# Nothing outside this range is a plausible graduation year, and a typo'd 202 or 20255 is
+# worth catching before it reaches a report.
+_MIN_YEAR, _MAX_YEAR = 1950, 2100
 
 _VS = Candidate.ValidationStatus
+
+# Free-text fields that must contain at least one letter when filled in. Keyed by field name,
+# valued by the column label shown to the reviewer.
+_TEXT_FIELDS = (
+    ('first_name', 'Name'),
+    ('college_name', 'College Name'),
+    ('degree', 'Degree'),
+    ('stream', 'Stream'),
+    ('location', 'Location'),
+)
 
 
 def normalize_email(value):
@@ -58,55 +79,94 @@ def is_valid_mobile(value):
     return bool(_MOBILE_RE.match(_MOBILE_STRIP_RE.sub('', (value or '').strip())))
 
 
-def validate_candidate_values(values, email_counts=None):
-    """Check one row. Returns (validation_status, errors).
+def validate_candidate_values(values, email_counts=None, raw=None, aadhaar_counts=None):
+    """Check one row, column by column. Returns (validation_status, errors).
 
     `errors` is every problem found, in the order they're reported on screen:
-    [{'field': 'Email', 'message': 'Email "x" is not a valid address.'}, ...]. The returned
-    status is the FIRST error's category (or OK) - it drives the status pill and the
-    finalize gate, while the list drives the Errors column.
+    [{'field': 'Email', 'message': 'Invalid email format'}, ...]. Messages are deliberately
+    terse - they sit in a narrow table cell next to nine other columns, so "Must be 12 digits"
+    reads better there than a full sentence naming the offending value, which the row already
+    shows. The returned status is the FIRST error's category (or OK) - it drives the status
+    pill and the finalize gate, while the list drives the Errors column.
 
-    `email_counts` is a Counter of normalized emails across the whole batch; a row whose
-    address appears more than once is flagged. Duplicates are scoped to the batch on purpose:
-    the same person legitimately reappears in a later batch, but twice in one upload is a
-    mistake in the sheet.
+    `email_counts` / `aadhaar_counts` are Counters across the whole batch; a row whose address
+    or Aadhaar appears more than once is flagged. Both are scoped to the batch on purpose: the
+    same person legitimately reappears in a later batch (that's the cooling-off check), but
+    twice in one upload is a mistake in the sheet.
+
+    `raw` is Candidate.upload_raw - the original spreadsheet text for fields whose model type
+    can't hold a bad value. Without it a Percentage cell reading "abc" is stored as NULL and
+    is indistinguishable from an empty one, so "must be a number" could never be reported.
     """
     errors = []
     statuses = []
+    raw = raw or {}
 
     def fail(status, field, message):
         statuses.append(status)
         errors.append({'field': field, 'message': message})
 
+    # --- Name (required) -------------------------------------------------------------
     first_name = (values.get('first_name') or '').strip()
     if not first_name:
-        fail(_VS.MISSING_NAME, 'First Name', 'Name is required.')
+        fail(_VS.MISSING_NAME, 'Name', 'Name required')
 
+    # --- Email (required, format, unique within the batch) ---------------------------
     email = (values.get('email') or '').strip()
     if not email:
-        fail(_VS.MISSING_EMAIL, 'Email', 'Email is required.')
+        fail(_VS.MISSING_EMAIL, 'Email', 'Email required')
     elif not is_valid_email(email):
-        fail(_VS.INVALID_EMAIL, 'Email', f'"{email}" is not a valid email address.')
+        fail(_VS.INVALID_EMAIL, 'Email', 'Invalid email format')
     elif email_counts and email_counts.get(normalize_email(email), 0) > 1:
-        fail(_VS.DUPLICATE_EMAIL, 'Email',
-             f'"{email}" appears more than once in this batch.')
+        fail(_VS.DUPLICATE_EMAIL, 'Email', 'Duplicate email in this batch')
 
+    # --- Aadhaar (required, exactly 12 digits, unique within the batch) --------------
+    # Aadhaar identifies the person, so the same number twice in one upload is one candidate
+    # entered twice - left unflagged they would both be invited and both sit the assessment.
+    # This is only about repeats WITHIN the batch; the same Aadhaar appearing in an earlier
+    # batch is the cooling-off check in services/duplicate_check.py, which is a status the TA
+    # judges rather than an error that blocks.
     aadhaar = (values.get('aadhaar_number') or '').strip()
     if not aadhaar:
-        fail(_VS.MISSING_AADHAAR, 'Aadhaar Number', 'Aadhaar Number is required.')
+        fail(_VS.MISSING_AADHAAR, 'Aadhaar Number', 'Aadhaar required')
     elif not _AADHAAR_RE.match(aadhaar):
-        fail(_VS.INVALID_AADHAAR, 'Aadhaar Number',
-             'Aadhaar Number must be exactly 12 digits.')
+        fail(_VS.INVALID_AADHAAR, 'Aadhaar Number', 'Must be 12 digits')
+    elif aadhaar_counts and aadhaar_counts.get(aadhaar, 0) > 1:
+        fail(_VS.DUPLICATE_AADHAAR, 'Aadhaar Number', 'Duplicate Aadhaar in this batch')
 
-    college = (values.get('college_name') or '').strip()
-    if not college:
-        fail(_VS.MISSING_COLLEGE, 'College Name', 'College Name is required.')
+    # --- College (required) ----------------------------------------------------------
+    if not (values.get('college_name') or '').strip():
+        fail(_VS.MISSING_COLLEGE, 'College Name', 'College required')
 
-    # Mobile is an optional column - blank is fine, but a value that's there has to be usable.
+    # --- Text fields must not be all digits -----------------------------------------
+    # A name or college of "12345" means the spreadsheet's columns are mis-aligned, which is
+    # worth catching loudly - it usually affects every row in the file.
+    for field, label in _TEXT_FIELDS:
+        text = (values.get(field) or '').strip()
+        if text and not _HAS_LETTER_RE.search(text):
+            fail(_VS.INVALID_TEXT, label, f'{label} cannot be only numbers')
+
+    # --- Percentage (optional; numeric 0-100 when present) --------------------------
+    raw_percentage = (raw.get('percentage') or '').strip()
+    percentage = values.get('percentage')
+    if raw_percentage and percentage is None:
+        fail(_VS.INVALID_PERCENTAGE, 'Percentage', 'Must be a number')
+    elif percentage is not None and not (0 <= float(percentage) <= 100):
+        fail(_VS.INVALID_PERCENTAGE, 'Percentage', 'Must be between 0 and 100')
+
+    # --- Passing Out Year (optional; 4 digits in a plausible range) ------------------
+    raw_year = (raw.get('passing_out_year') or '').strip()
+    year = values.get('passing_out_year')
+    if raw_year and year is None:
+        fail(_VS.INVALID_YEAR, 'Passing Out Year', 'Must be a 4-digit year')
+    elif year is not None and not (_MIN_YEAR <= int(year) <= _MAX_YEAR):
+        fail(_VS.INVALID_YEAR, 'Passing Out Year',
+             f'Must be between {_MIN_YEAR} and {_MAX_YEAR}')
+
+    # --- Mobile (optional column; blank is fine, a value must be usable) ------------
     mobile = (values.get('phone') or '').strip()
     if mobile and not is_valid_mobile(mobile):
-        fail(_VS.INVALID_MOBILE, 'Mobile',
-             'Mobile must be 10-15 digits (an optional +country code is allowed).')
+        fail(_VS.INVALID_MOBILE, 'Mobile', 'Must be 10-15 digits')
 
     return (statuses[0] if statuses else _VS.OK), errors
 
@@ -135,10 +195,16 @@ def revalidate_batch_candidates(batch, candidates=None):
     email_counts = Counter(
         normalize_email(c.email) for c in candidates if (c.email or '').strip()
     )
+    aadhaar_counts = Counter(
+        c.aadhaar_number.strip() for c in candidates if (c.aadhaar_number or '').strip()
+    )
 
     changed = []
     for candidate in candidates:
-        status, errors = validate_candidate_values(_values_of(candidate), email_counts)
+        status, errors = validate_candidate_values(
+            _values_of(candidate), email_counts, raw=candidate.upload_raw,
+            aadhaar_counts=aadhaar_counts,
+        )
         if candidate.validation_status != status or candidate.validation_errors != errors:
             candidate.validation_status = status
             candidate.validation_errors = errors

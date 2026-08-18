@@ -121,7 +121,7 @@ export default function QuestionFormModal({ question, sections, defaultSectionId
 
         <div className="btn-row" style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
           <button className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn primary" style={{ width: 'auto' }} onClick={handleSave} disabled={saving}>
+          <button className="btn primary" onClick={handleSave} disabled={saving}>
             {saving ? 'Saving…' : '💾 Save Changes'}
           </button>
         </div>

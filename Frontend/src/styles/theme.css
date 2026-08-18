@@ -197,21 +197,32 @@ h1, h2, h3, h4, .brand, .btn, .box-label {
 .field-error { color: var(--brand-red); font-size: 11.5px; margin-top: 5px; }
 .field-hint { color: var(--muted); font-size: 11px; margin-top: 5px; }
 
+/* Every button - regardless of variant - shares one size scale: this base rule sets the normal
+   size, `.btn.small` (used for in-row table actions) is the one deliberate second tier, and
+   nothing else should touch padding/font-size ad hoc. Auto-width by default: a button sizes to
+   its own label, not to its container, so a "Cancel" next to a "Save & Revalidate" in the same
+   row look like two buttons, not one stretched bar next to a normal one. `.btn.block` (or the
+   auth screens' own full-bleed layout) is the explicit opt-in for a button that should fill its
+   container - a plain, undecorated .btn/.btn.primary never does that implicitly.
+   text-decoration: none lives here too, since <Link className="btn ..."> is exactly as common
+   a call site as <button> and neither should need to repeat it. */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   padding: 10px 20px; border-radius: 999px; font-size: 13px; font-weight: 600;
   border: 1px solid var(--line-soft); background: #fff; color: var(--text); cursor: pointer;
-  transition: all .15s ease; letter-spacing: .1px;
+  transition: all .15s ease; letter-spacing: .1px; text-decoration: none; width: auto;
 }
 .btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 3px 8px rgba(0,0,0,.12); border-color: var(--brand-blue); color: var(--brand-blue); }
 .btn:disabled { opacity: .55; cursor: not-allowed; }
 .btn.primary {
   background: linear-gradient(135deg, var(--brand-blue) 0%, var(--brand-blue-dark) 100%);
-  border-color: var(--brand-blue-dark); color: #fff; width: 100%;
+  border-color: var(--brand-blue-dark); color: #fff;
 }
 .btn.primary:hover:not(:disabled) { color: #fff; box-shadow: 0 4px 12px rgba(18,137,232,.4); filter: brightness(1.06); }
 .btn.danger { background: var(--red-bg); border-color: var(--red); color: var(--red); }
 .btn.danger:hover:not(:disabled) { background: var(--brand-red); border-color: var(--brand-red-dark); color: #fff; }
+/* The one explicit full-width opt-in - a lone auth-form submit button, not a button sitting in
+   a row of others. */
 .btn.block { width: 100%; }
 .btn.ghost { border-color: transparent; background: transparent; }
 

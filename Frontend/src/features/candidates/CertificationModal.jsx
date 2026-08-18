@@ -97,7 +97,7 @@ Accelirate Softech Pvt. Ltd.`}
 
         <div className="btn-row" style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
           <button className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn primary" style={{ width: 'auto' }} onClick={handleSend} disabled={sending}>
+          <button className="btn primary" onClick={handleSend} disabled={sending}>
             {sending ? 'Sending…' : '🎓 Send Certification Email'}
           </button>
         </div>

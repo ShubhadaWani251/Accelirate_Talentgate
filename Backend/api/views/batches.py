@@ -210,7 +210,7 @@ class BatchUploadView(APIView):
         cooling_off_months = max(1, min(cooling_off_months, 24))
 
         try:
-            created, missing_columns, staged = stage_candidates_from_workbook(
+            created, missing_columns, staged, skipped_duplicates = stage_candidates_from_workbook(
                 batch, upload, request.user, cooling_off_months,
             )
         except (zipfile.BadZipFile, InvalidFileException, KeyError, DataError):
@@ -230,7 +230,8 @@ class BatchUploadView(APIView):
         batch.total_candidates = len(staged)
         batch.save(update_fields=['total_candidates'])
         log_action(request, request.user, 'upload', 'batch', batch.batch_id,
-                   details={'rows_created': len(created), 'missing_columns': missing_columns})
+                   details={'rows_created': len(created), 'missing_columns': missing_columns,
+                            'duplicates_skipped': len(skipped_duplicates)})
 
         summary = summarize_candidates(staged)
         return Response({
@@ -241,6 +242,9 @@ class BatchUploadView(APIView):
             # Named so the review screen can say "this sheet has no Aadhaar Number column"
             # instead of showing every row as missing it and leaving the reviewer to guess.
             'missing_columns': missing_columns,
+            # Repeated entries collapsed to one. Reported rather than silent: the reviewer
+            # should know their 40-row sheet became 38 candidates, and why.
+            'skipped_duplicates': skipped_duplicates,
         }, status=status.HTTP_201_CREATED)
 
 
@@ -320,6 +324,13 @@ class BatchCandidateRowView(APIView):
                 # something the review screen needs to support.
                 continue
             if field in ('percentage', 'passing_out_year'):
+                # Record what was actually typed as well as the parsed value: "abc" parses to
+                # None, and without the raw text the reviewer would be told the field is empty
+                # rather than that it isn't a number.
+                raw = candidate.upload_raw if isinstance(candidate.upload_raw, dict) else {}
+                candidate.upload_raw = {**raw, field: '' if value is None else str(value)}
+                if 'upload_raw' not in updates:
+                    updates.append('upload_raw')
                 value = _to_number(value, field)
             elif field in ('last_name', 'phone', 'college_name', 'degree', 'stream', 'location'):
                 value = value or None
@@ -404,7 +415,12 @@ class BatchCandidateDeleteView(APIView):
         batch.save(update_fields=['total_candidates'])
         log_action(request, request.user, 'delete_candidates', 'batch', batch.batch_id,
                    details={'candidate_ids': candidate_ids})
-        return Response({'deleted_count': candidate_count})
+
+        # Re-validate what's left and hand the whole table back: removing a row changes other
+        # rows' verdicts (delete one of a duplicated pair and its twin is no longer a
+        # duplicate), so the caller needs the refreshed set, not just a count.
+        revalidate_batch_candidates(batch)
+        return Response({'deleted_count': candidate_count, **_staging_payload(batch)})
 
 
 class BatchCandidateClearDuplicateView(APIView):

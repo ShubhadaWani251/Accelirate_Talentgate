@@ -67,7 +67,7 @@ export default function InviteConfirmationStep({ summary, onBack, onSent }) {
 
       <div className="btn-row" style={{ display: 'flex', gap: 10, marginTop: 14 }}>
         <button className="btn" onClick={onBack} disabled={sending}>Back / Edit</button>
-        <button className="btn primary" style={{ width: 'auto' }} onClick={handleConfirm} disabled={sending}>
+        <button className="btn primary" onClick={handleConfirm} disabled={sending}>
           {sending ? 'Sending…' : 'Confirm & Send Invites'}
         </button>
       </div>
