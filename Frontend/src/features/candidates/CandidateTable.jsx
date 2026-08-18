@@ -58,7 +58,7 @@ export default function CandidateTable({
         <table className="data-table">
           <thead>
             <tr>
-              <th></th><th>Name</th><th>Email</th><th>Batch Name</th><th>College</th><th>Degree</th>
+              <th></th><th>Name</th><th>Email</th><th>Mobile</th><th>Batch Name</th><th>College</th><th>Degree</th>
               <th>Stream</th><th>Percentage</th><th>Passing Out Year</th><th>Location</th><th>Aadhaar</th>
               <th>Status</th><th>Logical</th><th>Quant.</th><th>Verbal</th><th>Programming</th>
               <th>Overall</th><th>Result</th><th>History</th><th>Edit</th>
@@ -66,15 +66,16 @@ export default function CandidateTable({
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={20}>Loading…</td></tr>
+              <tr><td colSpan={21}>Loading…</td></tr>
             ) : candidates.length === 0 ? (
-              <tr><td colSpan={20}>No candidates found.</td></tr>
+              <tr><td colSpan={21}>No candidates found.</td></tr>
             ) : (
               candidates.map((c) => (
                 <tr key={c.candidate_id}>
                   <td><input type="checkbox" checked={selected.has(c.candidate_id)} onChange={() => onToggleRow(c.candidate_id)} /></td>
                   <td>{c.full_name}</td>
                   <td>{c.email}</td>
+                  <td>{c.phone || '—'}</td>
                   <td>{c.batch_name}</td>
                   <td>{c.college_name || '—'}</td>
                   <td>{c.degree || '—'}</td>

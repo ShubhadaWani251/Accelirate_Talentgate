@@ -110,7 +110,7 @@ class CandidateListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Candidate
         fields = [
-            'candidate_id', 'full_name', 'email', 'batch_id', 'batch_name',
+            'candidate_id', 'full_name', 'email', 'phone', 'batch_id', 'batch_name',
             'college_name', 'degree', 'stream', 'percentage', 'passing_out_year', 'location',
             'aadhaar_masked', 'status', 'status_display', 'result', 'result_display',
             'logical_score', 'quantitative_score', 'verbal_score', 'programming_score',

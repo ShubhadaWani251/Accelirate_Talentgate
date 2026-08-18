@@ -26,6 +26,12 @@ class Candidate(models.Model):
         INVALID_TEXT = 'invalid_text', 'Invalid Text Field'
         INVALID_PERCENTAGE = 'invalid_percentage', 'Invalid Percentage'
         INVALID_YEAR = 'invalid_year', 'Invalid Passing Year'
+        MISSING_MOBILE = 'missing_mobile', 'Missing Mobile'
+        MISSING_DEGREE = 'missing_degree', 'Missing Degree'
+        MISSING_STREAM = 'missing_stream', 'Missing Stream'
+        MISSING_PERCENTAGE = 'missing_percentage', 'Missing Percentage'
+        MISSING_YEAR = 'missing_year', 'Missing Passing Out Year'
+        MISSING_LOCATION = 'missing_location', 'Missing Location'
 
     class Status(models.TextChoices):
         PENDING_INVITE = 'pending_invite', 'Pending Invite'

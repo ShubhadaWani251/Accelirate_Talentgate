@@ -53,13 +53,24 @@ _MIN_YEAR, _MAX_YEAR = 1950, 2100
 _VS = Candidate.ValidationStatus
 
 # Free-text fields that must contain at least one letter when filled in. Keyed by field name,
-# valued by the column label shown to the reviewer.
+# valued by the column label shown to the reviewer. Presence itself is checked separately
+# (each field below has its own required check) - this only catches a filled-in value that's
+# nothing but digits, meaning the spreadsheet's columns are mis-aligned.
 _TEXT_FIELDS = (
     ('first_name', 'Name'),
     ('college_name', 'College Name'),
     ('degree', 'Degree'),
     ('stream', 'Stream'),
     ('location', 'Location'),
+)
+
+# Required text fields with no other format rule - just "must not be blank". Degree/Stream/
+# Location are checked here; Name and College have their own checks above because they came
+# first historically, but the effect is identical.
+_REQUIRED_TEXT_FIELDS = (
+    ('degree', 'Degree', _VS.MISSING_DEGREE),
+    ('stream', 'Stream', _VS.MISSING_STREAM),
+    ('location', 'Location', _VS.MISSING_LOCATION),
 )
 
 
@@ -138,34 +149,46 @@ def validate_candidate_values(values, email_counts=None, raw=None, aadhaar_count
     if not (values.get('college_name') or '').strip():
         fail(_VS.MISSING_COLLEGE, 'College Name', 'College required')
 
+    # --- Degree / Stream / Location (required, free text) ----------------------------
+    for field, label, missing_status in _REQUIRED_TEXT_FIELDS:
+        if not (values.get(field) or '').strip():
+            fail(missing_status, label, f'{label} required')
+
     # --- Text fields must not be all digits -----------------------------------------
     # A name or college of "12345" means the spreadsheet's columns are mis-aligned, which is
-    # worth catching loudly - it usually affects every row in the file.
+    # worth catching loudly - it usually affects every row in the file. Only runs against a
+    # value that's actually present - blank already failed its own required check above.
     for field, label in _TEXT_FIELDS:
         text = (values.get(field) or '').strip()
         if text and not _HAS_LETTER_RE.search(text):
             fail(_VS.INVALID_TEXT, label, f'{label} cannot be only numbers')
 
-    # --- Percentage (optional; numeric 0-100 when present) --------------------------
+    # --- Percentage (required; numeric 0-100) -----------------------------------------
     raw_percentage = (raw.get('percentage') or '').strip()
     percentage = values.get('percentage')
-    if raw_percentage and percentage is None:
+    if not raw_percentage and percentage is None:
+        fail(_VS.MISSING_PERCENTAGE, 'Percentage', 'Percentage required')
+    elif raw_percentage and percentage is None:
         fail(_VS.INVALID_PERCENTAGE, 'Percentage', 'Must be a number')
     elif percentage is not None and not (0 <= float(percentage) <= 100):
         fail(_VS.INVALID_PERCENTAGE, 'Percentage', 'Must be between 0 and 100')
 
-    # --- Passing Out Year (optional; 4 digits in a plausible range) ------------------
+    # --- Passing Out Year (required; 4 digits in a plausible range) ------------------
     raw_year = (raw.get('passing_out_year') or '').strip()
     year = values.get('passing_out_year')
-    if raw_year and year is None:
+    if not raw_year and year is None:
+        fail(_VS.MISSING_YEAR, 'Passing Out Year', 'Passing Out Year required')
+    elif raw_year and year is None:
         fail(_VS.INVALID_YEAR, 'Passing Out Year', 'Must be a 4-digit year')
     elif year is not None and not (_MIN_YEAR <= int(year) <= _MAX_YEAR):
         fail(_VS.INVALID_YEAR, 'Passing Out Year',
              f'Must be between {_MIN_YEAR} and {_MAX_YEAR}')
 
-    # --- Mobile (optional column; blank is fine, a value must be usable) ------------
+    # --- Mobile (required; 10-15 digits) ----------------------------------------------
     mobile = (values.get('phone') or '').strip()
-    if mobile and not is_valid_mobile(mobile):
+    if not mobile:
+        fail(_VS.MISSING_MOBILE, 'Mobile', 'Mobile required')
+    elif not is_valid_mobile(mobile):
         fail(_VS.INVALID_MOBILE, 'Mobile', 'Must be 10-15 digits')
 
     return (statuses[0] if statuses else _VS.OK), errors

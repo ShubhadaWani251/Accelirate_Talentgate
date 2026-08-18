@@ -5,15 +5,18 @@ from api.models import Candidate
 from api.services.candidate_validation import revalidate_batch_candidates
 from api.services.duplicate_check import preload_duplicate_lookup, run_duplicate_check
 
-# Mobile is optional - a sheet without that column uploads exactly as before. Every other
-# column is required, and a sheet missing one is reported rather than silently importing
-# blanks for it.
+# Every column is mandatory - a sheet missing one is reported by name (see missing_columns
+# below) rather than silently importing blanks for it, and validate_candidate_values() rejects
+# any row where one of these is blank.
 TEMPLATE_COLUMNS = [
     'Name', 'Email', 'Mobile', 'Aadhaar Number', 'College Name', 'Degree',
     'Stream', 'Percentage', 'Passing Out Year', 'Location',
 ]
 
-OPTIONAL_COLUMNS = {'Mobile', 'Degree', 'Stream', 'Percentage', 'Passing Out Year', 'Location'}
+# Nothing is optional at the column level any more - kept as a named set (rather than deleted
+# outright) because parse_uploaded_workbook's missing-column check reads it directly, and an
+# empty set there reads as "every column is required" just as clearly as removing the check.
+OPTIONAL_COLUMNS = set()
 
 # Deliberately generous: recruiters export these sheets from a dozen different systems, and
 # a header this map doesn't recognise means the whole column silently imports as blank - which
@@ -132,7 +135,7 @@ def generate_validation_report_workbook(candidates):
 
 
 EXPORT_COLUMNS = [
-    'Name', 'Email', 'Batch Name', 'College', 'Degree', 'Stream', 'Percentage',
+    'Name', 'Email', 'Mobile', 'Batch Name', 'College', 'Degree', 'Stream', 'Percentage',
     'Passing Out Year', 'Location', 'Status', 'Result', 'Overall Score',
 ]
 
@@ -156,6 +159,7 @@ def generate_candidates_workbook(candidates, latest_attempt_fn, status_display_f
         ws.append([
             candidate.full_name,
             candidate.email,
+            candidate.phone,
             candidate.batch.batch_name,
             candidate.college_name,
             candidate.degree,
