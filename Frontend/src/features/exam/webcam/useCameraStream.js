@@ -1,5 +1,18 @@
 import { useCallback, useState } from 'react';
 
+// Dev escape hatch for a machine with no working webcam, now requiring an EXPLICIT opt-in
+// (?devNoCamera=1) rather than triggering automatically. It used to fall back silently, which
+// meant "no camera at all" looked indistinguishable from a successful start - masking the very
+// thing that must be caught: an exam must never begin without a working, unobstructed camera.
+function devNoCameraRequested() {
+  if (!import.meta.env.DEV) return false;
+  try {
+    return new URLSearchParams(window.location.search).get('devNoCamera') === '1';
+  } catch {
+    return false;
+  }
+}
+
 export default function useCameraStream() {
   const [error, setError] = useState(null);
 
@@ -11,9 +24,9 @@ export default function useCameraStream() {
     // from an actual camera/mic denial saves a lot of guessing when this happens.
     if (!navigator.mediaDevices?.getUserMedia) {
       const err = new Error(
-        'Camera access is unavailable on this page. This usually means the page was opened over ' +
-        'plain HTTP on an address other than "localhost" (e.g. a LAN IP) - browsers only allow ' +
-        'camera/mic access on HTTPS or on localhost itself.'
+        'Camera access is unavailable on this page. This usually means the page was opened over '
+        + 'plain HTTP on an address other than "localhost" (e.g. a LAN IP) - browsers only allow '
+        + 'camera/mic access on HTTPS or on localhost itself.'
       );
       err.name = 'SecureContextUnavailable';
       setError(err);
@@ -23,17 +36,12 @@ export default function useCameraStream() {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       return { stream, noVideo: false };
     } catch (err) {
-      // Dev-only convenience: a test machine with no working webcam (or a phantom/disconnected
-      // one - see Windows Device Manager's CM_PROB_PHANTOM) can still exercise the rest of the
-      // exam flow using audio only. import.meta.env.DEV is statically false in a production
-      // build, so this whole branch is dead code once built - it can never reach a real
-      // candidate, only someone running `npm run dev` locally.
-      if (import.meta.env.DEV) {
+      if (devNoCameraRequested()) {
         try {
           const stream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
           return { stream, noVideo: true };
         } catch {
-          // Audio-only also failed - fall through to reporting the original error below.
+          // Audio-only also failed - report the original camera error below.
         }
       }
       setError(err);

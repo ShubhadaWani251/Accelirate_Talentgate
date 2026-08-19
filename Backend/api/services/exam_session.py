@@ -208,29 +208,32 @@ def build_session_state(attempt):
     }
 
 
-def finalize_attempt(attempt, outcome, reason=None):
-    """Score the attempt and close it out. Idempotent - a no-op if it isn't IN_PROGRESS
-    anymore, which is what lets auto-finalize-on-expired-auth, an explicit submit, and the
-    tab-switch terminate endpoint all call this without racing each other.
-
-    `outcome` is 'submitted' (manual submit AND time-expiry - a candidate who ran out of time
-    did nothing wrong, so it's scored like a normal submission) or 'terminated' (the tab-switch/
-    window-blur proctoring violation).
-    """
-    if attempt.status != ExamAttempt.Status.IN_PROGRESS:
-        return attempt
-
-    answers = list(
+def _load_answers(attempt):
+    return list(
         attempt.examanswer_set.select_related('question', 'question__section')
         .order_by('answer_id')
     )
-    answered = [a for a in answers if a.selected_option]
-    for answer in answered:
-        answer.is_correct = (answer.selected_option == answer.question.correct_option)
-    if answered:
-        ExamAnswer.objects.bulk_update(answered, ['is_correct'])
 
-    batch = attempt.invitation.batch
+
+# Fields _grade_sections writes, for a targeted bulk_update on re-grade.
+GRADED_FIELDS = (
+    ['total_correct', 'overall_score']
+    + [f'{key}_score' for key in SECTION_ORDER]
+    + [f'{key}_cleared' for key in SECTION_ORDER]
+)
+
+
+def _grade_sections(attempt, answers, batch):
+    """Recompute per-section scores/cleared and the overall totals from already-marked answers,
+    against the batch's CURRENT cutoffs. Returns all_cleared.
+
+    Split out of finalize_attempt so re-grading after a cutoff change (see regrade_batch) runs
+    exactly the same arithmetic rather than a second, drifting copy of it.
+
+    NOTE on units: `<section>_score` and `total_correct` are RAW COUNTS of correct answers, while
+    `overall_score` is a PERCENTAGE. Mixing those two up is what previously made a 2-out-of-40
+    result render as "5/40" in the UI.
+    """
     total_correct = 0
     all_cleared = True
     for section_key in SECTION_ORDER:
@@ -250,11 +253,83 @@ def finalize_attempt(attempt, outcome, reason=None):
         setattr(attempt, f'{section_key}_score', correct)
         setattr(attempt, f'{section_key}_cleared', cleared)
 
-    attempt.total_answered = len(answered)
     attempt.total_correct = total_correct
     attempt.overall_score = (
         round(Decimal(total_correct) / Decimal(len(answers)) * 100, 2) if answers else Decimal('0.00')
     )
+    return all_cleared
+
+
+def _write_candidate_result(candidate, passed):
+    """finalize_attempt and regrade_attempt are the only writers of Candidate.result."""
+    candidate.result = Candidate.Result.PASS if passed else Candidate.Result.FAIL
+    candidate.save(update_fields=['result', 'overall_score'])
+
+
+def regrade_attempt(attempt, batch=None):
+    """Re-evaluate an already-graded attempt against the batch's current cutoffs.
+
+    Only SUBMITTED attempts are re-graded: a TERMINATED attempt fails on proctoring grounds, so
+    lowering a cutoff must not resurrect it, and an IN_PROGRESS one has no scores yet.
+
+    Deliberately does NOT re-mark ExamAnswer.is_correct - the answers and the answer key are not
+    what changed. Only the pass/fail verdict derived from them is recomputed.
+
+    Returns True if anything actually changed.
+    """
+    if attempt.status != ExamAttempt.Status.SUBMITTED:
+        return False
+
+    batch = batch or attempt.invitation.batch
+    before = [getattr(attempt, f) for f in GRADED_FIELDS]
+    all_cleared = _grade_sections(attempt, _load_answers(attempt), batch)
+    changed = before != [getattr(attempt, f) for f in GRADED_FIELDS]
+
+    candidate = attempt.candidate
+    new_result = Candidate.Result.PASS if all_cleared else Candidate.Result.FAIL
+    result_changed = candidate.result != new_result or candidate.overall_score != attempt.overall_score
+
+    if changed:
+        attempt.save(update_fields=GRADED_FIELDS)
+    if result_changed:
+        candidate.overall_score = attempt.overall_score
+        _write_candidate_result(candidate, all_cleared)
+    return changed or result_changed
+
+
+def regrade_batch(batch):
+    """Re-grade every submitted attempt in a batch - called when its cutoffs change, so the
+    pass/fail shown on Batch Details and Candidate Details reflects the new cutoffs immediately
+    instead of the values stored at submit time. Returns the number of attempts affected.
+    """
+    attempts = ExamAttempt.objects.select_related('candidate', 'invitation__batch').filter(
+        invitation__batch=batch, status=ExamAttempt.Status.SUBMITTED,
+    )
+    return sum(1 for attempt in attempts if regrade_attempt(attempt, batch))
+
+
+def finalize_attempt(attempt, outcome, reason=None):
+    """Score the attempt and close it out. Idempotent - a no-op if it isn't IN_PROGRESS
+    anymore, which is what lets auto-finalize-on-expired-auth, an explicit submit, and the
+    tab-switch terminate endpoint all call this without racing each other.
+
+    `outcome` is 'submitted' (manual submit AND time-expiry - a candidate who ran out of time
+    did nothing wrong, so it's scored like a normal submission) or 'terminated' (the tab-switch/
+    window-blur proctoring violation).
+    """
+    if attempt.status != ExamAttempt.Status.IN_PROGRESS:
+        return attempt
+
+    answers = _load_answers(attempt)
+    answered = [a for a in answers if a.selected_option]
+    for answer in answered:
+        answer.is_correct = (answer.selected_option == answer.question.correct_option)
+    if answered:
+        ExamAnswer.objects.bulk_update(answered, ['is_correct'])
+
+    batch = attempt.invitation.batch
+    all_cleared = _grade_sections(attempt, answers, batch)
+    attempt.total_answered = len(answered)
 
     now = timezone.now()
     if outcome == 'submitted':
@@ -270,10 +345,7 @@ def finalize_attempt(attempt, outcome, reason=None):
     # been set before this (services/invites.py only ever moves candidate.status). A terminated
     # attempt fails outright, matching the wireframe's zero-tolerance framing.
     candidate = attempt.candidate
-    candidate.result = (
-        Candidate.Result.PASS if (outcome == 'submitted' and all_cleared) else Candidate.Result.FAIL
-    )
     candidate.overall_score = attempt.overall_score
-    candidate.save(update_fields=['result', 'overall_score'])
+    _write_candidate_result(candidate, outcome == 'submitted' and all_cleared)
 
     return attempt

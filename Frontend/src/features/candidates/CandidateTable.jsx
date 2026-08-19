@@ -89,7 +89,9 @@ export default function CandidateTable({
                   <td>{c.quantitative_score ?? '—'}</td>
                   <td>{c.verbal_score ?? '—'}</td>
                   <td>{c.programming_score ?? '—'}</td>
-                  <td>{c.overall_score ?? '—'}</td>
+                  {/* Raw mark count, matching the per-section columns beside it. Showing
+                      overall_score here instead would put a percentage next to raw counts. */}
+                  <td>{c.total_correct != null ? `${c.total_correct}/${c.overall_total}` : '—'}</td>
                   <td><span className={`pill ${RESULT_PILL[c.result] || 'gray'}`}>{c.result_display}</span></td>
                   <td><Link className="link-text" to={`/candidates/${c.candidate_id}`}>View History</Link></td>
                   <td><button className="btn small" onClick={() => onEdit(c)}>Edit</button></td>

@@ -40,12 +40,30 @@ export default function EditCandidateModal({ candidate, onClose, onSaved }) {
 
   async function handleResendInvite() {
     setResendConfirming(false);
+    setSaving(true);
+    let saved = false;
     try {
+      // Save the edits FIRST, then send. The invite is addressed server-side from the stored
+      // candidate record, so re-sending without saving would mail the old address and silently
+      // discard whatever the TA just typed in this form.
+      await candidateApi.updateCandidate(candidate.candidate_id, form);
+      saved = true;
       const res = await candidateApi.resendInvite(candidate.candidate_id);
-      toast.success(res.detail);
+      toast.success(`Changes saved. ${res.detail}`);
       onSaved();
     } catch (err) {
-      toast.error(extractErrorMessage(err));
+      const message = extractErrorMessage(err);
+      // Which half failed matters: if the save failed nothing was sent and the edits are still
+      // unsaved, but if the save succeeded the edits ARE persisted and only the email failed -
+      // one generic error would leave the TA unsure whether to re-enter everything.
+      if (saved) {
+        toast.error(`Changes were saved, but the invite could not be sent: ${message}`);
+        onSaved();
+      } else {
+        toast.error(`Changes not saved, invite not sent: ${message}`);
+      }
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -84,7 +102,17 @@ export default function EditCandidateModal({ candidate, onClose, onSaved }) {
         <div className="modal-overlay" onClick={() => setResendConfirming(false)}>
           <div className="modal-box" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 360 }}>
             <h4>Send Invite Again?</h4>
-            <p>This will re-send the assessment invite link to {candidate.email}. Continue?</p>
+            {/* form.email, NOT candidate.email: the edits are saved before sending, so the invite
+                goes to the address currently in the form. Showing the original prop here named a
+                different address than the one actually about to be emailed. */}
+            <p>
+              Your changes will be saved, then the assessment invite link will be sent to{' '}
+              <b>{form.email}</b>.
+              {form.email !== candidate.email && (
+                <> This is different from the previously saved address ({candidate.email}).</>
+              )}{' '}
+              Continue?
+            </p>
             <div className="btn-row" style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
               <button className="btn" onClick={() => setResendConfirming(false)}>Cancel</button>
               <button className="btn primary" onClick={handleResendInvite}>Confirm &amp; Send</button>

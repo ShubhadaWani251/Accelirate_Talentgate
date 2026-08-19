@@ -89,7 +89,9 @@ export default function CandidateDetail() {
               {candidate.section_results.map((row) => (
                 <tr key={row.section}>
                   <td>{row.section}</td>
-                  <td>{row.score != null ? `${row.score}/10` : '—'}</td>
+                  {/* Denominator comes from the batch's own per-section count - it used to be
+                      hardcoded to /10, which read wrong for any other configuration. */}
+                  <td>{row.score != null ? `${row.score}/${row.total}` : `—/${row.total}`}</td>
                   <td>{row.cutoff}%</td>
                   <td>
                     {row.cleared == null ? (
@@ -106,8 +108,10 @@ export default function CandidateDetail() {
           </table>
           <div style={{ fontSize: 12.5, marginTop: 8 }}>
             <b>
-              Overall: {candidate.overall_score != null
-                ? `${candidate.overall_score}/${candidate.overall_total}`
+              {/* total_correct is the mark COUNT; overall_score is a PERCENTAGE. Rendering the
+                  percentage over the question count is what made 2-of-40 read as "5/40". */}
+              Overall: {candidate.total_correct != null
+                ? `${candidate.total_correct}/${candidate.overall_total} (${candidate.overall_score}%)`
                 : `—/${candidate.overall_total}`}{' '}
               · <span className={`pill ${RESULT_PILL[candidate.result] || 'gray'}`}>{candidate.result_display}</span>
             </b>

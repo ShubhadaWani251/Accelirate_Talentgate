@@ -106,6 +106,8 @@ class CandidateListSerializer(serializers.ModelSerializer):
     verbal_score = serializers.SerializerMethodField()
     programming_score = serializers.SerializerMethodField()
     overall_score = serializers.SerializerMethodField()
+    total_correct = serializers.SerializerMethodField()
+    overall_total = serializers.SerializerMethodField()
     has_attempt = serializers.SerializerMethodField()
 
     class Meta:
@@ -115,7 +117,7 @@ class CandidateListSerializer(serializers.ModelSerializer):
             'college_name', 'degree', 'stream', 'percentage', 'passing_out_year', 'location',
             'aadhaar_masked', 'status', 'status_display', 'result', 'result_display',
             'logical_score', 'quantitative_score', 'verbal_score', 'programming_score',
-            'overall_score', 'has_attempt',
+            'overall_score', 'total_correct', 'overall_total', 'has_attempt',
         ]
 
     def get_aadhaar_masked(self, candidate):
@@ -144,8 +146,21 @@ class CandidateListSerializer(serializers.ModelSerializer):
         return attempt.programming_score if attempt else None
 
     def get_overall_score(self, candidate):
+        """PERCENTAGE - see CandidateDetailSerializer.get_overall_score."""
         attempt = _latest_attempt(candidate)
         return attempt.overall_score if attempt else candidate.overall_score
+
+    def get_total_correct(self, candidate):
+        """RAW COUNT, so the Overall column can read "2/40" consistently with the per-section
+        columns beside it (which are also raw counts) rather than mixing in a percentage.
+        """
+        attempt = _latest_attempt(candidate)
+        return attempt.total_correct if attempt else None
+
+    def get_overall_total(self, candidate):
+        batch = candidate.batch
+        return (batch.logical_questions + batch.quantitative_questions
+                + batch.verbal_questions + batch.programming_questions)
 
     def get_has_attempt(self, candidate):
         return _latest_attempt(candidate) is not None
@@ -173,6 +188,7 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
     section_results = serializers.SerializerMethodField()
     overall_score = serializers.SerializerMethodField()
     overall_total = serializers.SerializerMethodField()
+    total_correct = serializers.SerializerMethodField()
     evidence = serializers.SerializerMethodField()
     timeline = serializers.SerializerMethodField()
 
@@ -182,7 +198,8 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
             'candidate_id', 'full_name', 'email', 'phone',
             'college_name', 'degree', 'stream', 'percentage', 'passing_out_year', 'location',
             'aadhaar_masked', 'batch_id', 'batch_name', 'status', 'status_display',
-            'result', 'result_display', 'overall_score', 'overall_total', 'section_results',
+            'result', 'result_display', 'overall_score', 'overall_total', 'total_correct',
+            'section_results',
             'evidence', 'timeline',
         ]
 
@@ -196,8 +213,18 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
         return _effective_status(candidate)[1]
 
     def get_overall_score(self, candidate):
+        """PERCENTAGE, not a mark count - pair it with `%`, never with overall_total."""
         attempt = _latest_attempt(candidate)
         return attempt.overall_score if attempt else candidate.overall_score
+
+    def get_total_correct(self, candidate):
+        """RAW COUNT of correct answers - this is the numerator for "x/overall_total".
+
+        Added because the UI was rendering overall_score (a percentage) over overall_total (a
+        question count), so 2 correct out of 40 displayed as "5/40" instead of "2/40".
+        """
+        attempt = _latest_attempt(candidate)
+        return attempt.total_correct if attempt else None
 
     def get_overall_total(self, candidate):
         """Denominator for the "14/40" reading on Candidate Details - one mark per question,
@@ -217,6 +244,10 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
             rows.append({
                 'section': label,
                 'score': score,
+                # Per-section denominator. Sent explicitly because the UI previously hardcoded
+                # "/10", which silently showed a wrong total for any batch not configured with
+                # exactly 10 questions per section.
+                'total': getattr(batch, f'{key}_questions'),
                 'cutoff': float(getattr(batch, f'{key}_cutoff')),
                 'cleared': cleared,
             })

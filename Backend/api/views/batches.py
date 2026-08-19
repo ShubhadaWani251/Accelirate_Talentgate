@@ -25,6 +25,7 @@ from api.services.batch_status_filter import filter_batches_by_status_group
 from api.services.candidate_validation import (
     EDITABLE_FIELDS, revalidate_batch_candidates, summarize_candidates,
 )
+from api.services import exam_session
 from api.services.duplicate_check import clear_duplicate, run_duplicate_check
 from api.services.excel_upload import (
     generate_template_workbook, generate_validation_report_workbook,
@@ -117,11 +118,25 @@ class BatchDetailView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
+        cutoffs_before = {f: getattr(batch, f) for f in self.EDITABLE_AFTER_DRAFT}
+
         serializer = BatchSerializer(batch, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-        serializer.save()
+        batch = serializer.save()
         log_action(request, request.user, 'update', 'batch', batch.batch_id)
-        return Response(serializer.data)
+
+        # Results are graded against the cutoffs, so changing one has to re-grade the candidates
+        # already scored under the old value - otherwise Batch Details and Candidate Details keep
+        # showing pass/fail computed at submit time, which no longer matches the batch config.
+        cutoffs_changed = any(
+            getattr(batch, f) != cutoffs_before[f] for f in self.EDITABLE_AFTER_DRAFT
+        )
+        data = serializer.data
+        if cutoffs_changed:
+            regraded = exam_session.regrade_batch(batch)
+            data = {**data, 'regraded_candidates': regraded}
+
+        return Response(data)
 
 
 class BatchDeactivateView(APIView):
