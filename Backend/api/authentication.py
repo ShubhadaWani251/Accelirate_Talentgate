@@ -3,7 +3,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import InvalidToken
 from rest_framework_simplejwt.settings import api_settings
 
-from api.models import User
+from api.models import ExamAttempt, User
 from api.services.tokens import token_issued_before_password_change
 
 
@@ -53,3 +53,43 @@ class CustomJWTAuthentication(JWTAuthentication):
             )
 
         return user
+
+
+class CandidateAttemptAuthentication(JWTAuthentication):
+    """Resolves a JWT's `attempt_id` claim to an ExamAttempt, not a User - the exam-taking
+    portal's candidates aren't in api.User at all (see services/tokens.issue_attempt_token for
+    how this token is minted). request.user ends up being the ExamAttempt itself; that's safe
+    because every candidate-facing view only ever reads it as "the current attempt," never as
+    something with a `.role` for IsAdminOrTA-style checks.
+
+    Also enforces the exam's timer here rather than in each view individually: an attempt whose
+    deadline (started_at + batch.exam_duration_minutes) has passed is auto-finalized on the way
+    out, so a tampered client-side countdown can never buy extra writes past the real deadline.
+    """
+
+    def get_user(self, validated_token):
+        # Deferred import: services.exam_session pulls in services.question_selection, which
+        # only api.models needs - avoids any chance of a load-order cycle with authentication.py
+        # being imported very early (it's on DEFAULT_AUTHENTICATION_CLASSES).
+        from api.services import exam_session
+
+        try:
+            attempt_id = validated_token['attempt_id']
+        except KeyError:
+            raise InvalidToken('Token contained no attempt identification')
+
+        try:
+            attempt = ExamAttempt.objects.select_related(
+                'candidate', 'invitation', 'invitation__batch'
+            ).get(attempt_id=attempt_id)
+        except ExamAttempt.DoesNotExist:
+            raise AuthenticationFailed('Attempt not found', code='attempt_not_found')
+
+        if attempt.status != ExamAttempt.Status.IN_PROGRESS:
+            raise AuthenticationFailed('This attempt is no longer active', code='attempt_closed')
+
+        if exam_session.is_expired(attempt):
+            exam_session.finalize_attempt(attempt, outcome='submitted')
+            raise AuthenticationFailed('Time expired for this attempt', code='attempt_expired')
+
+        return attempt

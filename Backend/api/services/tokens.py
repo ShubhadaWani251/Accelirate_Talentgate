@@ -1,6 +1,6 @@
-from datetime import datetime, timezone as dt_timezone
+from datetime import datetime, timedelta, timezone as dt_timezone
 
-from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
 
 from api.models import RevokedRefreshToken
@@ -19,6 +19,23 @@ def issue_tokens_for_user(user):
     refresh[USER_ID_CLAIM] = user.user_id
     access = refresh.access_token
     return str(refresh), str(access)
+
+
+def issue_attempt_token(attempt):
+    """Mint a short-lived access token scoped to one ExamAttempt - the candidate-portal
+    equivalent of issue_tokens_for_user, but with no refresh-rotation counterpart: a lost or
+    expired token just means resuming via /t/<token> again (see views/exam.py), so there's
+    nothing to revoke or rotate.
+
+    Lifetime is the exam's own duration plus a small grace window, not SIMPLE_JWT's default -
+    CandidateAttemptAuthentication independently re-checks the real deadline
+    (started_at + exam_duration_minutes) on every request, so this JWT expiry is only a backstop
+    against a stale token being replayed long after the exam window closed.
+    """
+    token = AccessToken()
+    token['attempt_id'] = attempt.attempt_id
+    token.set_exp(lifetime=timedelta(minutes=attempt.invitation.batch.exam_duration_minutes + 10))
+    return str(token)
 
 
 def revoke_refresh_token(raw_token):

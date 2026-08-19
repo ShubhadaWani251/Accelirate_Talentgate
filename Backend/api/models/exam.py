@@ -5,7 +5,17 @@ from .question import Question
 
 
 class ExamAttempt(models.Model):
-    """One row per exam attempt with identity verification and proctoring."""
+    """One row per exam attempt with identity verification and proctoring.
+
+    is_authenticated/is_anonymous are provided so DRF's IsAuthenticated permission (which reads
+    request.user.is_authenticated) works when request.user is an ExamAttempt - see
+    api.authentication.CandidateAttemptAuthentication, which resolves a candidate's exam JWT
+    to an instance of this model instead of a User, the same way api.models.User does it for
+    staff logins.
+    """
+    is_authenticated = True
+    is_anonymous = False
+
     class Status(models.TextChoices):
         IN_PROGRESS = 'in_progress', 'In Progress'
         SUBMITTED = 'submitted', 'Submitted'

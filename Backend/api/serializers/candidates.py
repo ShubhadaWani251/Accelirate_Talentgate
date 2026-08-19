@@ -2,6 +2,7 @@ from rest_framework import serializers
 
 from api.models import AuditLog, Candidate, ExamAttempt
 from api.serializers.common import mask_aadhaar
+from api.services.exam_session import termination_label
 
 SECTION_LABELS = {
     'logical': 'Logical & Analytical',
@@ -280,7 +281,8 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
                 events.append({
                     'timestamp': attempt.terminated_at,
                     'event': 'Terminated',
-                    'details': attempt.termination_reason,
+                    # Readable label, not the raw stored code - this cell is read by a TA.
+                    'details': termination_label(attempt.termination_reason),
                 })
 
         events.sort(key=lambda e: e['timestamp'])

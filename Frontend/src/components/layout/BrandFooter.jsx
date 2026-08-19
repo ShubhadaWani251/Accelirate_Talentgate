@@ -1,6 +1,7 @@
 const ROLE_LABELS = {
   admin: 'Administrator',
   ta: 'Staffing User',
+  candidate: 'Candidate Exam',
 };
 
 export default function BrandFooter({ roleCode }) {

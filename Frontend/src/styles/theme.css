@@ -295,6 +295,33 @@ table.data-table tbody tr:hover td { background: var(--accent-soft); }
 .pill.amber { background: var(--amber-bg); color: var(--amber); }
 .pill.red { background: var(--red-bg); color: var(--red); }
 
+/* ---------- Candidate exam-taking portal ---------- */
+.timer-badge {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 999px;
+  font-size: 13px; font-weight: 700; background: var(--accent-soft); color: var(--brand-blue-dark);
+}
+.timer-badge.low-time { background: var(--red-bg); color: var(--brand-red-dark); }
+
+.section-marker {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px;
+  color: var(--brand-blue-dark); background: var(--accent-soft); padding: 8px 12px;
+  border-radius: 8px; margin: 22px 0 12px;
+}
+.section-marker:first-of-type { margin-top: 4px; }
+
+.q-card {
+  background: #fff; border: 1px solid #e7eaee; border-radius: 12px; padding: 16px 18px;
+  box-shadow: 0 1px 3px rgba(16,24,40,.04); margin-bottom: 14px;
+}
+.q-num { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; margin-bottom: 6px; }
+.q-text { font-size: 13.5px; margin-bottom: 12px; line-height: 1.5; }
+.option-row {
+  display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px;
+  font-size: 13px; cursor: pointer; transition: background .12s ease;
+}
+.option-row:hover { background: var(--accent-soft); }
+.option-row input[type='radio'] { width: 16px; height: 16px; accent-color: var(--brand-blue); cursor: pointer; }
+
 .wizard-steps { display: flex; gap: 8px; margin-bottom: 22px; flex-wrap: wrap; }
 .wizard-steps .wstep {
   padding: 7px 16px; border-radius: 999px; font-size: 12px; font-weight: 600; color: var(--muted);

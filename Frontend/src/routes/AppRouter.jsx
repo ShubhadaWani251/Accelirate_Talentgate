@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { authCheckStarted, credentialsReceived, sessionCleared, selectAuthStatus, selectRoleCode } from '../features/auth/authSlice';
 import * as authApi from '../api/authApi';
@@ -20,6 +20,23 @@ import QuestionBank from '../pages/questions/QuestionBank';
 import QuestionUpload from '../pages/questions/QuestionUpload';
 import UserManagement from '../pages/users/UserManagement';
 import EditUser from '../pages/users/EditUser';
+import { ExamSessionProvider } from '../features/exam/ExamSessionProvider';
+import ExamVerify from '../pages/exam/ExamVerify';
+import ExamFullscreenGate from '../pages/exam/ExamFullscreenGate';
+import ExamCameraPermission from '../pages/exam/ExamCameraPermission';
+import ExamInstructions from '../pages/exam/ExamInstructions';
+import ExamIdVerify from '../pages/exam/ExamIdVerify';
+import ExamAttemptPage from '../pages/exam/ExamAttemptPage';
+
+// Wraps the candidate exam-taking routes in their own local session context - deliberately
+// NOT ProtectedRoute/ProtectedLayout, which assume a logged-in staff user.
+function ExamPortalLayout() {
+  return (
+    <ExamSessionProvider>
+      <Outlet />
+    </ExamSessionProvider>
+  );
+}
 
 function RoleHome() {
   const roleCode = useSelector(selectRoleCode);
@@ -51,6 +68,15 @@ export default function AppRouter() {
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/verify-otp" element={<OtpVerification />} />
         <Route path="/logged-out" element={<LoggedOut />} />
+
+        <Route element={<ExamPortalLayout />}>
+          <Route path="/t/:token" element={<ExamVerify />} />
+          <Route path="/t/:token/fullscreen" element={<ExamFullscreenGate />} />
+          <Route path="/t/:token/camera" element={<ExamCameraPermission />} />
+          <Route path="/t/:token/instructions" element={<ExamInstructions />} />
+          <Route path="/t/:token/identity" element={<ExamIdVerify />} />
+          <Route path="/t/:token/exam" element={<ExamAttemptPage />} />
+        </Route>
 
         <Route element={<ProtectedRoute><ProtectedLayout /></ProtectedRoute>}>
           <Route

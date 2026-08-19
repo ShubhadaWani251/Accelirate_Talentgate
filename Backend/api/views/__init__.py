@@ -45,6 +45,17 @@ from .questions import (
     QuestionRowValidationView,
 )
 from .users import UserListCreateView, UserDetailView
+from .exam import (
+    ExamTokenLandingView,
+    ExamVerifyEmailView,
+    ExamIdentityCaptureView,
+    ExamBeginView,
+    ExamSessionView,
+    ExamAnswerView,
+    ExamRecordingChunkView,
+    ExamTerminateView,
+    ExamSubmitView,
+)
 
 __all__ = [
     'health_check',
@@ -63,4 +74,7 @@ __all__ = [
     'QuestionSectionListView', 'QuestionListCreateView', 'QuestionDetailView',
     'QuestionTemplateDownloadView', 'QuestionBulkUploadView', 'QuestionRowValidationView',
     'UserListCreateView', 'UserDetailView',
+    'ExamTokenLandingView', 'ExamVerifyEmailView', 'ExamIdentityCaptureView',
+    'ExamBeginView', 'ExamSessionView', 'ExamAnswerView', 'ExamRecordingChunkView',
+    'ExamTerminateView', 'ExamSubmitView',
 ]

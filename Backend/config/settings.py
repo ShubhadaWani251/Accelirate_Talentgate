@@ -223,6 +223,24 @@ DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'noreply@accelirate.co
 # address and is only the fallback so the invite never goes out with a blank contact.
 SUPPORT_EMAIL = os.environ.get('SUPPORT_EMAIL', '')
 
+# Azure Blob Storage - proctoring evidence for the candidate exam-taking portal (identity
+# photos, continuous session recording). See api/services/blob_storage.py. Left unset while
+# DEBUG=True falls back to local disk (MEDIA_ROOT below) so the exam flow is testable without
+# real Azure credentials; left unset with DEBUG=False raises clearly at first use instead of
+# silently no-op'ing, since a missing evidence upload would otherwise fail invisibly mid-exam.
+AZURE_STORAGE_CONNECTION_STRING = os.environ.get('AZURE_STORAGE_CONNECTION_STRING', '')
+AZURE_STORAGE_CONTAINER_EVIDENCE = os.environ.get('AZURE_STORAGE_CONTAINER_EVIDENCE', 'proctoring-evidence')
+
+# Local-disk fallback for the above, DEBUG-only (see api/services/blob_storage.py). Not used at
+# all once AZURE_STORAGE_CONNECTION_STRING is set, and never reachable with DEBUG=False.
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+# Base URL the local-disk fallback stamps onto evidence URLs it returns - CandidateEvidenceZipView
+# fetches those URLs with a plain urllib.request.urlopen(), which needs an absolute URL, not a
+# relative /media/... path. Only matters for this DEBUG-only fallback; production always goes
+# through the real Azure SAS URLs instead.
+LOCAL_MEDIA_BASE_URL = os.environ.get('LOCAL_MEDIA_BASE_URL', 'http://127.0.0.1:8000')
+
 # Request body / file upload size caps. BatchUploadView additionally enforces its own tighter
 # 5MB limit on the candidate spreadsheet specifically (see MAX_UPLOAD_SIZE_BYTES) - these are the
 # app-wide backstop so no endpoint can be made to buffer an unbounded request body into memory.

@@ -1,6 +1,7 @@
 const ROLE_LABELS = {
   admin: 'Administrator Portal',
   ta: 'Staffing User Portal',
+  candidate: 'Candidate Exam Portal',
 };
 
 export default function BrandHeader({ roleCode }) {

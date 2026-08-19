@@ -8,6 +8,7 @@ BATCH-0098" from "this row was uploaded today".
 """
 
 from api.models import AuditLog, Candidate, ExamAttempt, Invitation
+from api.services.exam_session import termination_label
 
 # Audit actions worth surfacing to a TA, mapped to human-readable labels. Anything not listed
 # (internal bookkeeping, reads) is intentionally omitted rather than dumped raw into the modal.
@@ -33,9 +34,9 @@ def _attempt_events(attempt, batch_name):
         events.append(_event(attempt.started_at, 'Exam Started', batch_name))
 
     if attempt.status == ExamAttempt.Status.TERMINATED:
-        reason = attempt.termination_reason or 'no reason recorded'
         events.append(_event(attempt.terminated_at or attempt.started_at,
-                             f'Terminated - {reason}', batch_name))
+                             f'Terminated - {termination_label(attempt.termination_reason)}',
+                             batch_name))
     elif attempt.status == ExamAttempt.Status.SUBMITTED:
         score = f' ({attempt.overall_score})' if attempt.overall_score is not None else ''
         events.append(_event(attempt.submitted_at or attempt.started_at,

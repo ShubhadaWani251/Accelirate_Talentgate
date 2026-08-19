@@ -63,4 +63,18 @@ urlpatterns = [
 
     path('users/', views.UserListCreateView.as_view(), name='user-list-create'),
     path('users/<int:user_id>/', views.UserDetailView.as_view(), name='user-detail'),
+
+    # Candidate exam-taking portal - public up through identity capture, then authenticated via
+    # the attempt JWT (CandidateAttemptAuthentication), never CustomJWTAuthentication.
+    path('exam/token/<str:token>/', views.ExamTokenLandingView.as_view(), name='exam-token-landing'),
+    path('exam/token/<str:token>/verify-email/', views.ExamVerifyEmailView.as_view(),
+         name='exam-verify-email'),
+    path('exam/token/<str:token>/identity/', views.ExamIdentityCaptureView.as_view(),
+         name='exam-identity'),
+    path('exam/begin/', views.ExamBeginView.as_view(), name='exam-begin'),
+    path('exam/session/', views.ExamSessionView.as_view(), name='exam-session'),
+    path('exam/answers/<int:question_id>/', views.ExamAnswerView.as_view(), name='exam-answer'),
+    path('exam/recording/chunk/', views.ExamRecordingChunkView.as_view(), name='exam-recording-chunk'),
+    path('exam/terminate/', views.ExamTerminateView.as_view(), name='exam-terminate'),
+    path('exam/submit/', views.ExamSubmitView.as_view(), name='exam-submit'),
 ]
