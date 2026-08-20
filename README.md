@@ -146,6 +146,25 @@ and a comment on what each one does. Highlights:
 | Apply migrations | `python manage.py migrate` | - |
 | Create a migration | `python manage.py makemigrations api` | - |
 
+### Scheduled jobs (required in any real deployment)
+
+Two housekeeping commands have to run on a timer. Neither is optional: without them, abandoned
+exam attempts sit `in_progress` forever and unfinalized draft batches are never cleaned up.
+
+No Celery broker is configured (`celery` / `django-celery-beat` are in `requirements.txt` but
+nothing is wired up in `settings.py`), so these are plain management commands intended to be
+driven by whatever scheduler the host already provides - cron, Windows Task Scheduler, or an
+Azure WebJob.
+
+| Command | Suggested interval | What it does |
+|---|---|---|
+| `python manage.py finalize_expired_attempts` | every 5-15 min | Finalizes exam attempts still `in_progress` past their deadline, and ones whose candidate never started before the invitation link expired. |
+| `python manage.py delete_expired_draft_batches` | every 15-60 min | **Deletes** Draft batches not finalized within 24 hours of creation, together with their staged candidates. Run `--dry-run` first to see what it would remove. |
+
+Both are safe to run more often than suggested - each is idempotent and does nothing when there
+is nothing to process. `delete_expired_draft_batches` really deletes rows, so read
+`Backend/api/services/draft_expiry.py` before changing the 24-hour window.
+
 ## Testing
 
 There is currently no meaningful automated test suite (`Backend/api/tests.py` is Django's
@@ -161,8 +180,10 @@ real test suite is an open item, not something this README can claim is already 
   behind explicit opt-in flags - set both `True` behind a TLS-terminating proxy.
 - `CORPORATE_EMAIL_DOMAIN` currently includes a non-corporate domain for testing purposes -
   confirm this is tightened before go-live.
-- The candidate/exam-taking flow (see Status above) has no backend endpoints or frontend
-  routes yet; invitation emails will link to a route that 404s until that's built.
+- The two scheduled commands above must be wired into the host's scheduler. Draft-batch expiry
+  in particular has a lazy fallback (an expired draft is deleted the moment anyone touches it)
+  and a queryset filter that hides expired drafts immediately, but neither is a substitute:
+  only the scheduled job removes a draft that nobody ever looks at again.
 
 ## Architectural decisions log
 

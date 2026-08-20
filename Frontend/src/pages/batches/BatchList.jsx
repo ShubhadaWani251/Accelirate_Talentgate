@@ -5,6 +5,9 @@ import * as batchApi from '../../api/batchApi';
 import PaginationControls from '../../components/common/PaginationControls';
 import BatchStatusFilter from '../../components/common/BatchStatusFilter';
 import { ListPageSkeleton, SkeletonTableRows } from '../../components/loading/Skeleton';
+import {
+  formatExpiryDate, formatTimeLeft, isExpiringSoon, parseExpiry,
+} from '../../utils/draftExpiry';
 import { extractErrorMessage } from '../../utils/passwordSchema';
 
 const STATUS_PILL = { draft: 'gray', in_progress: 'blue', completed: 'green', cancelled: 'red' };
@@ -14,6 +17,24 @@ const EMPTY_MESSAGE = {
   cancelled: 'No Cancelled batches found.',
   all: 'No batches yet.',
 };
+
+// A quiet second line under the batch name, not a badge or a live ticking clock: this is
+// information a TA needs when they glance at the Draft list, not something to draw the eye on
+// every row. Deletion is the backend's job (Backend/api/services/draft_expiry.py) - this only
+// reports the deadline it will act on.
+function DraftExpiryNote({ batch }) {
+  const expiresAt = parseExpiry(batch);
+  if (!expiresAt) return null;
+  const soon = isExpiringSoon(expiresAt);
+  return (
+    <div
+      style={{ fontSize: 11.5, marginTop: 3, color: soon ? 'var(--brand-red)' : 'var(--muted)' }}
+      title={`This draft is deleted automatically at ${formatExpiryDate(expiresAt)} if it isn't finalized.`}
+    >
+      {formatTimeLeft(expiresAt)}
+    </div>
+  );
+}
 
 export default function BatchList() {
   const [batches, setBatches] = useState([]);
@@ -88,6 +109,9 @@ export default function BatchList() {
         <div className="alert" style={{ marginBottom: 12 }}>
           These uploads were started but never completed — no batch has been created and no
           invites have been sent. Opening one resumes it at the step it was left on.
+          {' '}A draft is kept for <b>24 hours from when it was created</b>; if it isn&apos;t
+          finalized by then, it and its uploaded candidates are deleted automatically. Editing
+          a draft or uploading more candidates doesn&apos;t extend that window.
         </div>
       )}
       {batchStatus === 'cancelled' && (
@@ -119,7 +143,12 @@ export default function BatchList() {
             ) : (
               batches.map((b) => (
                 <tr key={b.batch_id}>
-                  <td>{b.batch_name}</td>
+                  <td>
+                    {b.batch_name}
+                    {/* Only drafts carry draft_expires_at - it's null for every other status,
+                        so nothing is shown on a finalized batch. */}
+                    <DraftExpiryNote batch={b} />
+                  </td>
                   <td>{b.college_name}</td>
                   <td>{b.primary_ta_user_name}</td>
                   <td>{b.total_candidates}</td>

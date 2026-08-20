@@ -5,6 +5,7 @@ from django.db.models import Case, Count, IntegerField, Q, Value, When
 from api.models import Batch, Candidate, Question, QuestionBankSection, User
 from api.serializers.batch import annotate_batch_counts
 from api.serializers.question import normalize_question_text
+from api.services import draft_expiry
 from api.services.access import visible_candidates_qs
 from api.services.batch_status_filter import filter_batches_by_status_group
 
@@ -13,7 +14,10 @@ def _batches_qs_for(user):
     # Every TA sees every batch, same as an admin - the owner narrowing that used to live here
     # was removed deliberately (see services/access.py for the rationale). Kept as a function
     # so the dashboard has the same single seam the other call sites do.
-    return Batch.objects.filter(is_deleted=False)
+    #
+    # Expired drafts are excluded for the same reason as in the batch list: they're pending
+    # deletion, so neither the Draft overview nor the stat cards should still be counting them.
+    return draft_expiry.exclude_expired(Batch.objects.filter(is_deleted=False))
 
 
 def _build_stats(batches_qs, candidates_qs):
@@ -61,6 +65,11 @@ def _build_batches_overview(batches_qs, is_admin, status_group='active'):
             'pass_count': batch.pass_count,
             'fail_count': batch.fail_count,
             'borderline_count': 0,
+            # Null for anything already finalized; the Draft view uses it for the countdown.
+            'draft_expires_at': (
+                expires_at.isoformat()
+                if (expires_at := draft_expiry.draft_expires_at(batch)) else None
+            ),
         }
         if is_admin:
             row['primary_ta_user_name'] = batch.primary_ta_user.full_name
