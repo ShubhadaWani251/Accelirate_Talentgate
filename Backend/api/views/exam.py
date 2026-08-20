@@ -20,10 +20,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from api.authentication import CandidateAttemptAuthentication
-from api.models import ExamAnswer, ExamAttempt, Invitation, ProctoringEvent
+from api.models import ExamAnswer, ExamAttempt, Invitation
 from api.serializers.exam import AnswerSerializer, EmailVerifySerializer, TerminateSerializer
 from api.services import blob_storage, exam_session
-from api.services.exam_session import TERMINATION_MESSAGES, TerminationReason, is_violation_reason
+from api.services.exam_session import TerminationReason
 from api.services.question_selection import SECTION_LABELS, SECTION_ORDER, InsufficientQuestionsError
 from api.services.tokens import issue_attempt_token
 from api.utils.net import get_client_ip, ratelimit_ip_key
@@ -310,13 +310,20 @@ class ExamRecordingChunkView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class ExamTerminateView(APIView):
-    """POST /api/exam/terminate/ - the candidate's browser calls this the instant any
-    zero-tolerance trigger fires (tab switch, window blur, full-screen exit, a devtools/
-    view-source/screenshot key, or camera/mic loss - see the frontend's proctoring hooks).
-    First call wins (idempotent no-op if the attempt is already finalized by the time this
-    lands). `reason` drives both the stored ProctoringEvent/termination_reason and the specific
-    message returned to the candidate - never a single generic message regardless of cause.
+class ExamViolationView(APIView):
+    """POST /api/exam/violation/ - the candidate's browser calls this the instant any proctoring
+    trigger fires (tab switch, window blur, full-screen exit, a devtools/view-source/screenshot
+    key, or camera/mic loss - see the frontend's proctoring hooks).
+
+    The SERVER decides whether that ends the attempt. Leaving the exam window earns one warning
+    first; a deliberate keypress or a lost camera still ends it on the first occurrence. See
+    exam_session.record_violation for the split and why. The browser is told what happened via
+    `action` ('warned' | 'terminated' | 'already_closed') and must not decide for itself - the
+    warning count lives in the database precisely so a reload can't reset it.
+
+    Idempotent: a duplicate call for an already-finalized attempt reports the termination that
+    already happened rather than issuing a fresh warning. `reason` drives both the stored
+    ProctoringEvent and the specific message returned - never one generic message for every cause.
     """
     authentication_classes = [CandidateAttemptAuthentication]
     permission_classes = [IsAuthenticated]
@@ -325,16 +332,7 @@ class ExamTerminateView(APIView):
         serializer = TerminateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         reason_code = serializer.validated_data.get('reason', TerminationReason.TAB_SWITCH)
-
-        attempt = request.user
-        if attempt.status == ExamAttempt.Status.IN_PROGRESS:
-            ProctoringEvent.objects.create(
-                attempt=attempt, event_type=reason_code,
-                is_violation=is_violation_reason(reason_code),
-                severity=ProctoringEvent.Severity.CRITICAL,
-            )
-            exam_session.finalize_attempt(attempt, outcome='terminated', reason=reason_code)
-        return Response({'detail': TERMINATION_MESSAGES[reason_code], 'reason': reason_code})
+        return Response(exam_session.record_violation(request.user, reason_code))
 
 
 class ExamSubmitView(APIView):

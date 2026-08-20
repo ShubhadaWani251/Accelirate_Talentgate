@@ -85,6 +85,135 @@ def is_violation_reason(reason_code):
     return reason_code not in _NON_VIOLATION_REASONS
 
 
+# ---------------------------------------------------------------- warning tier
+#
+# Leaving the exam window gets ONE warning before the attempt is ended. Only this family of
+# reasons is warnable, and deliberately so:
+#
+#   - They can genuinely happen by accident. A notification stealing focus, a stray Alt+Tab, a
+#     misplaced Esc - none of those is proof of cheating, and termination is irreversible.
+#   - fullscreen_exit has to be in here even though the request was specifically about tabs:
+#     on Chrome/Windows, switching away from a full-screen tab ALSO drops full-screen, so the
+#     two arrive together. If fullscreen_exit stayed zero-tolerance it would win the reason
+#     ranking and terminate on the very first tab switch, and the warning would never be seen.
+#
+# Everything else stays first-strike. A devtools/view-source/Print-Screen keypress is a
+# deliberate act nobody performs by accident, and system_issue means the camera/mic feed is
+# gone - the exam cannot continue at all, so "warning, don't do it again" would be nonsense.
+WARNABLE_REASONS = {
+    TerminationReason.TAB_SWITCH,
+    TerminationReason.WINDOW_BLUR,
+    TerminationReason.FULLSCREEN_EXIT,
+}
+
+# One warning, then out. Counted server-side (see record_violation) rather than in the browser,
+# so reloading the page - or clearing storage - cannot hand out a fresh warning.
+MAX_WARNINGS = 1
+
+_WARNING_CAUSES = {
+    TerminationReason.TAB_SWITCH:
+        'you switched to a different browser tab, or the exam tab was hidden or minimized',
+    TerminationReason.WINDOW_BLUR:
+        'the exam window lost focus - for example Alt+Tab, clicking another window or the '
+        'taskbar, or opening another application',
+    TerminationReason.FULLSCREEN_EXIT:
+        'the assessment left full-screen mode',
+}
+
+
+def warning_message(reason_code):
+    """The candidate-facing warning text - names the specific cause, then the consequence.
+
+    Same principle as TERMINATION_MESSAGES: never one generic "you did something wrong" for
+    every cause. The consequence is stated in full because this is the only notice they get.
+    """
+    cause = _WARNING_CAUSES.get(reason_code, 'the assessment window was left')
+    return (
+        f'Warning: {cause}. '
+        f'This is your only warning. Stay in the assessment window until you submit - if this '
+        f'happens again your assessment will be ended immediately, your answers will be '
+        f'submitted as they are, and it cannot be resumed.'
+    )
+
+
+def warnings_used(attempt):
+    """How many warnings this attempt has already been given.
+
+    Read from the ProctoringEvent stream rather than a counter column: the events are already
+    recorded for the TA's evidence view, so there is no second source of truth to keep in step,
+    and no migration needed.
+    """
+    from api.models import ProctoringEvent
+    return ProctoringEvent.objects.filter(
+        attempt=attempt, severity=ProctoringEvent.Severity.WARNING, is_violation=True,
+    ).count()
+
+
+def record_violation(attempt, reason_code):
+    """Decide what a proctoring violation does: warn once, or end the attempt.
+
+    Returns {'action', 'detail', 'reason', 'warnings_used', 'warnings_allowed'} where action is
+    'warned', 'terminated', or 'already_closed'.
+
+    The whole decision runs under a row lock on the attempt so two violations arriving together
+    can't both read "0 warnings used" and both let the candidate off. The browser collapses
+    simultaneous triggers into one call already (see the frontend's settle window), but that is
+    a convenience, not a guarantee - this is the check that actually holds.
+    """
+    from api.models import ProctoringEvent
+
+    with transaction.atomic():
+        locked = (ExamAttempt.objects
+                  .select_for_update()
+                  .select_related('invitation__batch', 'candidate')
+                  .get(pk=attempt.pk))
+
+        if locked.status != ExamAttempt.Status.IN_PROGRESS:
+            # Already finalized - a late duplicate call. Report the termination message rather
+            # than pretending this was a fresh warning.
+            return {
+                'action': 'already_closed',
+                'reason': locked.termination_reason or reason_code,
+                'detail': TERMINATION_MESSAGES.get(
+                    locked.termination_reason or reason_code,
+                    TERMINATION_MESSAGES[TerminationReason.TAB_SWITCH],
+                ),
+                'warnings_used': warnings_used(locked),
+                'warnings_allowed': MAX_WARNINGS,
+            }
+
+        used = warnings_used(locked)
+        if reason_code in WARNABLE_REASONS and used < MAX_WARNINGS:
+            ProctoringEvent.objects.create(
+                attempt=locked, event_type=reason_code,
+                event_details={'outcome': 'warned', 'warning_number': used + 1},
+                is_violation=True,
+                severity=ProctoringEvent.Severity.WARNING,
+            )
+            return {
+                'action': 'warned',
+                'reason': reason_code,
+                'detail': warning_message(reason_code),
+                'warnings_used': used + 1,
+                'warnings_allowed': MAX_WARNINGS,
+            }
+
+        ProctoringEvent.objects.create(
+            attempt=locked, event_type=reason_code,
+            event_details={'outcome': 'terminated', 'warnings_used': used},
+            is_violation=is_violation_reason(reason_code),
+            severity=ProctoringEvent.Severity.CRITICAL,
+        )
+        finalize_attempt(locked, outcome='terminated', reason=reason_code)
+        return {
+            'action': 'terminated',
+            'reason': reason_code,
+            'detail': TERMINATION_MESSAGES[reason_code],
+            'warnings_used': used,
+            'warnings_allowed': MAX_WARNINGS,
+        }
+
+
 def remaining_seconds(attempt):
     """Server-authoritative countdown - the only clock that matters. A tampered client-side
     timer can't extend an attempt past this, since every write endpoint checks it via

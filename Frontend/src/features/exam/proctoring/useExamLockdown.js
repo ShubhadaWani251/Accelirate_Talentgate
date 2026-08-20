@@ -28,7 +28,11 @@ function isPrintScreen(e) {
     || e.key === 'Snapshot' || e.keyCode === 44;
 }
 
-export default function useExamLockdown(active, onViolation) {
+// `rearmKey` re-arms the latch after a warning for a DIFFERENT (warnable) trigger has been
+// acknowledged, so a candidate who was warned for switching tabs can still be caught pressing
+// F12 afterwards. The triggers in this hook are themselves never warnable - see
+// exam_session.WARNABLE_REASONS.
+export default function useExamLockdown(active, onViolation, rearmKey = 0) {
   const firedRef = useRef(false);
 
   useEffect(() => {
@@ -74,5 +78,5 @@ export default function useExamLockdown(active, onViolation) {
       document.removeEventListener('keyup', handleKeyup);
       window.removeEventListener('beforeunload', warnBeforeUnload);
     };
-  }, [active, onViolation]);
+  }, [active, onViolation, rearmKey]);
 }

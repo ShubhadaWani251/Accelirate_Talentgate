@@ -32,7 +32,11 @@ export const uploadRecordingChunk = (chunkBlob) =>
     headers: { 'Content-Type': 'application/octet-stream' },
   });
 
-export const terminateAttempt = (reason) =>
-  examAxiosClient.post('/exam/terminate/', reason ? { reason } : {}).then((r) => r.data);
+// Reports a proctoring trigger. The SERVER decides whether it's a warning or a termination -
+// leaving the exam window earns one warning first, a devtools/screenshot key or a lost camera
+// does not. Resolves to { action: 'warned' | 'terminated' | 'already_closed', detail, reason,
+// warnings_used, warnings_allowed }. Never assume termination from the fact that this was called.
+export const reportViolation = (reason) =>
+  examAxiosClient.post('/exam/violation/', reason ? { reason } : {}).then((r) => r.data);
 
 export const submitExam = () => examAxiosClient.post('/exam/submit/').then((r) => r.data);

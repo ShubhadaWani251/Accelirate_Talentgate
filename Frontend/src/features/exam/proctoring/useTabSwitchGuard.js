@@ -1,11 +1,16 @@
 import { useEffect, useRef } from 'react';
 
-// Zero-tolerance: the FIRST tab switch, window minimize, or window-blur while the exam screen
-// is active ends the attempt immediately - no warning tier, no violation count. Matches the
-// wireframe's own cepwfWatchTabSwitch script (visibilitychange + blur). onViolation receives the
-// specific reason code ('tab_switch' vs 'window_blur') so the candidate sees exactly what
-// triggered it, not one generic message for both.
-export default function useTabSwitchGuard(active, onViolation) {
+// Reports a tab switch, window minimize, or window-blur while the exam screen is active.
+// Matches the wireframe's own cepwfWatchTabSwitch script (visibilitychange + blur).
+// onViolation receives the specific reason code ('tab_switch' vs 'window_blur') so the candidate
+// sees exactly what triggered it, not one generic message for both.
+//
+// This hook does NOT decide the consequence. Leaving the exam window earns one warning before
+// the attempt ends, and that count is held by the server (see exam_session.record_violation) -
+// a browser-side counter would reset on reload. `rearmKey` is bumped by the caller after a
+// warning is acknowledged, which re-runs this effect and clears the once-only latch so the next
+// occurrence is reported too.
+export default function useTabSwitchGuard(active, onViolation, rearmKey = 0) {
   const firedRef = useRef(false);
 
   useEffect(() => {
@@ -30,5 +35,6 @@ export default function useTabSwitchGuard(active, onViolation) {
       document.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('blur', handleBlur);
     };
-  }, [active, onViolation]);
+    // rearmKey is intentionally a dependency - changing it is how the caller re-arms the latch.
+  }, [active, onViolation, rearmKey]);
 }

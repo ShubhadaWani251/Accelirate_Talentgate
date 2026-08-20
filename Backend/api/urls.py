@@ -75,6 +75,6 @@ urlpatterns = [
     path('exam/session/', views.ExamSessionView.as_view(), name='exam-session'),
     path('exam/answers/<int:question_id>/', views.ExamAnswerView.as_view(), name='exam-answer'),
     path('exam/recording/chunk/', views.ExamRecordingChunkView.as_view(), name='exam-recording-chunk'),
-    path('exam/terminate/', views.ExamTerminateView.as_view(), name='exam-terminate'),
+    path('exam/violation/', views.ExamViolationView.as_view(), name='exam-violation'),
     path('exam/submit/', views.ExamSubmitView.as_view(), name='exam-submit'),
 ]

@@ -43,6 +43,15 @@ export default function ExamAttemptPage() {
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
   const [terminationMessage, setTerminationMessage] = useState('');
+  // The one warning a candidate gets for leaving the exam window: { detail, used, allowed }, or
+  // null. Purely for display - the authoritative count lives on the server, so this is not what
+  // stops a second warning being issued.
+  const [warning, setWarning] = useState(null);
+  // Re-arm counters for the guards' once-only latches. Two of them, because the window guards
+  // and the full-screen guard have to come back at different moments - see onViolation and
+  // acknowledgeWarning.
+  const [windowGuardGen, setWindowGuardGen] = useState(0);
+  const [fullscreenGuardGen, setFullscreenGuardGen] = useState(0);
   // Gates the actual question content behind a full-screen entry click - requestFullscreen()
   // needs a real user gesture, so it can't fire automatically on page load. Already true if the
   // candidate is arriving from the earlier ExamFullscreenGate screen (the normal path) - this
@@ -116,17 +125,67 @@ export default function ExamAttemptPage() {
     state.timer = setTimeout(() => {
       state.fired = true;
       examApi
-        .terminateAttempt(state.reason)
-        .then((data) => setTerminationMessage(data.detail))
-        .catch(() => setTerminationMessage(
-          // Deliberately cause-agnostic: this only runs when the terminate call itself failed, so
-          // the real reason is unknown here. It must NOT claim a specific cause (it previously
-          // asserted camera/mic loss, which was simply wrong for e.g. a devtools attempt).
-          'Your assessment was ended and could not be reported to the server. '
-          + 'Please contact the Staffing team.'
-        ))
-        .finally(() => setView('terminated'));
+        .reportViolation(state.reason)
+        .then((data) => {
+          // The SERVER decides warn-vs-terminate; this only renders the outcome. Leaving the
+          // exam window earns one warning, counted in the database so a reload can't earn
+          // another - see exam_session.record_violation.
+          if (data.action === 'warned') {
+            setWarning({ detail: data.detail, used: data.warnings_used,
+                         allowed: data.warnings_allowed });
+            // Re-arm the window guards NOW, not on acknowledgement. Otherwise a candidate
+            // could take their warning and then read notes in another window for as long as
+            // they left the modal open, with every further trigger swallowed by the latches.
+            // The full-screen guard is deliberately left latched until acknowledgeWarning has
+            // actually restored full-screen - re-arming it here would fire it immediately on
+            // the very state the warning was just given for.
+            state.fired = false;
+            state.reason = null;
+            state.timer = null;
+            setWindowGuardGen((g) => g + 1);
+            return;
+          }
+          setTerminationMessage(data.detail);
+          setView('terminated');
+        })
+        .catch(() => {
+          // Only reached when the call itself failed, so the real outcome is unknown. Ending
+          // the attempt is the safe default - treating an unreachable server as "warning
+          // granted" would let a dropped connection buy unlimited tab switches. Deliberately
+          // cause-agnostic: it must NOT claim a specific cause (it previously asserted
+          // camera/mic loss, which was simply wrong for e.g. a devtools attempt).
+          setTerminationMessage(
+            'Your assessment was ended and could not be reported to the server. '
+            + 'Please contact the Staffing team.'
+          );
+          setView('terminated');
+        });
     }, REASON_SETTLE_MS);
+  }, []);
+
+  // Acknowledging the warning puts the candidate back in full-screen and re-arms the
+  // full-screen guard. A tab switch usually drops full-screen on its way out (Chrome releases
+  // it when the tab is backgrounded), so without re-entering here the candidate would sit
+  // outside full-screen and be terminated for it moments later. requestFullscreen needs a real
+  // user gesture - this button click is that gesture, which is why the warning is a dismissible
+  // modal rather than a toast that fades on its own.
+  const acknowledgeWarning = useCallback(async () => {
+    const state = violationRef.current;
+    // Suppressed across the transition only: entering full-screen can itself produce a
+    // transient focus event, and the window guards are live by this point (re-armed when the
+    // warning arrived), so without this the acknowledgement click could terminate the
+    // candidate for the act of complying.
+    state.fired = true;
+    if (state.timer) {
+      clearTimeout(state.timer);
+      state.timer = null;
+    }
+    setWarning(null);
+    if (FULLSCREEN_SUPPORTED && !isFullscreen()) await enterFullscreen();
+    state.fired = false;
+    state.reason = null;
+    // Re-armed last, once full-screen is actually back.
+    setFullscreenGuardGen((g) => g + 1);
   }, []);
 
   const examActive = view === 'exam' && fullscreenReady && begun;
@@ -156,9 +215,9 @@ export default function ExamAttemptPage() {
   // Only counts down once the server has actually started the exam - the `begun` gate also stops
   // it from ticking 0 -> onExpire and auto-submitting a blank paper before the exam starts.
   const timer = useExamTimer(sessionState?.remaining_seconds ?? 0, finishExam, begun);
-  useTabSwitchGuard(view === 'exam', onViolation);
-  useFullscreenGuard(examActive, onViolation);
-  useExamLockdown(examActive, onViolation);
+  useTabSwitchGuard(view === 'exam', onViolation, windowGuardGen);
+  useFullscreenGuard(examActive, onViolation, fullscreenGuardGen);
+  useExamLockdown(examActive, onViolation, windowGuardGen);
   useSessionRecorder(mediaStreamRef.current, examActive);
 
   // "System issue" - the camera/mic feed the recorder depends on disappearing mid-exam (device
@@ -227,9 +286,9 @@ export default function ExamAttemptPage() {
           <div className="auth-card" style={{ textAlign: 'center' }}>
             <h3>Enter Full-Screen to Begin</h3>
             <div className="auth-sub">
-              The assessment runs in full-screen mode. Exiting full-screen, switching tabs, or
-              leaving this window once started will end your attempt automatically and be
-              logged — per the integrity rules shown earlier.
+              The assessment runs in full-screen mode. Exiting full-screen, switching tabs or
+              leaving this window gives you one warning; the second time, your attempt ends
+              automatically. Every such event is logged — per the integrity rules shown earlier.
             </div>
             <button className="btn primary block" type="button" onClick={onEnterFullscreen}>
               Enter Full-Screen &amp; Begin
@@ -302,7 +361,30 @@ export default function ExamAttemptPage() {
       </div>
       <BrandFooter roleCode="candidate" />
 
-      {showConfirm && (
+      {/* The single warning for leaving the exam window. Deliberately a blocking modal with one
+          button, not a toast: dismissing it is the user gesture that lets requestFullscreen()
+          put the candidate back in full-screen (see acknowledgeWarning), and a warning this
+          consequential shouldn't be dismissible by being ignored. Rendered above the submit
+          confirmation so the two can't be competing for attention. */}
+      {warning && (
+        <div className="modal-overlay">
+          <div className="modal-box">
+            <h4 style={{ color: 'var(--brand-red)' }}>⚠ Warning — Assessment Integrity</h4>
+            <p>{warning.detail}</p>
+            <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+              Warning {warning.used} of {warning.allowed}. This has been recorded and is visible
+              to the Staffing team. Your timer has continued to run.
+            </p>
+            <div className="btn-row">
+              <button className="btn primary block" type="button" onClick={acknowledgeWarning}>
+                I understand — return to the assessment
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showConfirm && !warning && (
         <div className="modal-overlay">
           <div className="modal-box">
             <h4>Submit Assessment?</h4>

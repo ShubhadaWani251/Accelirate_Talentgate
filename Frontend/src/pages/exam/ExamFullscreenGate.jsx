@@ -53,7 +53,9 @@ export default function ExamFullscreenGate() {
           <div className="auth-sub">
             Camera and microphone access is granted. The assessment now runs in full-screen mode
             for its full duration — through the instructions, identity verification, and the exam
-            itself. Exiting full-screen once the exam begins will end your attempt automatically.
+            itself. Once the exam begins, leaving the assessment window — exiting full-screen,
+            switching tabs or minimizing — gives you one warning; the second time, your attempt
+            ends automatically.
           </div>
           <button className="btn primary block" type="button" onClick={onContinue}>
             Continue to Full-Screen Mode
