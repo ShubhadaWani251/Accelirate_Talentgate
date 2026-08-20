@@ -3,13 +3,13 @@ import secrets
 import threading
 
 from django.conf import settings
-from django.core.mail import send_mail
+from django.core.mail import EmailMultiAlternatives
 from django.db import connections
 from django.utils import timezone
 
 from api.models import Batch, Candidate, Invitation
 from api.services.email_errors import EMAIL_SEND_ERRORS
-from api.services.email_templates import render_invitation_email
+from api.services.email_templates import render_invitation_email, text_body_to_html
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +102,31 @@ def create_single_reinvite(candidate, user):
     )
 
 
+def send_candidate_email(subject, body, to_address):
+    """Send one candidate-facing email as multipart text + HTML.
+
+    Single seam for every candidate email (invitation, notifications, certification) so they
+    all behave the same way. The plain-text part is the approved copy unchanged; the HTML part
+    is generated from it purely so URLs arrive clickable - candidates used to have to select
+    the assessment link and paste it into a browser, because a bare URL in a plain-text mail
+    is only auto-linked by some clients and Outlook frequently isn't one of them.
+
+    A client that prefers text still gets the text part, so nothing is lost by adding this.
+    services/graph_email.py already looks for a text/html alternative and flips the Graph
+    payload's contentType accordingly, so no transport change is needed here.
+    """
+    message = EmailMultiAlternatives(
+        subject=subject,
+        body=body,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        to=[to_address],
+    )
+    message.attach_alternative(text_body_to_html(body), 'text/html')
+    # Matches the previous send_mail(fail_silently=False): callers rely on the exception to
+    # mark an invitation FAILED rather than reporting a silent success.
+    message.send(fail_silently=False)
+
+
 def send_invite_email(invitation, base_url):
     """Send the approved invitation copy for one invitation.
 
@@ -112,13 +137,7 @@ def send_invite_email(invitation, base_url):
     candidate = invitation.candidate
     link = f"{base_url.rstrip('/')}/t/{invitation.unique_link_token}"
     subject, body = render_invitation_email(candidate, invitation.batch, link)
-    send_mail(
-        subject=subject,
-        message=body,
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        recipient_list=[candidate.email],
-        fail_silently=False,
-    )
+    send_candidate_email(subject, body, candidate.email)
 
 
 def send_invites_async(invitations, base_url):
@@ -172,13 +191,10 @@ def send_notification_emails(candidates, subject, body_for):
         try:
             for candidate in candidates:
                 try:
-                    send_mail(
-                        subject=subject,
-                        message=body_for(candidate),
-                        from_email=settings.DEFAULT_FROM_EMAIL,
-                        recipient_list=[candidate.email],
-                        fail_silently=False,
-                    )
+                    # Same text+HTML treatment as the invitation: the certification email
+                    # carries two UiPath Academy course URLs, which had the identical
+                    # copy-and-paste problem.
+                    send_candidate_email(subject, body_for(candidate), candidate.email)
                 except EMAIL_SEND_ERRORS:
                     logger.exception(
                         'Failed to send notification email to candidate_id=%s', candidate.candidate_id

@@ -133,6 +133,13 @@ LANGUAGE_CODE = 'en-us'
 
 TIME_ZONE = 'UTC'
 
+# Timezone that candidate-facing text is rendered in. Storage stays UTC (above) - this is a
+# presentation choice only. Emails have to state a wall-clock time the candidate can act on,
+# and the browser isn't there to localize it the way the staff UI does, so the conversion has
+# to happen server-side and the zone has to be named in the text (see
+# services/email_templates.format_datetime).
+DISPLAY_TIME_ZONE = os.environ.get('DISPLAY_TIME_ZONE', 'Asia/Kolkata')
+
 USE_I18N = True
 
 USE_TZ = True

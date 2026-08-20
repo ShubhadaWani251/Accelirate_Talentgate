@@ -11,10 +11,21 @@ nothing else was reworded. Placeholders are substituted per recipient by the ren
 at the bottom of this file - a template must only reference placeholders its own render helper
 supplies, or .format() will raise at send time.
 
-Kept as plain text deliberately: send_mail is called with `message=`, not `html_message=`, so
-these bodies are what the candidate actually sees. Avoid non-ASCII characters here (the
-Windows console this is often run from is cp1252 and will crash on them).
+The bodies below stay plain text and remain the authoritative wording. Mail is sent as
+multipart: this text as-is, plus an HTML alternative GENERATED from it by text_body_to_html()
+at send time. That direction matters - a hand-written second copy would drift from the approved
+one, and the approved one is the thing that must not change. The HTML version exists only so
+URLs arrive as real hyperlinks; candidates previously had to copy the assessment link out of
+the message by hand, which Outlook does not reliably auto-link.
+
+Avoid non-ASCII characters here (the Windows console this is often run from is cp1252 and will
+crash on them).
 """
+
+import html as html_lib
+import re
+import zoneinfo
+from datetime import timezone as dt_timezone
 
 from django.conf import settings
 
@@ -209,13 +220,36 @@ def support_email():
     return getattr(settings, 'SUPPORT_EMAIL', '') or settings.DEFAULT_FROM_EMAIL
 
 
+def format_datetime(value):
+    """Render an assessment-window timestamp for a candidate, in the display timezone, named.
+
+    Two bugs in one, previously: `.strftime()` was called straight on the stored value, which is
+    UTC (settings.TIME_ZONE), and the result carried no timezone label. A candidate in IST was
+    told the window opened at "12:03 PM" for a batch the TA had set to 17:33 - the same instant,
+    5h30m apart, with nothing on the page to reveal that. The staff UI never showed the problem
+    because the browser localizes it automatically; email has no browser to do that.
+
+    The zone is always named in the output, so the reader can tell what they're looking at even
+    if DISPLAY_TIME_ZONE is later changed or they are in a different region.
+    """
+    if value is None:
+        return ''
+    if value.tzinfo is None:
+        # Shouldn't happen with USE_TZ=True, but assuming UTC beats silently shifting by the
+        # server's local offset.
+        value = value.replace(tzinfo=dt_timezone.utc)
+    local = value.astimezone(zoneinfo.ZoneInfo(settings.DISPLAY_TIME_ZONE))
+    label = local.strftime('%Z') or settings.DISPLAY_TIME_ZONE
+    return f'{local.strftime(DATETIME_FORMAT)} {label}'
+
+
 def render_invitation_email(candidate, batch, link):
     """Resolve the approved invitation copy into (subject, body) for one candidate."""
     return INVITATION_TEMPLATE['subject'], INVITATION_TEMPLATE['body'].format(
         name=candidate.full_name,
         link=link,
-        start=batch.link_valid_from.strftime(DATETIME_FORMAT),
-        end=batch.link_valid_until.strftime(DATETIME_FORMAT),
+        start=format_datetime(batch.link_valid_from),
+        end=format_datetime(batch.link_valid_until),
         support_email=support_email(),
     )
 
@@ -224,6 +258,60 @@ def render_certification_email(candidate, deadline):
     """Resolve the fixed certification copy for one candidate with the TA's deadline."""
     return CERTIFICATION_TEMPLATE['subject'], CERTIFICATION_TEMPLATE['body'].format(
         name=candidate.full_name, deadline=deadline,
+    )
+
+
+# A URL runs to the first whitespace or '<'. Trailing sentence punctuation is trimmed below so
+# "see https://x/y." doesn't produce a link ending in a full stop.
+_URL_RE = re.compile(r'https?://[^\s<]+')
+_EMAIL_RE = re.compile(r'[\w.+-]+@[\w-]+\.[\w.-]+')
+_TRAILING_PUNCTUATION = '.,;:!?)]}\''
+
+
+def _linkify(escaped_text):
+    """Wrap URLs and email addresses in anchors. Input must ALREADY be HTML-escaped.
+
+    Operating on escaped text is what keeps this safe: a candidate name or a template edit
+    containing markup can never reach the output as live HTML. The matched span is already
+    escaped, so it is valid both as the anchor text and inside the href attribute (an '&' is
+    '&amp;' in both places).
+    """
+    def url_repl(match):
+        url = match.group(0)
+        trailing = ''
+        while url and url[-1] in _TRAILING_PUNCTUATION:
+            trailing = url[-1] + trailing
+            url = url[:-1]
+        if not url:
+            return match.group(0)
+        return (f'<a href="{url}" style="color:#0b5cab;text-decoration:underline;'
+                f'word-break:break-all;">{url}</a>{trailing}')
+
+    def email_repl(match):
+        address = match.group(0)
+        return f'<a href="mailto:{address}" style="color:#0b5cab;">{address}</a>'
+
+    return _EMAIL_RE.sub(email_repl, _URL_RE.sub(url_repl, escaped_text))
+
+
+def text_body_to_html(text):
+    """Build the HTML alternative for a plain-text email body.
+
+    Renders inside `white-space: pre-wrap` rather than reflowing into paragraphs and lists:
+    the approved copy already carries its own line breaks, indentation and numbering, so
+    preserving them verbatim means the HTML says exactly what the text says. Reconstructing
+    paragraphs would be a second layout of approved wording that could disagree with it.
+
+    Styles are inline because email clients strip <style> blocks.
+    """
+    body = _linkify(html_lib.escape(text))
+    return (
+        '<html><body style="margin:0;padding:0;background:#f6f7f9;">'
+        '<div style="max-width:640px;margin:0 auto;padding:24px;'
+        'font-family:Segoe UI,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.6;'
+        'color:#1c1e21;background:#ffffff;">'
+        f'<div style="white-space:pre-wrap;">{body}</div>'
+        '</div></body></html>'
     )
 
 
