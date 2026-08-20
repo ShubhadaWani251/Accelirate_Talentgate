@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import * as batchApi from '../../api/batchApi';
 import CandidateHistoryModal from '../candidates/CandidateHistoryModal';
 import CandidateErrorRow from './CandidateErrorRow';
+import { SkeletonTableRows } from '../../components/loading/Skeleton';
 import { extractErrorMessage } from '../../utils/passwordSchema';
 
 // Step 3 of the upload: the error queue. Only rows that FAILED validation appear here, and the
@@ -159,7 +160,7 @@ export default function FixErrorsStep({ batch, onDone }) {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={14}>Loading…</td></tr>
+                <SkeletonTableRows rows={5} columns={14} />
               ) : (
                 invalidRows.map((r) => (
                   <CandidateErrorRow

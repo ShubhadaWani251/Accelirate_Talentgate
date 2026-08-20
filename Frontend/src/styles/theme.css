@@ -333,15 +333,17 @@ table.data-table tbody tr:hover td { background: var(--accent-soft); }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
-@media (max-width: 900px) {
-  .grid-4 { grid-template-columns: repeat(2, 1fr); }
-  .grid-3 { grid-template-columns: 1fr; }
-  .grid-2 { grid-template-columns: 1fr; }
-  /* Nav wraps rather than squeezing Back/Home off-screen - both must stay reachable. */
-  .app-nav { flex-wrap: wrap; gap: 10px; padding: 12px 16px; }
-  .app-nav .nav-left { flex-wrap: wrap; }
-  .app-nav .nav-brand { order: -1; width: 100%; }
-}
+/* A grid item's automatic minimum size is its CONTENT, so a wide table inside a column widens
+   that column past the viewport - even when the table sits in an overflow:auto wrapper. Setting
+   min-width:0 lets the column shrink and hands the overflow to .table-scroll, which is what
+   should be scrolling. This is the single most common cause of sideways scroll on phones here. */
+.grid-2 > *, .grid-3 > *, .grid-4 > * { min-width: 0; }
+/* Same guard for the scroll container itself. */
+.table-scroll { max-width: 100%; }
+/* Responsive rules for these grids live in the breakpoint block at the end of this file, so the
+   tablet/mobile behaviour for every component is defined in one place rather than split between
+   a legacy 900px block and the newer 1023/767px system (which overlapped and fought over
+   .grid-3 at tablet widths). */
 
 .dropzone {
   border: 2px dashed var(--line-soft); border-radius: 12px; padding: 28px; text-align: center;
@@ -384,4 +386,247 @@ table.data-table tbody tr:hover td { background: var(--accent-soft); }
   background: var(--red-bg);
   color: var(--brand-red-dark);
   font-weight: 600;
+}
+
+/* ---------- Screen-reader-only text ---------- */
+/* Used by skeletons to announce "Loading…" once while the decorative bars stay aria-hidden. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* ---------- Skeleton loading ---------- */
+/* One lightweight CSS animation shared by every skeleton - no animation library, and a single
+   background-position transition (compositor-friendly) rather than animating layout properties. */
+.skeleton {
+  display: block;
+  background: linear-gradient(90deg, #e9edf3 25%, #f4f7fa 37%, #e9edf3 63%);
+  background-size: 400% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+  /* Keeps a bar from collapsing to zero height inside flex/table contexts. */
+  min-height: 8px;
+}
+.skeleton-stack { display: flex; flex-direction: column; width: 100%; }
+
+@keyframes skeleton-shimmer {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
+
+/* Respect a reduced-motion preference: keep the placeholder shape, drop the movement. */
+@media (prefers-reduced-motion: reduce) {
+  .skeleton { animation: none; background: #e9edf3; }
+}
+
+/* Page-header / filter-row skeleton scaffolding. Uses the same flex behaviour as the real
+   headers and filter rows so the swap to real content doesn't shift anything. */
+.skeleton-page-header {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 12px; margin-bottom: 16px;
+}
+.skeleton-filters {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px;
+  align-items: center; margin-bottom: 14px;
+}
+
+/* ---------- Spinner ---------- */
+/* One rotate keyframe on a bordered circle - no icon library, no SVG. */
+.spinner {
+  display: inline-block; border-style: solid; border-radius: 50%;
+  border-color: var(--line-soft); border-top-color: var(--brand-blue);
+  animation: spinner-rotate .7s linear infinite; flex-shrink: 0;
+}
+/* Inside a button the spinner must inherit the button's text colour, otherwise it disappears
+   against a primary/danger background. */
+.btn .spinner, .spinner-inline { border-color: currentColor; border-top-color: transparent; opacity: .9; }
+.spinner-page { display: flex; align-items: center; justify-content: center; padding: 48px 16px; flex: 1; }
+
+@keyframes spinner-rotate { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  /* Still needs to convey "working", so it steps instead of spinning smoothly. */
+  .spinner { animation-duration: 2s; animation-timing-function: steps(8, end); }
+}
+
+/* ---------- Error pages (404 / 500) ---------- */
+.error-page {
+  flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px 20px;
+}
+.error-card {
+  width: 100%; max-width: 460px; background: #fff; border-radius: 14px; padding: 32px 28px;
+  box-shadow: 0 16px 40px rgba(16, 24, 40, .12); text-align: center;
+  border-top: 4px solid var(--brand-blue);
+}
+.error-card.is-server { border-top-color: var(--brand-red); }
+.error-code {
+  font-family: 'Poppins', 'Inter', sans-serif; font-size: 54px; font-weight: 800; line-height: 1;
+  color: var(--brand-navy); letter-spacing: -1px;
+}
+.error-card.is-server .error-code { color: var(--brand-red-dark); }
+.error-title { font-size: 17px; font-weight: 700; color: var(--brand-navy); margin: 10px 0 8px; }
+.error-message { font-size: 13px; color: var(--muted); line-height: 1.6; margin-bottom: 20px; }
+/* Feedback shown when a retry didn't resolve the problem - not colour-only, it's explicit text. */
+.error-note {
+  font-size: 12px; border-radius: 8px; padding: 10px 12px; margin-bottom: 16px;
+  background: var(--amber-bg); color: var(--amber); text-align: left;
+}
+.error-actions { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+
+/* Question Bank: section sidebar + content. `min-width: 0` on the children is what allows the
+   content column to be narrower than the table inside it - without it a grid item's automatic
+   minimum size is its content, so the table widens the column and the page scrolls sideways. */
+.qb-layout { display: grid; grid-template-columns: 220px 1fr; gap: 18px; }
+.qb-layout > * { min-width: 0; }
+
+/* The nav toggle exists only for the collapsed mobile layout. Declared BEFORE the breakpoint
+   blocks below: it has the same specificity as the rule that reveals it, so if it came after, it
+   would win the cascade and leave the mobile nav with hidden links AND no way to open them. */
+.nav-toggle { display: none; align-items: center; gap: 6px; }
+
+/* ---------- Responsive: tablet 768-1023px, mobile <768px ---------- */
+/* The app is a top-nav layout (no sidebar), so the mobile strategy is: collapse the nav links
+   behind a toggle, stack multi-column grids, and let wide tables keep their existing horizontal
+   scroll (.table-scroll) rather than re-rendering them as cards - the tables are dense
+   comparison views where losing the columns would lose the point of the screen. */
+
+/* Global overflow guard: long unbroken strings (emails, tokens) are the usual cause of a page
+   scrolling sideways on a phone. */
+@media (max-width: 1023px) {
+  .page-body { padding: 20px 16px; }
+  .page-wide { max-width: 100%; }
+  .brand-header { padding: 11px 16px; }
+  .brand-footer { padding: 10px 16px; }
+  /* Tablet: 4-up stat grids become 2-up; 3-up becomes 2-up rather than collapsing to one, so the
+     layout still reads as intentional at this width instead of a stretched phone view. */
+  .grid-4 { grid-template-columns: repeat(2, 1fr); }
+  .grid-3 { grid-template-columns: repeat(2, 1fr); }
+  /* .grid-2 holds full tables side by side (dashboard's Question Bank Health / TA Accounts) -
+     at tablet width two of those are unreadable, so it stacks. */
+  .grid-2 { grid-template-columns: 1fr; }
+  /* Sidebar above the list rather than beside it - 220px of chrome plus a wide table doesn't
+     fit at tablet width. */
+  .qb-layout { grid-template-columns: 1fr; }
+  .modal-box { max-width: 520px; }
+  /* Nav wraps rather than squeezing Back/Home off-screen - both must stay reachable. */
+  .app-nav { flex-wrap: wrap; gap: 10px; padding: 12px 16px; }
+  .app-nav .nav-left { flex-wrap: wrap; }
+  .app-nav .nav-brand { order: -1; width: 100%; }
+}
+
+@media (max-width: 767px) {
+  .page-body { padding: 16px 12px; }
+  .brand-header { padding: 10px 12px; gap: 8px; }
+  .brand-header .brand-name { font-size: 13px; }
+  .brand-header .brand-role-badge { font-size: 9.5px; padding: 3px 9px; }
+
+  /* Single column everywhere - two columns at phone width leaves both unreadable. */
+  .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+
+  /* Nav: brand + toggle on one row, links revealed underneath on demand. */
+  .app-nav { flex-wrap: wrap; gap: 8px; padding: 10px 12px; }
+  .app-nav .nav-left { flex-wrap: wrap; width: 100%; gap: 6px; }
+  .app-nav .nav-brand { order: -1; width: 100%; font-size: 12.5px; margin-left: 0; }
+  .app-nav .nav-links { display: none; width: 100%; flex-direction: column; align-items: stretch; gap: 4px; }
+  .app-nav .nav-links.is-open { display: flex; }
+  .app-nav .nav-links a { display: block; }
+  .app-nav .nav-links span { display: block; text-align: left; border-radius: 8px; padding: 10px 14px; }
+  .nav-toggle { display: inline-flex; }
+  .profile-wrap { width: 100%; justify-content: space-between; }
+  /* The name beside the avatar is the first thing to sacrifice for width. */
+  .profile-trigger .profile-name { display: none; }
+  .profile-menu { right: 0; left: auto; width: min(230px, calc(100vw - 32px)); }
+
+  .btn-row { flex-wrap: wrap; }
+
+  .modal-overlay { padding: 12px; }
+  .modal-box { max-width: 100%; padding: 18px 16px; }
+
+  /* Auth/exam cards shouldn't be pinned to a desktop width on a phone. */
+  .auth-shell { padding: 20px 12px; }
+  .auth-card { max-width: 100% !important; padding: 22px 18px; }
+
+  .error-card { padding: 26px 20px; }
+  .error-code { font-size: 44px; }
+  /* Full-width retry target on mobile. */
+  .error-actions { align-self: stretch; }
+  .error-actions > .btn { width: 100%; }
+
+  /* Exam questions: keep options tappable and text unclipped. */
+  .q-card { padding: 14px 14px; }
+  .option-row { padding: 11px 8px; }
+  .timer-badge { font-size: 12px; padding: 5px 11px; }
+}
+
+/* ---------- Phone layout: below 585px ----------
+   This is the band where the desktop design stops working as a scaled-down version of itself, so
+   it gets deliberate treatment rather than just narrower columns:
+     - every control becomes a comfortable touch target (the small nav/filter buttons measured
+       26-27px tall, well under a usable tap size),
+     - action rows stack to full width instead of stretching unevenly,
+     - filter/search rows go single-column,
+     - type and padding step down together so density stays consistent. */
+@media (max-width: 584px) {
+  /* --- Touch targets. `.btn.small` exists for dense desktop table rows; on a phone it has to
+         grow back to something tappable. --- */
+  .btn { min-height: 40px; padding: 10px 16px; }
+  .btn.small { min-height: 38px; padding: 8px 14px; font-size: 12px; }
+  .nav-back, .nav-home, .nav-toggle { min-height: 38px; }
+  .profile-trigger { min-height: 38px; padding: 6px; }
+  .profile-menu .pitem { padding: 12px 14px; }
+  .link-text { display: inline-block; padding: 4px 0; }
+  /* In-row table actions get a bigger hit area, but not the full 40px used for standalone
+     buttons - that would nearly double the height of every row in a dense table. */
+  .data-table .link-text { padding: 7px 2px; }
+
+  /* --- Action rows stack full width: a row of 3 pill buttons at 360px either overflows or
+         squeezes into uneven slivers. Stacked is predictable and thumb-friendly. --- */
+  .btn-row { flex-direction: column; align-items: stretch; gap: 8px; }
+  .btn-row > .btn, .btn-row > a.btn { width: 100%; }
+  /* Toolbars that mix a checkbox/label with buttons keep their label on its own line. */
+  .btn-row > label { justify-content: flex-start; }
+
+  /* --- Search + filter rows: one column. --- */
+  .skeleton-filters { grid-template-columns: 1fr; }
+  .search-bar { width: 100%; min-width: 0 !important; flex-direction: column; align-items: stretch; }
+  .search-bar > input, .search-bar > .btn { width: 100%; }
+
+  /* --- Typography: a measured step down, not a blanket shrink. --- */
+  h3 { font-size: 16.5px; }
+  h4 { font-size: 14.5px; }
+  .box-label { font-size: 11px; }
+  table.data-table { font-size: 12px; }
+  table.data-table th, table.data-table td { padding: 8px 10px; }
+  .stat-num { font-size: 20px; }
+
+  /* --- Spacing. --- */
+  .page-body { padding: 14px 12px; }
+  .card { padding: 14px; margin-bottom: 14px; }
+  .stat-card { padding: 14px 10px; }
+
+  /* --- Long unbroken strings (emails, tokens, batch names) must wrap rather than push the
+         layout wide. Scoped to content containers, not tables, which scroll instead. --- */
+  .card, .field, .auth-card, .error-message, .alert, .modal-box p { overflow-wrap: anywhere; }
+
+  /* --- Wizard steps: compact, wrapping chips. --- */
+  .wizard-steps { gap: 6px; margin-bottom: 16px; }
+  .wizard-steps .wstep { font-size: 10.5px; padding: 6px 10px; }
+
+  /* --- Modals: use the width available, keep footer buttons reachable. --- */
+  .modal-overlay { padding: 12px; align-items: flex-start; }
+  .modal-box { padding: 16px 14px; max-height: calc(100vh - 24px); }
+  .modal-box .btn-row { flex-direction: column-reverse; }
+
+  /* --- Stat grids: 2-up stays readable down to ~420px and avoids a very tall scroll; below
+         that a single column is the only honest option. --- */
+  .grid-4 { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+}
+
+/* Very narrow phones. */
+@media (max-width: 419px) {
+  .grid-4 { grid-template-columns: 1fr; }
+  .brand-header .brand-tagline { display: none; }
+  .brand-footer { justify-content: center; text-align: center; }
+  .brand-footer .foot-links { gap: 10px; }
+  .page-body { padding: 12px 10px; }
+  h3 { font-size: 15.5px; }
 }

@@ -7,6 +7,10 @@ import * as dashboardApi from '../api/dashboardApi';
 import * as candidateApi from '../api/candidateApi';
 import ExportModal from '../features/candidates/ExportModal';
 import BatchStatusFilter from '../components/common/BatchStatusFilter';
+import ServerErrorPage from '../components/error/ServerErrorPage';
+import {
+  Skeleton, SkeletonPage, SkeletonStatCard, SkeletonTable, SkeletonTableRows,
+} from '../components/loading/Skeleton';
 import { extractErrorMessage } from '../utils/passwordSchema';
 
 const STATUS_PILL = { draft: 'gray', in_progress: 'blue', completed: 'green', cancelled: 'red' };
@@ -23,14 +27,19 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [batchStatus, setBatchStatus] = useState('active');
   const [tableLoading, setTableLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
 
   async function loadSummary(status, { initial = false } = {}) {
     if (initial) setLoading(true); else setTableLoading(true);
     try {
       setSummary(await dashboardApi.getDashboardSummary(status));
+      setLoadError(false);
     } catch (err) {
       toast.error(extractErrorMessage(err));
+      // Without this the page fell through to its "Loading…" branch forever on a failed initial
+      // load, because summary stayed null - a permanent fake loading state with no way out.
+      if (initial) setLoadError(true);   // dashboard has no single 'resource', so 5xx-or-worse only
     } finally {
       if (initial) setLoading(false); else setTableLoading(false);
     }
@@ -54,9 +63,32 @@ export default function Dashboard() {
     }
   }
 
-  if (loading || !summary) return <div>Loading…</div>;
-
   const isAdmin = roleCode === 'admin';
+
+  // Error takes precedence over loading: once a load has failed there is nothing still coming.
+  if (loadError) {
+    return <ServerErrorPage onRetry={() => loadSummary(batchStatus, { initial: true })} />;
+  }
+
+  if (loading || !summary) {
+    return (
+      <SkeletonPage label="Loading dashboard…">
+        <div className="grid-4" style={{ marginBottom: 20 }}>
+          {Array.from({ length: 4 }).map((_, i) => <SkeletonStatCard key={i} />)}
+        </div>
+        <div className="btn-row" style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
+          <Skeleton width={190} height={38} radius={999} />
+          <Skeleton width={160} height={38} radius={999} />
+          <Skeleton width={210} height={38} radius={999} />
+        </div>
+        <div className="card" style={{ marginBottom: 20 }}>
+          <Skeleton width="42%" height={11} style={{ marginBottom: 14 }} />
+          <SkeletonTable rows={5} columns={isAdmin ? 10 : 9} label="Loading batches…" />
+        </div>
+      </SkeletonPage>
+    );
+  }
+
   const { stats, batches_overview: batches, question_bank_health: qbankHealth, ta_accounts: taAccounts } = summary;
 
   return (
@@ -90,7 +122,9 @@ export default function Dashboard() {
           </div>
           <BatchStatusFilter value={batchStatus} onChange={handleStatusChange} />
         </div>
-        <div className="table-scroll" style={{ opacity: tableLoading ? 0.6 : 1 }}>
+        {/* aria-busy on the scroll container, so a filter change is announced once rather than
+            per skeleton cell. */}
+        <div className="table-scroll" aria-busy={tableLoading}>
           <table className="data-table">
             <thead>
               <tr>
@@ -107,7 +141,12 @@ export default function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              {batches.length === 0 ? (
+              {/* Skeleton rows rather than dimming the old rows: after a filter change the
+                  previous rows belong to a different filter, so showing them faded reads as if
+                  they were the (wrong) result. */}
+              {tableLoading ? (
+                <SkeletonTableRows rows={5} columns={isAdmin ? 10 : 9} />
+              ) : batches.length === 0 ? (
                 <tr><td colSpan={isAdmin ? 9 : 8}>{EMPTY_MESSAGE[batchStatus] || 'No batches yet.'}</td></tr>
               ) : (
                 batches.map((b) => (
@@ -151,6 +190,9 @@ export default function Dashboard() {
             {qbankHealth.length === 0 ? (
               <p style={{ color: 'var(--muted)', fontSize: 12.5 }}>No sections configured yet.</p>
             ) : (
+              // Wrapped in .table-scroll like every other table: without it the table sets its
+              // own intrinsic width and pushes the whole page sideways on a phone.
+              <div className="table-scroll">
               <table className="data-table">
                 <thead><tr><th>Section</th><th>Unique Active</th><th>Duplicates</th><th>Status</th></tr></thead>
                 <tbody>
@@ -168,6 +210,7 @@ export default function Dashboard() {
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
             <Link to="/admin/question-bank" className="link-text" style={{ display: 'inline-block', marginTop: 10 }}>
               Manage Question Bank →
@@ -175,17 +218,19 @@ export default function Dashboard() {
           </div>
           <div className="card">
             <div className="box-label">TA Accounts</div>
-            <table className="data-table">
-              <thead><tr><th>Name</th><th>Status</th></tr></thead>
-              <tbody>
-                {taAccounts.map((u) => (
-                  <tr key={u.user_id}>
-                    <td>{u.full_name}</td>
-                    <td><span className={`pill ${u.role_name === 'Administrator' ? 'gray' : 'green'}`}>{u.role_name}</span></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="table-scroll">
+              <table className="data-table">
+                <thead><tr><th>Name</th><th>Status</th></tr></thead>
+                <tbody>
+                  {taAccounts.map((u) => (
+                    <tr key={u.user_id}>
+                      <td>{u.full_name}</td>
+                      <td><span className={`pill ${u.role_name === 'Administrator' ? 'gray' : 'green'}`}>{u.role_name}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
             <Link to="/admin/users" className="link-text" style={{ display: 'inline-block', marginTop: 10 }}>
               Manage Users →
             </Link>

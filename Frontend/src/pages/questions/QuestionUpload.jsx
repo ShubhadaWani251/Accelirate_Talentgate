@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import * as questionApi from '../../api/questionApi';
 import QuestionValidationRow from '../../features/questions/QuestionValidationRow';
 import { extractErrorMessage } from '../../utils/passwordSchema';
+import { ButtonSpinner } from '../../components/loading/Spinner';
 
 // Full page rather than a modal: the validation table is 9 columns wide and every row can
 // expand into an edit form, which inside a fixed-height dialog meant three nested scrollbars
@@ -211,7 +212,7 @@ export default function QuestionUpload() {
             </button>
             <button className="btn primary" onClick={handleValidate}
                     disabled={!file || validating}>
-              {validating ? 'Validating…' : 'Validate'}
+              <ButtonSpinner loading={validating}>Validate</ButtonSpinner>
             </button>
           </div>
         </div>

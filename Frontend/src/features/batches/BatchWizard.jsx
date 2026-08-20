@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import * as batchApi from '../../api/batchApi';
+import { Skeleton, SkeletonCard, SkeletonPage } from '../../components/loading/Skeleton';
 import ConfigureBatchStep from './ConfigureBatchStep';
 import UploadStep from './UploadStep';
 import FixErrorsStep from './FixErrorsStep';
@@ -62,7 +63,21 @@ export default function BatchWizard() {
 
   const stepIndex = STEPS.findIndex((s) => s.key === stepKey);
 
-  if (!stepKey) return <div>Loading…</div>;
+  // Waiting on getBatch to decide which step to resume at.
+  if (!stepKey) {
+    return (
+      <div className="page-wide">
+        <SkeletonPage label="Loading upload wizard…">
+          <div className="wizard-steps">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} width={130} height={30} radius={999} />
+            ))}
+          </div>
+          <SkeletonCard lines={4} />
+        </SkeletonPage>
+      </div>
+    );
+  }
 
   return (
     <div className="page-wide">

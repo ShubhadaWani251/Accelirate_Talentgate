@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import * as candidateApi from '../../api/candidateApi';
+import { SkeletonTable } from '../../components/loading/Skeleton';
 import { formatDateTime } from '../../utils/datetime';
 import { extractErrorMessage } from '../../utils/passwordSchema';
 
@@ -30,7 +31,7 @@ export default function CandidateHistoryModal({ candidate, onClose }) {
         <h4>History — {name}</h4>
 
         {loading ? (
-          <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>Loading…</p>
+          <SkeletonTable rows={4} columns={3} label="Loading history…" />
         ) : events.length === 0 ? (
           <div className="hist-empty"><div className="hist-icon">🗂</div>No history found</div>
         ) : (

@@ -31,6 +31,9 @@ export default function AppNav() {
   const navigate = useNavigate();
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
+  // Mobile only: the nav links collapse behind a toggle below 768px (see theme.css). On desktop
+  // and tablet the links are always visible and this state is simply unused.
+  const [navOpen, setNavOpen] = useState(false);
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -74,10 +77,28 @@ export default function AppNav() {
         <button className="btn small nav-back" onClick={handleBack}>← Back</button>
         <button className="btn small primary nav-home" onClick={() => navigate(home)}>Home</button>
         <span className="nav-brand">CEP — {user?.role_code === 'admin' ? 'Administrator' : 'Staffing User'}</span>
-        <div className="nav-links">
+        {/* Visible only under 768px (CSS-driven), so desktop/tablet behaviour is unchanged. */}
+        <button
+          type="button"
+          className="btn small nav-toggle"
+          onClick={() => setNavOpen((o) => !o)}
+          aria-expanded={navOpen}
+          aria-controls="app-nav-links"
+          aria-label={navOpen ? 'Hide navigation menu' : 'Show navigation menu'}
+        >
+          ☰ Menu
+        </button>
+        <div id="app-nav-links" className={`nav-links${navOpen ? ' is-open' : ''}`}>
           {links.map((link) =>
             link.to ? (
-              <Link key={link.label} to={link.to} style={{ textDecoration: 'none' }}>
+              // Collapse the mobile menu on navigation, otherwise it stays open over the page
+              // the user just asked for.
+              <Link
+                key={link.label}
+                to={link.to}
+                style={{ textDecoration: 'none' }}
+                onClick={() => setNavOpen(false)}
+              >
                 <span className={location.pathname === link.to ? 'current' : ''}>{link.label}</span>
               </Link>
             ) : (
@@ -95,7 +116,9 @@ export default function AppNav() {
         <button className="btn" onClick={handleLogout}>Logout</button>
         <button className="profile-trigger" onClick={() => setMenuOpen((o) => !o)}>
           <span className="avatar">{initials(user)}</span>
-          <span>{user?.first_name} {user?.last_name}</span>
+          {/* Hidden below 768px - the avatar still identifies the account, and the name is the
+              first thing worth sacrificing for horizontal space on a phone. */}
+          <span className="profile-name">{user?.first_name} {user?.last_name}</span>
         </button>
         {menuOpen && (
           <div className="profile-menu">

@@ -12,7 +12,10 @@ import NotifyModal from '../../features/candidates/NotifyModal';
 import CertificationModal from '../../features/candidates/CertificationModal';
 import ExportModal from '../../features/candidates/ExportModal';
 import PaginationControls from '../../components/common/PaginationControls';
-import ConfirmModal from '../../components/common/ConfirmModal';
+import ServerErrorPage from '../../components/error/ServerErrorPage';
+import NotFoundPage from '../../components/error/NotFoundPage';
+import { isResourceMissing } from '../../utils/apiError';
+import { Skeleton, SkeletonCard, SkeletonPage, SkeletonTable } from '../../components/loading/Skeleton';
 import { extractErrorMessage } from '../../utils/passwordSchema';
 
 const STATUS_PILL = { draft: 'gray', in_progress: 'blue', completed: 'green', cancelled: 'red' };
@@ -21,8 +24,9 @@ export default function BatchDetail() {
   const { id } = useParams();
   const [batch, setBatch] = useState(null);
   const [loading, setLoading] = useState(true);
+  // null | 'notfound' | 'server' - which error page (if any) replaces this page.
+  const [loadError, setLoadError] = useState(null);
   const [deactivateOpen, setDeactivateOpen] = useState(false);
-  const [inviteConfirmOpen, setInviteConfirmOpen] = useState(false);
 
   // Once a batch is finalized, this page gives it the same browse/select/notify/edit
   // capability as All Candidates, just pre-scoped to this one batch_id (wireframe parity -
@@ -42,8 +46,11 @@ export default function BatchDetail() {
     setLoading(true);
     try {
       setBatch(await batchApi.getBatch(id));
+      setLoadError(null);
     } catch (err) {
       toast.error(extractErrorMessage(err));
+      // Otherwise batch stays null and the page shows "Loading…" permanently.
+      setLoadError(isResourceMissing(err) ? 'notfound' : 'server');
     } finally {
       setLoading(false);
     }
@@ -73,21 +80,9 @@ export default function BatchDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  // Invites are sent to the checked rows only - never a blanket "everyone still pending",
-  // which would sweep up anyone deliberately skipped during upload review.
-  async function handleSendInvites() {
-    setInviteConfirmOpen(false);
-    try {
-      const res = await batchApi.sendInvites(batch.batch_id, Array.from(selected));
-      toast.success(res.detail);
-      setSelected(new Set());
-      refresh();
-      refreshCandidates();
-    } catch (err) {
-      toast.error(extractErrorMessage(err));
-    }
-  }
-
+  // Invites are not sent from this page. They go out from the upload wizard's Send Invites step
+  // (for a whole batch) and from Candidate Details / the Edit Candidate modal (for one person),
+  // so the bulk "Send Invite Link" control was removed from here rather than duplicating that.
   function toggleRow(candidateId) {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -100,7 +95,25 @@ export default function BatchDetail() {
     setSelected((prev) => (prev.size === candidates.length ? new Set() : new Set(candidates.map((c) => c.candidate_id))));
   }
 
-  if (loading || !batch) return <div>Loading…</div>;
+  if (loadError === 'notfound') return <NotFoundPage standalone={false} />;
+  if (loadError) return <ServerErrorPage onRetry={refresh} />;
+
+  if (loading || !batch) {
+    return (
+      <div className="page-wide">
+        <SkeletonPage label="Loading batch…">
+          <SkeletonCard lines={3} style={{ marginBottom: 20 }} />
+          <div className="grid-4" style={{ marginBottom: 20 }}>
+            {Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} lines={1} />)}
+          </div>
+          <div className="card">
+            <Skeleton width="30%" height={11} style={{ marginBottom: 14 }} />
+            <SkeletonTable rows={6} columns={8} label="Loading candidates…" />
+          </div>
+        </SkeletonPage>
+      </div>
+    );
+  }
 
   // A draft has no candidates, no results and no invites - every panel on this page would be
   // empty or zero. It's an unfinished upload, so it belongs in the wizard, resumed at whatever
@@ -166,7 +179,6 @@ export default function BatchDetail() {
         onEdit={setEditingCandidate}
         onOpenNotify={() => setNotifyOpen(true)}
         onOpenCertification={() => setCertificationOpen(true)}
-        onOpenInvite={() => setInviteConfirmOpen(true)}
         onOpenExport={() => setExportOpen(true)}
       />
 
@@ -201,18 +213,6 @@ export default function BatchDetail() {
         />
       )}
       {exportOpen && <ExportModal onClose={() => setExportOpen(false)} batchId={batch.batch_id} />}
-
-      {inviteConfirmOpen && (
-        <ConfirmModal
-          title="Send invite links?"
-          message={`This emails the assessment link to the ${selected.size} selected candidate(s) on
-                    "${batch.batch_name}". Anyone already invited is skipped. Invitation emails
-                    cannot be recalled once sent.`}
-          confirmLabel={`Send ${selected.size} Invite(s)`}
-          onConfirm={handleSendInvites}
-          onCancel={() => setInviteConfirmOpen(false)}
-        />
-      )}
 
       {deactivateOpen && (
         <DeactivateBatchModal

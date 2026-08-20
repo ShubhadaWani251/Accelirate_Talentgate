@@ -6,6 +6,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import * as authApi from '../../api/authApi';
 import BrandHeader from '../../components/layout/BrandHeader';
 import BrandFooter from '../../components/layout/BrandFooter';
+import { ButtonSpinner } from '../../components/loading/Spinner';
 
 // Catches obvious mistakes (wrong domain, typos) before hitting the network. Deliberately does
 // NOT check whether the email is actually registered - the backend (ForgotPasswordView) always
@@ -67,7 +68,7 @@ export default function ForgotPassword() {
               {errors.email && <div className="field-error">{errors.email.message}</div>}
             </div>
             <button className="btn primary block" type="submit" disabled={submitting}>
-              {submitting ? 'Sending…' : 'Send OTP'}
+              <ButtonSpinner loading={submitting}>Send OTP</ButtonSpinner>
             </button>
           </form>
 

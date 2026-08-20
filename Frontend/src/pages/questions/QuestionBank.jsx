@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import * as questionApi from '../../api/questionApi';
 import PaginationControls from '../../components/common/PaginationControls';
 import QuestionFormModal from '../../features/questions/QuestionFormModal';
+import { ListPageSkeleton, SkeletonTableRows } from '../../components/loading/Skeleton';
 import { extractErrorMessage } from '../../utils/passwordSchema';
 
 const STATUS_PILL = { Active: 'green', Inactive: 'gray' };
@@ -18,6 +19,9 @@ export default function QuestionBank() {
   const [page, setPage] = useState(1);
   const [pageMeta, setPageMeta] = useState({ count: 0, next: null, previous: null });
   const [loading, setLoading] = useState(true);
+  // Page-level skeleton on first paint only; section/difficulty/search changes keep the chrome
+  // and skeleton just the table rows.
+  const [firstLoad, setFirstLoad] = useState(true);
   const [editing, setEditing] = useState(null); // question object, or 'new'
 
   useEffect(() => {
@@ -37,6 +41,7 @@ export default function QuestionBank() {
       toast.error(extractErrorMessage(err));
     } finally {
       setLoading(false);
+      setFirstLoad(false);
     }
   }
 
@@ -47,12 +52,25 @@ export default function QuestionBank() {
 
   const selectedSection = sections.find((s) => s.section_key === sectionKey);
 
+  if (firstLoad && loading) {
+    return (
+      <ListPageSkeleton
+        titleWidth={240} actions={1} filters={3} rows={6} columns={8}
+        label="Loading question bank…"
+      />
+    );
+  }
+
   return (
     <div>
       <h3>Question Bank Management</h3>
       
 
-      <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: 18 }}>
+      {/* Was an inline `gridTemplateColumns: '220px 1fr'`, which had no responsive behaviour and
+          (because grid items default to min-width:auto) let the wide questions table push the
+          whole page sideways below ~900px. The class stacks the sidebar under tablet/mobile and
+          gives the content column min-width:0 so its table scroller can shrink instead. */}
+      <div className="qb-layout">
         <div className="card" style={{ padding: 12 }}>
           <div className="box-label">Sections</div>
           <div>
@@ -120,7 +138,7 @@ export default function QuestionBank() {
             <button className="btn" onClick={() => refresh(1)}>Search</button>
           </div>
 
-          <div className="table-scroll">
+          <div className="table-scroll" aria-busy={loading}>
             <table className="data-table">
               <thead>
                 <tr>
@@ -130,7 +148,7 @@ export default function QuestionBank() {
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={8}>Loading…</td></tr>
+                  <SkeletonTableRows rows={6} columns={8} />
                 ) : questions.length === 0 ? (
                   <tr><td colSpan={8}>No questions found.</td></tr>
                 ) : (

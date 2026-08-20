@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import * as batchApi from '../../api/batchApi';
 import { formatDateTime } from '../../utils/datetime';
 import { extractErrorMessage } from '../../utils/passwordSchema';
+import { ButtonSpinner } from '../../components/loading/Spinner';
 
 // "Send Invite - Confirmation" from the wireframe. Nothing is committed until the TA confirms
 // here: the batch is finalized AND the invites dispatched in the same action, so "Back / Edit"
@@ -68,7 +69,7 @@ export default function InviteConfirmationStep({ summary, onBack, onSent }) {
       <div className="btn-row" style={{ display: 'flex', gap: 10, marginTop: 14 }}>
         <button className="btn" onClick={onBack} disabled={sending}>Back / Edit</button>
         <button className="btn primary" onClick={handleConfirm} disabled={sending}>
-          {sending ? 'Sending…' : 'Confirm & Send Invites'}
+          <ButtonSpinner loading={sending}>Confirm & Send Invites</ButtonSpinner>
         </button>
       </div>
     </div>

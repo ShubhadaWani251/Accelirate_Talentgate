@@ -10,6 +10,7 @@ import useSessionRecorder from '../../features/exam/webcam/useSessionRecorder';
 import {
   FULLSCREEN_SUPPORTED, enterFullscreen, exitFullscreen, isFullscreen,
 } from '../../features/exam/proctoring/fullscreen';
+import { ButtonSpinner } from '../../components/loading/Spinner';
 import {
   REASON_SETTLE_MS, moreSpecificReason,
 } from '../../features/exam/proctoring/violationReasons';
@@ -317,7 +318,7 @@ export default function ExamAttemptPage() {
                 Cancel, Go Back
               </button>
               <button className="btn primary" type="button" disabled={submitting} onClick={onConfirmSubmit}>
-                {submitting ? 'Submitting…' : 'Yes, Submit'}
+                <ButtonSpinner loading={submitting}>Yes, Submit</ButtonSpinner>
               </button>
             </div>
           </div>

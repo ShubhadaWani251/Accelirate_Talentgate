@@ -8,6 +8,10 @@ import { useDispatch, useSelector } from 'react-redux';
 import { credentialsReceived, selectUser } from '../features/auth/authSlice';
 import * as authApi from '../api/authApi';
 import PasswordInput from '../components/common/PasswordInput';
+import {
+  Skeleton, SkeletonAvatar, SkeletonForm, SkeletonPage,
+} from '../components/loading/Skeleton';
+import { ButtonSpinner } from '../components/loading/Spinner';
 import { extractErrorMessage, passwordSchema, PASSWORD_HINT } from '../utils/passwordSchema';
 
 const schema = yup.object({
@@ -58,6 +62,34 @@ export default function Profile() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  // Profile renders from the Redux session rather than its own request, so there's normally
+  // nothing to wait for. It CAN be reached before the session lands though (deep link, slow
+  // refresh), where every field would render blank - a skeleton is the honest state for that.
+  if (!user) {
+    return (
+      <div style={{ maxWidth: 460 }}>
+        <SkeletonPage title label="Loading profile…">
+          <div className="card">
+            <Skeleton width="38%" height={11} style={{ marginBottom: 14 }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
+              <SkeletonAvatar size={52} />
+              <div style={{ flex: 1 }}>
+                <Skeleton width="60%" height={13} style={{ marginBottom: 8 }} />
+                <Skeleton width="80%" height={11} />
+              </div>
+            </div>
+            <SkeletonForm fields={3} />
+          </div>
+          <div className="card">
+            <Skeleton width="40%" height={11} style={{ marginBottom: 14 }} />
+            <SkeletonForm fields={3} />
+            <Skeleton width={150} height={38} radius={999} />
+          </div>
+        </SkeletonPage>
+      </div>
+    );
   }
 
   return (
@@ -116,7 +148,7 @@ export default function Profile() {
             {errors.confirm_password && <div className="field-error">{errors.confirm_password.message}</div>}
           </div>
           <button className="btn primary block" type="submit" disabled={submitting}>
-            {submitting ? 'Updating…' : 'Update Password'}
+            <ButtonSpinner loading={submitting}>Update Password</ButtonSpinner>
           </button>
         </form>
       </div>

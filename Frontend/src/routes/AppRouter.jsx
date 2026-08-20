@@ -20,6 +20,9 @@ import QuestionBank from '../pages/questions/QuestionBank';
 import QuestionUpload from '../pages/questions/QuestionUpload';
 import UserManagement from '../pages/users/UserManagement';
 import EditUser from '../pages/users/EditUser';
+import { FullPageSpinner } from '../components/loading/Spinner';
+import ErrorBoundary from '../components/error/ErrorBoundary';
+import NotFoundPage from '../components/error/NotFoundPage';
 import { ExamSessionProvider } from '../features/exam/ExamSessionProvider';
 import ExamVerify from '../pages/exam/ExamVerify';
 import ExamFullscreenGate from '../pages/exam/ExamFullscreenGate';
@@ -57,11 +60,16 @@ export default function AppRouter() {
       .catch(() => dispatch(sessionCleared()));
   }, [dispatch]);
 
+  // App boot: the session refresh decides which routes even exist for this user, so nothing
+  // page-shaped can be skeletoned yet. A centred spinner is the honest indicator.
   if (status === 'idle' || status === 'loading') {
-    return <div className="loading-splash">Loading TalentGate…</div>;
+    return <FullPageSpinner label="Starting TalentGate" />;
   }
 
   return (
+    // Wraps the whole routed tree: any unexpected render error below this becomes the 500 page
+    // rather than a blank white screen.
+    <ErrorBoundary>
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
@@ -127,8 +135,12 @@ export default function AppRouter() {
         </Route>
 
         <Route path="/" element={<RoleHome />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        {/* Unknown routes now show a real 404 instead of silently bouncing to "/". The previous
+            redirect meant a mistyped URL looked like a login/dashboard redirect, giving the user
+            no idea the address was wrong. */}
+        <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </BrowserRouter>
+    </ErrorBoundary>
   );
 }

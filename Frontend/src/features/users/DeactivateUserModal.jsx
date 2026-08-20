@@ -2,6 +2,7 @@ import { useState } from 'react';
 import toast from 'react-hot-toast';
 import * as userApi from '../../api/userApi';
 import { extractErrorMessage } from '../../utils/passwordSchema';
+import { ButtonSpinner } from '../../components/loading/Spinner';
 
 // Deactivation, not deletion: the account row and all its history are preserved, the user
 // simply can't sign in. They stay listed in User Management as Inactive and can be switched
@@ -35,7 +36,7 @@ export default function DeactivateUserModal({ user, onClose, onDeactivated }) {
         <div className="btn-row" style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
           <button className="btn" onClick={onClose}>Cancel</button>
           <button className="btn danger" onClick={handleDeactivate} disabled={working}>
-            {working ? 'Deactivating…' : 'Deactivate User'}
+            <ButtonSpinner loading={working}>Deactivate User</ButtonSpinner>
           </button>
         </div>
       </div>

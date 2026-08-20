@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import * as batchApi from '../../api/batchApi';
 import { extractErrorMessage } from '../../utils/passwordSchema';
+import { ButtonSpinner } from '../../components/loading/Spinner';
 
 export default function DeactivateBatchModal({ batch, onClose, onDeactivated }) {
   const [busy, setBusy] = useState(false);
@@ -35,7 +36,7 @@ export default function DeactivateBatchModal({ batch, onClose, onDeactivated }) 
         <div className="btn-row" style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
           <button className="btn" onClick={onClose} disabled={busy}>Cancel</button>
           <button className="btn danger" onClick={handleDeactivate} disabled={busy}>
-            {busy ? 'Deactivating…' : 'Deactivate Batch'}
+            <ButtonSpinner loading={busy}>Deactivate Batch</ButtonSpinner>
           </button>
         </div>
       </div>

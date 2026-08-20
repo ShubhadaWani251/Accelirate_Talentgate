@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import * as questionApi from '../../api/questionApi';
 import ToggleSwitch from '../../components/common/ToggleSwitch';
 import { extractErrorMessage } from '../../utils/passwordSchema';
+import { ButtonSpinner } from '../../components/loading/Spinner';
 
 const DIFFICULTIES = ['Easy', 'Medium', 'Hard'];
 
@@ -122,7 +123,7 @@ export default function QuestionFormModal({ question, sections, defaultSectionId
         <div className="btn-row" style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
           <button className="btn" onClick={onClose}>Cancel</button>
           <button className="btn primary" onClick={handleSave} disabled={saving}>
-            {saving ? 'Saving…' : '💾 Save Changes'}
+            <ButtonSpinner loading={saving}>💾 Save Changes</ButtonSpinner>
           </button>
         </div>
       </div>

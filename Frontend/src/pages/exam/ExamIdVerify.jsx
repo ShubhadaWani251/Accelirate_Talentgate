@@ -6,6 +6,7 @@ import RequireFullscreen from '../../features/exam/proctoring/RequireFullscreen'
 import PhotoCapture from '../../features/exam/webcam/PhotoCapture';
 import BrandHeader from '../../components/layout/BrandHeader';
 import BrandFooter from '../../components/layout/BrandFooter';
+import { ButtonSpinner } from '../../components/loading/Spinner';
 
 // Dev-only convenience for a test machine with no working webcam (see useCameraStream.js) -
 // stands in for the two required photos so the rest of the flow can still be exercised. Never
@@ -126,7 +127,7 @@ export default function ExamIdVerify() {
             disabled={!bothCaptured || submitting}
             onClick={onStartAssessment}
           >
-            {submitting ? 'Starting…' : 'Verified — Start Assessment'}
+            <ButtonSpinner loading={submitting}>Verified — Start Assessment</ButtonSpinner>
           </button>
         </div>
       </div>

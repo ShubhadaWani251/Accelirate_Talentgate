@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import * as candidateApi from '../../api/candidateApi';
 import { extractErrorMessage } from '../../utils/passwordSchema';
+import { ButtonSpinner } from '../../components/loading/Spinner';
 
 // The email body is fixed server-side (email_templates.CERTIFICATION_TEMPLATE), including both
 // UiPath course links - they're part of the approved copy, not something a TA pastes in, so the
@@ -98,7 +99,7 @@ Accelirate Softech Pvt. Ltd.`}
         <div className="btn-row" style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
           <button className="btn" onClick={onClose}>Cancel</button>
           <button className="btn primary" onClick={handleSend} disabled={sending}>
-            {sending ? 'Sending…' : '🎓 Send Certification Email'}
+            <ButtonSpinner loading={sending}>🎓 Send Certification Email</ButtonSpinner>
           </button>
         </div>
       </div>

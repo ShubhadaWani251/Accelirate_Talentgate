@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import * as batchApi from '../../api/batchApi';
 import { fromDatetimeLocalValue, toDatetimeLocalValue } from '../../utils/datetime';
 import { extractErrorMessage } from '../../utils/passwordSchema';
+import { ButtonSpinner } from '../../components/loading/Spinner';
 
 const SECTIONS = [
   { key: 'logical', label: 'Logical & Analytical' },
@@ -203,7 +204,7 @@ export default function ConfigureBatchStep({ onCreated, existingBatch, readOnly 
 
         <div className="btn-row" style={{ display: 'flex', gap: 10, marginTop: 8 }}>
           <button type="button" className="btn" onClick={handleSaveDefaults} disabled={savingDefaults}>
-            {savingDefaults ? 'Saving…' : 'Save as Default for New Batches'}
+            <ButtonSpinner loading={savingDefaults}>Save as Default for New Batches</ButtonSpinner>
           </button>
           {!locked && (
             <button type="submit" className="btn primary" disabled={submitting}>

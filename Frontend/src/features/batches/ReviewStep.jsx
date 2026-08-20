@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import * as batchApi from '../../api/batchApi';
 import CandidateHistoryModal from '../candidates/CandidateHistoryModal';
+import { SkeletonTableRows } from '../../components/loading/Skeleton';
 import { formatDateTime } from '../../utils/datetime';
 import { extractErrorMessage } from '../../utils/passwordSchema';
 
@@ -169,7 +170,7 @@ export default function ReviewStep({ batch, onFinalized }) {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={8}>Loading…</td></tr>
+              <SkeletonTableRows rows={5} columns={8} />
             ) : candidates.length === 0 ? (
               <tr><td colSpan={8}>No candidates on this batch.</td></tr>
             ) : (

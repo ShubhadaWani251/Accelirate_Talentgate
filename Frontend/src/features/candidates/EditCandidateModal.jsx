@@ -2,6 +2,7 @@ import { useState } from 'react';
 import toast from 'react-hot-toast';
 import * as candidateApi from '../../api/candidateApi';
 import { extractErrorMessage } from '../../utils/passwordSchema';
+import { ButtonSpinner } from '../../components/loading/Spinner';
 
 // Deliberately excludes Aadhaar and Batch from the editable fields - the backend
 // (CandidateUpdateSerializer) rejects them too, since changing either would silently invalidate
@@ -92,7 +93,7 @@ export default function EditCandidateModal({ candidate, onClose, onSaved }) {
             <button className="btn" onClick={onClose}>Cancel</button>
             <button className="btn" onClick={() => setResendConfirming(true)}>📧 Send Invite Again</button>
             <button className="btn primary" onClick={handleSave} disabled={saving}>
-              {saving ? 'Saving…' : '💾 Save'}
+              <ButtonSpinner loading={saving}>💾 Save</ButtonSpinner>
             </button>
           </div>
         </div>

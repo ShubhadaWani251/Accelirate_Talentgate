@@ -9,6 +9,7 @@ import * as authApi from '../../api/authApi';
 import BrandHeader from '../../components/layout/BrandHeader';
 import BrandFooter from '../../components/layout/BrandFooter';
 import PasswordInput from '../../components/common/PasswordInput';
+import { ButtonSpinner } from '../../components/loading/Spinner';
 
 const schema = yup.object({
   email: yup.string().email('Enter a valid email').required('Corporate email is required'),
@@ -73,7 +74,7 @@ export default function Login() {
               {errors.password && <div className="field-error">{errors.password.message}</div>}
             </div>
             <button className="btn primary block" type="submit" disabled={submitting}>
-              {submitting ? 'Logging in…' : 'Log In'}
+              <ButtonSpinner loading={submitting}>Log In</ButtonSpinner>
             </button>
           </form>
 

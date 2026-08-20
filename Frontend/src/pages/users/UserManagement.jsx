@@ -4,7 +4,9 @@ import toast from 'react-hot-toast';
 import * as userApi from '../../api/userApi';
 import DeactivateUserModal from '../../features/users/DeactivateUserModal';
 import PaginationControls from '../../components/common/PaginationControls';
+import { ListPageSkeleton, SkeletonTableRows } from '../../components/loading/Skeleton';
 import { extractErrorMessage } from '../../utils/passwordSchema';
+import { ButtonSpinner } from '../../components/loading/Spinner';
 
 const ROLE_PILL = { admin: 'gray', ta: 'blue' };
 
@@ -13,6 +15,8 @@ export default function UserManagement() {
   const [page, setPage] = useState(1);
   const [pageMeta, setPageMeta] = useState({ count: 0, next: null, previous: null });
   const [loading, setLoading] = useState(true);
+  // Page-level skeleton on first paint only; pagination keeps the chrome and skeletons the rows.
+  const [firstLoad, setFirstLoad] = useState(true);
   const [form, setForm] = useState({ first_name: '', last_name: '', email: '', role: 'ta' });
   const [creating, setCreating] = useState(false);
   const [deactivateTarget, setDeactivateTarget] = useState(null);
@@ -28,6 +32,7 @@ export default function UserManagement() {
       toast.error(extractErrorMessage(err));
     } finally {
       setLoading(false);
+      setFirstLoad(false);
     }
   }
 
@@ -52,6 +57,15 @@ export default function UserManagement() {
     } finally {
       setCreating(false);
     }
+  }
+
+  if (firstLoad && loading) {
+    return (
+      <ListPageSkeleton
+        titleWidth={250} actions={0} filters={0} rows={5} columns={5}
+        label="Loading users…"
+      />
+    );
   }
 
   return (
@@ -87,18 +101,18 @@ export default function UserManagement() {
         </div>
         <button className="btn primary" onClick={handleCreate}
                 disabled={creating || !form.first_name || !form.email}>
-          {creating ? 'Creating…' : '+ Create User'}
+          <ButtonSpinner loading={creating}>+ Create User</ButtonSpinner>
         </button>
       </div>
 
-      <div className="table-scroll">
+      <div className="table-scroll" aria-busy={loading}>
         <table className="data-table">
           <thead>
             <tr><th>Name</th><th>Corporate Email</th><th>Role</th><th>Status</th><th></th></tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={5}>Loading…</td></tr>
+              <SkeletonTableRows rows={5} columns={5} />
             ) : users.length === 0 ? (
               <tr><td colSpan={5}>No users yet.</td></tr>
             ) : (

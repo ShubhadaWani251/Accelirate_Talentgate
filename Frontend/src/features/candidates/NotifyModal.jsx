@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import * as candidateApi from '../../api/candidateApi';
 import { extractErrorMessage } from '../../utils/passwordSchema';
+import { ButtonSpinner } from '../../components/loading/Spinner';
 
 // Icons are presentation-only; the labels and copy come from the backend template registry so
 // the approved wording lives in exactly one place.
@@ -108,7 +109,7 @@ export default function NotifyModal({ candidateIds, onClose, onSent }) {
         <div className="btn-row" style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
           <button className="btn" onClick={onClose}>Cancel</button>
           <button className="btn primary" onClick={handleSend} disabled={sending}>
-            {sending ? 'Sending…' : '📧 Send Email'}
+            <ButtonSpinner loading={sending}>📧 Send Email</ButtonSpinner>
           </button>
         </div>
       </div>

@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import * as batchApi from '../../api/batchApi';
 import { extractErrorMessage } from '../../utils/passwordSchema';
+import { ButtonSpinner } from '../../components/loading/Spinner';
 
 export default function UploadStep({ batch, onUploaded }) {
   const [file, setFile] = useState(null);
@@ -106,7 +107,7 @@ export default function UploadStep({ batch, onUploaded }) {
           ⬇ Download Template
         </button>
         <button className="btn primary" onClick={handleUpload} disabled={uploading}>
-          {uploading ? 'Uploading…' : 'Review & Upload'}
+          <ButtonSpinner loading={uploading}>Review & Upload</ButtonSpinner>
         </button>
       </div>
     </div>

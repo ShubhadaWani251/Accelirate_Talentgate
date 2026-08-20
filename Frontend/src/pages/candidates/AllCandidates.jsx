@@ -9,6 +9,7 @@ import EditCandidateModal from '../../features/candidates/EditCandidateModal';
 import NotifyModal from '../../features/candidates/NotifyModal';
 import ExportModal from '../../features/candidates/ExportModal';
 import PaginationControls from '../../components/common/PaginationControls';
+import { ListPageSkeleton } from '../../components/loading/Skeleton';
 import { extractErrorMessage } from '../../utils/passwordSchema';
 
 const EMPTY_FILTERS = EMPTY_CANDIDATE_FILTERS;
@@ -21,6 +22,10 @@ export default function AllCandidates() {
   const [pageMeta, setPageMeta] = useState({ count: 0, next: null, previous: null });
   const [batches, setBatches] = useState([]);
   const [loading, setLoading] = useState(true);
+  // First paint only. Later loads (filter/page changes) keep the page chrome and show skeleton
+  // rows inside the table instead - re-skeletoning the whole page for a filter change would
+  // throw away context the user is still reading.
+  const [firstLoad, setFirstLoad] = useState(true);
   const [selected, setSelected] = useState(new Set());
 
   const [editingCandidate, setEditingCandidate] = useState(null);
@@ -53,6 +58,7 @@ export default function AllCandidates() {
       toast.error(extractErrorMessage(err));
     } finally {
       setLoading(false);
+      setFirstLoad(false);
     }
   }
 
@@ -93,6 +99,13 @@ export default function AllCandidates() {
 
   return (
     <div>
+      {firstLoad && loading ? (
+        <ListPageSkeleton
+          titleWidth={190} actions={0} filters={3} rows={6} columns={12}
+          label="Loading candidates…"
+        />
+      ) : (
+      <>
       <h3>All Candidates</h3>
 
       {filterBatchName && (
@@ -147,6 +160,8 @@ export default function AllCandidates() {
       )}
 
       {exportOpen && <ExportModal onClose={() => setExportOpen(false)} />}
+      </>
+      )}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
+import { SkeletonTableRows } from '../../components/loading/Skeleton';
 
 const STATUS_PILL = {
   pending_invite: 'gray', invited: 'blue', in_progress: 'blue',
@@ -11,7 +12,7 @@ const RESULT_PILL = { pending: 'gray', pass: 'green', fail: 'red' };
 // candidates (All Candidates, Batch Details) needs both and they share selection state.
 export default function CandidateTable({
   candidates, loading, selected, onToggleRow, onToggleSelectAll, onEdit, onOpenNotify, onOpenExport,
-  onOpenCertification, onOpenInvite,
+  onOpenCertification,
 }) {
   // Only checked rows are emailed, so an empty selection is a mistake worth naming rather
   // than a silently dead button.
@@ -32,13 +33,9 @@ export default function CandidateTable({
           <input type="checkbox" checked={selected.size === candidates.length && candidates.length > 0} onChange={onToggleSelectAll} />
           <b>Select All</b>
         </label>
-        {/* Batch Details passes this; invites are only ever sent to checked rows, so anyone
-            skipped during upload review is re-invited by choosing them explicitly here. */}
-        {onOpenInvite && (
-          <button className="btn" onClick={requireSelection(onOpenInvite)}>
-            📧 Send Invite Link ({selected.size})
-          </button>
-        )}
+        {/* No bulk "Send Invite Link" here. Invites are issued from the upload wizard's Send
+            Invites step for a new batch, and per-candidate from Candidate Details / the Edit
+            Candidate modal - so this toolbar deliberately doesn't duplicate that. */}
         <button className="btn" onClick={requireSelection(onOpenNotify)}>
           ✉ Send Notification Email ({selected.size})
         </button>
@@ -54,7 +51,7 @@ export default function CandidateTable({
         </button>
       </div>
 
-      <div className="table-scroll">
+      <div className="table-scroll" aria-busy={loading}>
         <table className="data-table">
           <thead>
             <tr>
@@ -66,7 +63,7 @@ export default function CandidateTable({
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={21}>Loading…</td></tr>
+              <SkeletonTableRows rows={6} columns={21} />
             ) : candidates.length === 0 ? (
               <tr><td colSpan={21}>No candidates found.</td></tr>
             ) : (

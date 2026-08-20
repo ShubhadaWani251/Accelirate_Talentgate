@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import * as batchApi from '../../api/batchApi';
 import PaginationControls from '../../components/common/PaginationControls';
 import BatchStatusFilter from '../../components/common/BatchStatusFilter';
+import { ListPageSkeleton, SkeletonTableRows } from '../../components/loading/Skeleton';
 import { extractErrorMessage } from '../../utils/passwordSchema';
 
 const STATUS_PILL = { draft: 'gray', in_progress: 'blue', completed: 'green', cancelled: 'red' };
@@ -19,6 +20,9 @@ export default function BatchList() {
   const [page, setPage] = useState(1);
   const [pageMeta, setPageMeta] = useState({ count: 0, next: null, previous: null });
   const [loading, setLoading] = useState(true);
+  // Page-level skeleton on first paint only; later searches/filters keep the chrome and show
+  // skeleton rows in the table instead.
+  const [firstLoad, setFirstLoad] = useState(true);
   const [search, setSearch] = useState('');
   // Same unified Batch Status filter as the Dashboard - "Active" (In Progress + Completed) by
   // default. Draft and Cancelled aren't hidden, just not shown until asked for: a Draft has no
@@ -38,6 +42,7 @@ export default function BatchList() {
       toast.error(extractErrorMessage(err));
     } finally {
       setLoading(false);
+      setFirstLoad(false);
     }
   }
 
@@ -45,6 +50,15 @@ export default function BatchList() {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  if (firstLoad && loading) {
+    return (
+      <ListPageSkeleton
+        titleWidth={120} actions={1} filters={2} rows={6} columns={8}
+        label="Loading batches…"
+      />
+    );
+  }
 
   return (
     <div>
@@ -83,7 +97,7 @@ export default function BatchList() {
         </div>
       )}
 
-      <div className="table-scroll">
+      <div className="table-scroll" aria-busy={loading}>
         <table className="data-table">
           <thead>
             <tr>
@@ -99,7 +113,7 @@ export default function BatchList() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={8}>Loading…</td></tr>
+              <SkeletonTableRows rows={6} columns={8} />
             ) : batches.length === 0 ? (
               <tr><td colSpan={8}>{EMPTY_MESSAGE[batchStatus] || 'No batches yet.'}</td></tr>
             ) : (

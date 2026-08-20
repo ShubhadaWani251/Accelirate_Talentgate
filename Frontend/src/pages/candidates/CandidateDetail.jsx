@@ -2,6 +2,13 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import * as candidateApi from '../../api/candidateApi';
+import ServerErrorPage from '../../components/error/ServerErrorPage';
+import NotFoundPage from '../../components/error/NotFoundPage';
+import { isResourceMissing } from '../../utils/apiError';
+import {
+  Skeleton, SkeletonCard, SkeletonPage, SkeletonTable,
+} from '../../components/loading/Skeleton';
+import { ButtonSpinner } from '../../components/loading/Spinner';
 import { formatDateTime } from '../../utils/datetime';
 import { extractErrorMessage } from '../../utils/passwordSchema';
 
@@ -11,6 +18,8 @@ export default function CandidateDetail() {
   const { id } = useParams();
   const [candidate, setCandidate] = useState(null);
   const [loading, setLoading] = useState(true);
+  // null | 'notfound' | 'server' - which error page (if any) replaces this page.
+  const [loadError, setLoadError] = useState(null);
   const [sending, setSending] = useState(false);
   const [downloadingZip, setDownloadingZip] = useState(false);
 
@@ -18,8 +27,12 @@ export default function CandidateDetail() {
     setLoading(true);
     try {
       setCandidate(await candidateApi.getCandidate(id));
+      setLoadError(null);
     } catch (err) {
       toast.error(extractErrorMessage(err));
+      // Otherwise candidate stays null and the page shows "Loading…" permanently. The KIND of
+      // failure decides which page is shown: a missing candidate is a 404, not a server fault.
+      setLoadError(isResourceMissing(err) ? 'notfound' : 'server');
     } finally {
       setLoading(false);
     }
@@ -54,7 +67,28 @@ export default function CandidateDetail() {
     }
   }
 
-  if (loading || !candidate) return <div>Loading…</div>;
+  if (loadError === 'notfound') return <NotFoundPage standalone={false} />;
+  if (loadError) return <ServerErrorPage onRetry={refresh} />;
+
+  if (loading || !candidate) {
+    return (
+      <div className="page-wide">
+        <SkeletonPage label="Loading candidate…">
+          {/* Mirrors the real layout below: details grid, section-result table, evidence cards. */}
+          <SkeletonCard lines={4} style={{ marginBottom: 20 }} />
+          <div className="card" style={{ marginBottom: 20 }}>
+            <Skeleton width="34%" height={11} style={{ marginBottom: 14 }} />
+            <SkeletonTable rows={4} columns={4} label="Loading section results…" />
+          </div>
+          <div className="grid-3">
+            <SkeletonCard lines={2} />
+            <SkeletonCard lines={2} />
+            <SkeletonCard lines={2} />
+          </div>
+        </SkeletonPage>
+      </div>
+    );
+  }
 
   const hasAnyEvidence = Object.values(candidate.evidence).some(Boolean);
 
@@ -83,6 +117,8 @@ export default function CandidateDetail() {
 
         <div className="card">
           <div className="box-label">Section-wise Result</div>
+          {/* .table-scroll so the table can't widen the page on a phone. */}
+          <div className="table-scroll">
           <table className="data-table">
             <thead><tr><th>Section</th><th>Score</th><th>Cutoff</th><th></th></tr></thead>
             <tbody>
@@ -106,6 +142,7 @@ export default function CandidateDetail() {
               ))}
             </tbody>
           </table>
+          </div>
           <div style={{ fontSize: 12.5, marginTop: 8 }}>
             <b>
               {/* total_correct is the mark COUNT; overall_score is a PERCENTAGE. Rendering the
@@ -166,7 +203,7 @@ export default function CandidateDetail() {
         {hasAnyEvidence && (
           <div className="btn-row no-print" style={{ marginTop: 12 }}>
             <button className="btn" onClick={handleDownloadZip} disabled={downloadingZip}>
-              {downloadingZip ? 'Preparing…' : '⬇ Download All Evidence (ZIP)'}
+              <ButtonSpinner loading={downloadingZip}>⬇ Download All Evidence (ZIP)</ButtonSpinner>
             </button>
           </div>
         )}
@@ -177,24 +214,26 @@ export default function CandidateDetail() {
 
       <div className="card" style={{ marginTop: 16 }}>
         <div className="box-label">Process / Status History</div>
-        <table className="data-table">
-          <thead><tr><th>Date/Time</th><th>Event</th><th>Details</th><th>Batch</th></tr></thead>
-          <tbody>
-            {candidate.timeline.map((event, i) => (
-              <tr key={i}>
-                <td>{formatDateTime(event.timestamp)}</td>
-                <td>{event.event}</td>
-                <td>{event.details || '—'}</td>
-                <td>{event.batch_name}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="table-scroll">
+          <table className="data-table">
+            <thead><tr><th>Date/Time</th><th>Event</th><th>Details</th><th>Batch</th></tr></thead>
+            <tbody>
+              {candidate.timeline.map((event, i) => (
+                <tr key={i}>
+                  <td>{formatDateTime(event.timestamp)}</td>
+                  <td>{event.event}</td>
+                  <td>{event.details || '—'}</td>
+                  <td>{event.batch_name}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div className="btn-row no-print" style={{ display: 'flex', gap: 10, marginTop: 16 }}>
         <button className="btn primary" onClick={handleSendInvite} disabled={sending}>
-          {sending ? 'Sending…' : 'Send Invite Link'}
+          <ButtonSpinner loading={sending}>Send Invite Link</ButtonSpinner>
         </button>
         <button className="btn" onClick={() => window.print()}>🖨 Export Candidate Details (PDF)</button>
       </div>
