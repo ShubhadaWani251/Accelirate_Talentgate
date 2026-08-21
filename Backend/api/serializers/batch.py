@@ -81,6 +81,43 @@ class BatchSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {'link_valid_until': 'Must be after Link Valid From.'}
             )
+
+        # The link window has to be at least as long as the exam itself.
+        #
+        # This is not about the exam being cut short - it isn't. The deadline is
+        # started_at + exam_duration_minutes and is independent of link expiry, so a candidate who
+        # starts one minute before the window closes still gets their full time.
+        #
+        # The failure it prevents is on RESUME. Reconnecting after a dropped connection or a
+        # browser crash goes back through /t/<token>, which refuses an expired link - so a
+        # candidate whose exam is still legitimately running would be locked out of it while
+        # their clock keeps counting down, and nothing can let them back in. A window shorter
+        # than the exam guarantees a span where that is true for everyone still working.
+        #
+        # It is also, in practice, always a data-entry slip: a 26-minute window on a 45-minute
+        # exam is someone mistyping the end time, not a deliberate choice.
+        # Only enforced when the request actually touches one of the three fields involved.
+        # Checking unconditionally would retroactively fail edits to batches that already
+        # violate the rule - and one live batch does (a 26-minute window on a 45-minute exam,
+        # created before this validation existed). Its status allows only the section cutoffs to
+        # be changed, so an unconditional check would have blocked the single edit still
+        # permitted on it, for a reason the TA could not act on. Grandfathering the existing row
+        # while refusing to create or worsen one is the useful behaviour.
+        touches_window = {
+            'link_valid_from', 'link_valid_until', 'exam_duration_minutes',
+        } & set(attrs)
+        duration = attrs.get(
+            'exam_duration_minutes', getattr(self.instance, 'exam_duration_minutes', None)
+        )
+        if touches_window and link_from and link_until and duration:
+            window_minutes = (link_until - link_from).total_seconds() / 60
+            if window_minutes < duration:
+                raise serializers.ValidationError({'link_valid_until': (
+                    f'The link window is {int(window_minutes)} minutes, which is shorter than the '
+                    f'{duration}-minute exam. A candidate who needs to reconnect mid-exam would be '
+                    f'locked out while their timer is still running. Extend the end time to at '
+                    f'least {duration} minutes after the start.'
+                )})
         for section in SECTION_FIELDS:
             count_field = f'{section}_questions'
             cutoff_field = f'{section}_cutoff'

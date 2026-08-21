@@ -22,6 +22,20 @@ const schema = yup.object({
   link_valid_until: yup.string().required('Required')
     .test('after-from', 'Must be after Link Valid From', function (value) {
       return !value || !this.parent.link_valid_from || value > this.parent.link_valid_from;
+    })
+    // Mirrors the same rule in BatchSerializer.validate, which is the one that actually
+    // enforces it. Repeated here only so the TA sees it on the field while filling the form
+    // instead of as a toast after submitting - the server stays authoritative.
+    .test('covers-exam', function (value) {
+      const { link_valid_from: from, exam_duration_minutes: duration } = this.parent;
+      if (!value || !from || !duration) return true;
+      const windowMinutes = (new Date(value) - new Date(from)) / 60000;
+      if (!Number.isFinite(windowMinutes) || windowMinutes >= duration) return true;
+      return this.createError({
+        message: `Only ${Math.round(windowMinutes)} minutes long, but the exam runs for `
+          + `${duration}. A candidate reconnecting mid-exam would be locked out - make this at `
+          + `least ${duration} minutes after the start.`,
+      });
     }),
   exam_duration_minutes: yup.number().typeError('Required').min(1).required(),
   logical_questions: yup.number().typeError('Required').min(1).required(),
