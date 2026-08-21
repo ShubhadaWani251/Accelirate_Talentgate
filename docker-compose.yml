@@ -1,0 +1,89 @@
+# Full local/staging stack: API, SPA + reverse proxy, Redis, and the scheduled jobs.
+#
+# Postgres is deliberately NOT a service here. The database is a managed cloud instance holding
+# real candidate data; pointing the stack at a throwaway local Postgres by default would risk
+# someone running migrations against the wrong one. Set DB_HOST and friends in Backend/.env.
+
+services:
+  backend:
+    build:
+      context: ./Backend
+    # env_file rather than `environment:` so secrets stay in the gitignored .env and never
+    # appear in this tracked file or in `docker inspect` output as literals.
+    env_file: ./Backend/.env
+    environment:
+      # Overrides for what the container topology dictates, regardless of what .env says.
+      # Both are safe here specifically because nginx (see Frontend/nginx.conf) overwrites
+      # X-Forwarded-For rather than appending to it, so the client cannot spoof its own IP.
+      TRUST_X_FORWARDED_FOR: "True"
+      # Shared cache for rate-limit and login-lockout counters. Without this each gunicorn
+      # worker counts separately - see api/checks.py, api.W001.
+      REDIS_URL: "redis://redis:6379/0"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    # Not published to the host: the only way in is through the frontend's /api/ proxy, which
+    # keeps everything same-origin. Expose it directly only for debugging.
+    expose:
+      - "8000"
+
+  frontend:
+    build:
+      context: ./Frontend
+      args:
+        # Relative, so the SPA calls its own origin and nginx proxies onward. This is what makes
+        # CORS unnecessary and SameSite=Strict on the refresh cookie correct.
+        VITE_API_BASE_URL: /api
+    ports:
+      - "8080:8080"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    # Bounded memory with LRU eviction: these are rate-limit counters, so losing the oldest
+    # under pressure degrades gracefully. No persistence configured - nothing here is worth
+    # surviving a restart, and a lost counter fails open for one window rather than corrupting.
+    command: >
+      redis-server
+      --maxmemory 128mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  scheduler:
+    # Reuses the backend image - same code, same dependencies, different command. Runs the two
+    # housekeeping jobs the app cannot function correctly without: without them, abandoned exam
+    # attempts stay in_progress forever and expired draft batches are never removed.
+    build:
+      context: ./Backend
+    env_file: ./Backend/.env
+    environment:
+      REDIS_URL: "redis://redis:6379/0"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    # Overrides the entrypoint: this container must not run migrate or collectstatic - the
+    # backend service already did, and two containers racing migrations at boot is avoidable.
+    entrypoint: ["/bin/sh", "-c"]
+    # A plain sleep loop rather than cron: one less moving part, logs straight to stdout where
+    # the platform already collects them, and no crond-in-container signal handling to get
+    # wrong. Each command is idempotent and cheap when there is nothing to do, so the fixed
+    # 10-minute interval covers all three comfortably.
+    command:
+      - |
+        echo "scheduler: starting (10 minute interval)"
+        while true; do
+          python manage.py finalize_expired_attempts || echo "scheduler: finalize_expired_attempts FAILED"
+          python manage.py delete_expired_draft_batches || echo "scheduler: delete_expired_draft_batches FAILED"
+          python manage.py retry_stalled_invite_emails || echo "scheduler: retry_stalled_invite_emails FAILED"
+          sleep 600
+        done

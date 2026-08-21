@@ -53,13 +53,28 @@ def _set_refresh_cookie(response, refresh_token):
         max_age=int(settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME'].total_seconds()),
         path=settings.REFRESH_COOKIE_PATH,
         httponly=True,
-        secure=not settings.DEBUG,
-        samesite='Strict',
+        # SameSite=None is only honoured by browsers on a Secure cookie, and silently dropped
+        # otherwise - so if a deployment needs None (a genuinely cross-site frontend), it must
+        # also be on HTTPS. Forcing secure here in that case turns a confusing silent failure
+        # into an obvious one.
+        secure=(not settings.DEBUG) or settings.REFRESH_COOKIE_SAMESITE == 'None',
+        # Configurable rather than hard-coded Strict: see REFRESH_COOKIE_SAMESITE in settings.py.
+        # Strict is correct for the intended same-origin deployment (nginx proxies /api/ to the
+        # backend, so there is no cross-site request at all) and wrong if the frontend and API
+        # ever end up on genuinely different sites, where the browser withholds the cookie on
+        # every refresh and users are logged out mid-session with nothing logged anywhere.
+        samesite=settings.REFRESH_COOKIE_SAMESITE,
     )
 
 
 def _clear_refresh_cookie(response):
-    response.delete_cookie(key=settings.REFRESH_COOKIE_NAME, path=settings.REFRESH_COOKIE_PATH)
+    # Path, samesite and secure must match what _set_refresh_cookie used, or the browser treats
+    # this as a different cookie and leaves the original in place - i.e. logout does not log out.
+    response.delete_cookie(
+        key=settings.REFRESH_COOKIE_NAME,
+        path=settings.REFRESH_COOKIE_PATH,
+        samesite=settings.REFRESH_COOKIE_SAMESITE,
+    )
 
 
 @method_decorator(ratelimit(key=ratelimit_ip_key, rate='10/m', method='POST', block=False), name='post')

@@ -191,6 +191,14 @@ class Invitation(models.Model):
     # When the last send was ATTEMPTED, successful or not. email_sent_at only moves on success,
     # so without this a repeatedly-failing invitation looks like nothing was ever tried.
     email_last_attempt_at = models.DateTimeField(null=True, blank=True)
+    # When the invitation row was created, which is when its email was queued. Needed to tell a
+    # send that is genuinely stalled from one that was queued a moment ago and is still in
+    # flight on the background thread - without an age, the retry sweep
+    # (management/commands/retry_stalled_invite_emails.py) could not distinguish the two and
+    # would double-send. Nullable so adding it needed no data migration; rows that predated it
+    # were stamped with the migration's own timestamp, which makes them eligible for retry a few
+    # minutes after deploy rather than immediately.
+    created_at = models.DateTimeField(auto_now_add=True, null=True)
     link_clicked_at = models.DateTimeField(null=True, blank=True)
     is_link_used = models.BooleanField(default=False)
     link_expired_at = models.DateTimeField()

@@ -1,0 +1,62 @@
+# Direct dependencies only - the packages this codebase actually imports or configures.
+# requirements.txt is the fully-pinned, resolved tree generated from this file:
+#
+#     pip install -r requirements.in && pip freeze > requirements.txt
+#
+# Keeping the two separate is why this file exists. requirements.txt had accumulated 17 packages
+# nothing referenced (celery, django-celery-beat, django-axes, django-prometheus, drf-yasg,
+# django-filter, django-oauth-toolkit, django-extensions, factory_boy, Faker, Werkzeug,
+# django-environ, sendgrid, numpy, pandas, xlrd, prometheus_client) while MISSING python-dotenv,
+# which settings.py imports on its very first line - so a clean install produced an app that
+# could not start. A flat freeze cannot show that, because it does not distinguish "we asked for
+# this" from "something else pulled it in".
+
+# --- Framework ---
+Django==6.0.8
+djangorestframework==3.17.2
+djangorestframework-simplejwt==5.5.1
+django-cors-headers==4.9.0
+django-ratelimit==4.1.0
+
+# --- Configuration ---
+# Imported by config/settings.py to load Backend/.env.
+python-dotenv==1.2.2
+
+# --- Database ---
+psycopg2-binary==2.9.12
+
+# --- Serving (production) ---
+gunicorn==26.0.0
+# Serves collected static files; Django serves none itself with DEBUG=False.
+whitenoise==6.12.0
+
+# --- Email ---
+# Anymail provides the SendGrid fallback backend. The default transport is Microsoft Graph,
+# implemented in api/services/graph_email.py directly on top of requests.
+django-anymail==15.1
+requests==2.34.2
+
+# --- Spreadsheet upload/export ---
+# Candidate and question bulk upload, and the xlsx exports. openpyxl only - the pandas/numpy/xlrd
+# stack was pinned but never imported.
+openpyxl==3.1.5
+
+# --- Proctoring evidence storage ---
+azure-storage-blob==12.24.0
+
+# --- Shared cache for rate-limit and login-lockout counters ---
+# Used via django.core.cache.backends.redis.RedisCache when REDIS_URL is set. Without it those
+# counters are per-process and every limit is effectively multiplied by the worker count.
+redis==8.1.0
+
+# --- Error reporting ---
+# Initialised only when SENTRY_DSN is set.
+sentry-sdk==2.66.1
+
+# --- Timezone data ---
+# Required on Windows, where the OS ships no zoneinfo database and USE_TZ=True needs one.
+tzdata==2026.3
+
+# --- Tests ---
+pytest==9.1.1
+pytest-django==4.12.0

@@ -5,6 +5,9 @@ from . import views
 
 urlpatterns = [
     path('health/', views.health_check, name='health'),
+    # Separate from liveness above: this one fails when the database is unreachable, so a
+    # load balancer stops sending traffic to an instance that cannot serve it.
+    path('health/ready/', views.readiness_check, name='health-ready'),
 
     path('auth/login/', views.LoginView.as_view(), name='auth-login'),
     path('auth/logout/', views.LogoutView.as_view(), name='auth-logout'),

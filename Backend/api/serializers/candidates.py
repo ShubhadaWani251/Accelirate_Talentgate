@@ -2,6 +2,7 @@ from rest_framework import serializers
 
 from api.models import AuditLog, Candidate, ExamAttempt
 from api.serializers.common import format_aadhaar_last4
+from api.services import blob_storage
 from api.services.exam_session import termination_label
 
 SECTION_LABELS = {
@@ -352,10 +353,14 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
                 'face_photo_url': None,
                 'session_recording_url': None,
             }
+        # Signed here, at the moment they are handed to the browser, rather than read straight
+        # off the row. The stored values are unsigned pointers and would 404 on their own; each
+        # URL returned below carries a token valid for a couple of hours. See
+        # services/blob_storage.fresh_read_url for why the credential is not persisted.
         return {
-            'aadhaar_capture_url': attempt.aadhaar_capture_url,
-            'face_photo_url': attempt.face_photo_url,
-            'session_recording_url': attempt.session_recording_url,
+            'aadhaar_capture_url': blob_storage.fresh_read_url(attempt.aadhaar_capture_url),
+            'face_photo_url': blob_storage.fresh_read_url(attempt.face_photo_url),
+            'session_recording_url': blob_storage.fresh_read_url(attempt.session_recording_url),
         }
 
     def get_timeline(self, candidate):

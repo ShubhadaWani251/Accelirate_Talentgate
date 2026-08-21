@@ -25,6 +25,7 @@ from api.serializers.candidates import (
     _effective_status,
     _latest_attempt,
 )
+from api.services import blob_storage
 from api.services.access import visible_candidates_qs
 from api.services.audit import log_action
 from api.services.candidate_history import build_candidate_history
@@ -34,7 +35,8 @@ from api.services.email_templates import (
 from api.services.excel_upload import generate_candidates_workbook
 from api.services.invites import (
     BatchNotInvitableError,
-    create_single_reinvite, partition_by_deliverable, send_invites_async, send_notification_emails,
+    create_single_reinvite, partition_by_deliverable,
+    send_invites_async, send_notification_emails,
 )
 from api.utils.net import ratelimit_user_key
 
@@ -492,7 +494,10 @@ class CandidateEvidenceZipView(APIView):
         fetched_any = False
         with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as archive:
             for field, filename in self.EVIDENCE_FILES:
-                url = getattr(attempt, field)
+                # Signed on read - the stored value is an unsigned pointer, so fetching it
+                # directly would 401. Also upgrades rows written under the old scheme, whose
+                # baked-in token is discarded rather than relied on.
+                url = blob_storage.fresh_read_url(getattr(attempt, field))
                 if not url:
                     continue
                 try:

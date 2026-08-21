@@ -33,7 +33,8 @@ from api.services.excel_upload import (
     stage_candidates_from_workbook,
 )
 from api.services.invites import (
-    BatchNotInvitableError, assert_batch_can_invite, create_invitations, send_invites_async,
+    BatchNotInvitableError, assert_batch_can_invite, create_invitations,
+    send_invites_async,
 )
 
 logger = logging.getLogger(__name__)

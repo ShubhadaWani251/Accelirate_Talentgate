@@ -1,0 +1,22 @@
+# Scheduled jobs for a non-container deployment (cron). Install with: crontab deploy/crontab.example
+#
+# These are not optional. Without the first, exam attempts abandoned mid-way stay in_progress
+# forever and are never scored. Without the second, Draft batches past their 24-hour window are
+# never actually deleted - the app hides them and deletes lazily when someone happens to open
+# one, but a draft nobody ever looks at again is only removed here. Without the third, an
+# invitation email interrupted by a deploy stays queued with nobody retrying it.
+
+SHELL=/bin/sh
+# Adjust to the deployment's paths.
+APP=/srv/talentgate/Backend
+PY=/srv/talentgate/Backend/venv/bin/python
+
+# Finalize exam attempts past their deadline.
+*/10 * * * * cd $APP && $PY manage.py finalize_expired_attempts >> /var/log/talentgate/scheduler.log 2>&1
+
+# Delete Draft batches not activated within 24 hours, and their staged candidates.
+# Run once with --dry-run first on any new deployment to see what it would remove.
+*/30 * * * * cd $APP && $PY manage.py delete_expired_draft_batches >> /var/log/talentgate/scheduler.log 2>&1
+
+# Re-send invitation emails left stranded by a worker restart.
+*/15 * * * * cd $APP && $PY manage.py retry_stalled_invite_emails >> /var/log/talentgate/scheduler.log 2>&1

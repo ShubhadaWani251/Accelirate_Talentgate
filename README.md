@@ -90,12 +90,16 @@ Two deliberate decisions worth knowing before "fixing" them:
   created under, so moving models between apps against a live shared database needs careful,
   verified migration surgery - not a file move. The current `models/`/`serializers/`/`views/`/
   `services/` split already gives most of the organizational benefit without that risk.
-- **Several dependencies in `requirements.txt`/`package.json` aren't wired into the app yet**
-  (celery, sentry-sdk, drf-yasg, django-oauth-toolkit, prometheus_client, pytest, factory_boy,
-  Faker, numpy on the backend; jwt-decode, dayjs, bootstrap-icons on the frontend). These are
-  kept intentionally as placeholders for planned work (task queue, error tracking, API docs,
-  a real test suite) rather than removed as dead weight - remove them only once you're
-  confident that work isn't happening.
+- **`requirements.txt` is generated, not hand-edited.** Declare direct dependencies in
+  `Backend/requirements.in`, then regenerate:
+  `pip install -r requirements.in && pip freeze > requirements.txt`. The split exists because a
+  flat freeze cannot distinguish "we asked for this" from "something pulled it in", and that had
+  gone badly wrong: 17 packages were pinned that nothing imported (celery, django-celery-beat,
+  django-axes, django-prometheus, drf-yasg, django-filter, django-oauth-toolkit,
+  django-extensions, factory_boy, Faker, Werkzeug, django-environ, sendgrid, numpy, pandas,
+  xlrd, prometheus_client) while `python-dotenv` - imported on the first line of
+  `settings.py` - was **missing**, so a clean `pip install -r requirements.txt` produced an app
+  that could not start. Removing the unused set took the tree from 78 packages to 37.
 
 ## Setup
 
@@ -145,37 +149,140 @@ and a comment on what each one does. Highlights:
 | Django system checks | `python manage.py check` | - |
 | Apply migrations | `python manage.py migrate` | - |
 | Create a migration | `python manage.py makemigrations api` | - |
+| Run tests | `python -m pytest` | - |
+| Check for uncommitted model changes | `python manage.py makemigrations --check --dry-run` | - |
+| Production readiness check | `python manage.py check --deploy` | - |
 
 ### Scheduled jobs (required in any real deployment)
 
-Two housekeeping commands have to run on a timer. Neither is optional: without them, abandoned
-exam attempts sit `in_progress` forever and unfinalized draft batches are never cleaned up.
+Three housekeeping commands have to run on a timer. None is optional: without them, abandoned
+exam attempts sit `in_progress` forever, unfinalized draft batches are never cleaned up, and an
+invitation email interrupted by a deploy is never retried.
 
-No Celery broker is configured (`celery` / `django-celery-beat` are in `requirements.txt` but
-nothing is wired up in `settings.py`), so these are plain management commands intended to be
-driven by whatever scheduler the host already provides - cron, Windows Task Scheduler, or an
-Azure WebJob.
+There is no task queue - these are plain management commands, driven by whatever scheduler the
+host already provides (cron, Windows Task Scheduler, an Azure WebJob, or the `scheduler` service
+in `docker-compose.yml`). See **Deployment** below for ready-made configurations.
 
 | Command | Suggested interval | What it does |
 |---|---|---|
 | `python manage.py finalize_expired_attempts` | every 5-15 min | Finalizes exam attempts still `in_progress` past their deadline, and ones whose candidate never started before the invitation link expired. |
 | `python manage.py delete_expired_draft_batches` | every 15-60 min | **Deletes** Draft batches not finalized within 24 hours of creation, together with their staged candidates. Run `--dry-run` first to see what it would remove. |
+| `python manage.py retry_stalled_invite_emails` | every 15 min | Re-sends invitation emails left `queued` by an interrupted send. Emails go out on a daemon thread inside the web worker, so a deploy's SIGTERM kills any still in flight and they would otherwise sit `queued` forever, reading as "in progress". Skips rows whose link is already opened or expired. |
 
-Both are safe to run more often than suggested - each is idempotent and does nothing when there
-is nothing to process. `delete_expired_draft_batches` really deletes rows, so read
+All three are safe to run more often than suggested - each is idempotent and does nothing when
+there is nothing to process. `delete_expired_draft_batches` really deletes rows, so read
 `Backend/api/services/draft_expiry.py` before changing the 24-hour window.
 
 ## Testing
 
-There is currently no meaningful automated test suite (`Backend/api/tests.py` is Django's
-stock boilerplate). Verification during development has relied on one-off scripts run inside a
-rolled-back database transaction (never committed) plus manual browser walkthroughs. Building a
-real test suite is an open item, not something this README can claim is already covered.
+```bash
+cd Backend && python -m pytest
+```
 
-## Deployment notes
+159 tests, a few seconds. `pytest.ini` and `Backend/api/tests/` hold the suite; it covers
+the invariants that are silent when they break rather than trying for line coverage:
 
-- Rotate `SECRET_KEY` and the database password for any real deployment; both currently exist
-  only as values a developer entered locally into `.env`.
+| File | What it pins down |
+|---|---|
+| `test_draft_expiry.py` | The 24-hour rule: clock starts at creation and is **not** reset by edits or uploads, activation stops expiry permanently, deletion takes staged candidates with it, the sweep is idempotent. |
+| `test_access_scoping.py` | Per-creator batches vs uploader-agnostic candidates, over both the queryset helpers and HTTP. |
+| `test_candidate_identity.py` | Only four Aadhaar digits are storable, a full 12-digit number is rejected rather than truncated, and two people sharing a suffix are not treated as duplicates. |
+| `test_email_delivery.py` | Status is never "sent" when the provider failed, a failure always carries a reason, the reason never echoes an API key, and the retry sweep skips links that are opened, expired, or on a batch that may not invite. |
+| `test_hardening.py` | Unhandled errors return JSON without leaking the exception, rate limits actually return 429, readiness fails when the database is down, and stored evidence URLs carry no credential. |
+| `test_proctoring_warnings.py` | Which causes get one warning and which end the attempt outright, that the camera going off is warnable, and that the warning budget is shared across all causes. |
+| `test_batch_validation.py` | That a link window shorter than the exam duration is refused, in both directions, while the one pre-existing batch that violates it stays editable. |
+| `test_smoke.py` | That the suite cannot reach a real database. |
+
+**The suite runs against in-memory SQLite and never touches PostgreSQL.** That is enforced by
+`config/settings_test.py`, which `pytest.ini` selects as the settings module - not by a conftest
+hook, which is too late (pytest-django has already cached the connection by then, and an earlier
+version of this suite would have created and dropped `test_QA_TalentDB` on the shared server).
+`test_smoke.py::test_test_database_is_isolated` is the guard; if it ever fails, stop.
+
+Because the schema is built from the models (`--no-migrations`, needed because migration 0013
+contains PostgreSQL-only SQL), the suite does not exercise the migration history.
+`python manage.py makemigrations --check --dry-run` is what guards that, and belongs in CI
+alongside pytest.
+
+## Deployment
+
+### Running it
+
+```bash
+docker compose up --build
+```
+
+That brings up four services: the Django app under gunicorn, an nginx container serving the
+built SPA, Redis, and a scheduler running the three housekeeping commands on a loop. The app is
+reached on <http://localhost:8080>.
+
+**nginx proxies `/api/` to the backend, so the frontend and API share an origin.** That is the
+intended topology, not a convenience: same-origin means no CORS preflight at all, and it means
+the refresh-token cookie's `SameSite=Strict` is correct. Splitting them onto genuinely different
+sites is what makes that cookie a hazard - the browser silently withholds it on every refresh
+and users are logged out mid-session with nothing logged anywhere. If you must split them, set
+`REFRESH_COOKIE_SAMESITE=None` and serve over HTTPS.
+
+Postgres is deliberately **not** a compose service: the database is a managed instance holding
+real candidate data, and defaulting the stack to a throwaway local one invites running
+migrations against the wrong target. Point `DB_*` in `Backend/.env` at the real thing.
+
+For a host without Docker, `Backend/Dockerfile` and `Backend/docker-entrypoint.sh` document the
+same sequence: `migrate`, `collectstatic`, then `gunicorn --config gunicorn.conf.py
+config.wsgi:application`.
+
+### Scheduled jobs
+
+Wire the three commands in the table above into whatever scheduler the host has. Ready-made:
+
+| Host | Use |
+|---|---|
+| Docker | Already running as the `scheduler` service in `docker-compose.yml`. |
+| Linux/cron | `deploy/crontab.example` |
+| Windows | `deploy/register-scheduled-tasks.ps1 -BackendPath C:\path\to\Backend` (elevated) |
+
+### Before go-live
+
+`python manage.py check --deploy` reports most of this itself - the `api.W00x` warnings come
+from `Backend/api/checks.py` and cover configuration Django's own checks know nothing about.
+
+- **Rotate `SECRET_KEY` and the database password.** Both currently exist only as values a
+  developer entered locally into `.env`. `SECRET_KEY` also signs every JWT, so a leaked one lets
+  anyone mint a valid staff token. Generate one with:
+  `python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"`
+- **Rotate the Azure Storage account key** if it has ever been shared. This is now safe to do:
+  evidence URLs are signed at read time (`blob_storage.fresh_read_url`), so rotation no longer
+  breaks historical evidence. It would have before - stored URLs used to carry a 365-day token
+  and nothing re-signed them.
+- **Set `REDIS_URL`.** Without it, rate limiting and login lockout count in a per-process cache,
+  so every limit is effectively multiplied by the worker count and the lockout can be evaded by
+  landing on a different worker. Reported as `api.W001`.
+- **Set `TRUST_X_FORWARDED_FOR=True`, but only behind a proxy that overwrites the header.**
+  Without it every request appears to come from the proxy, so all IP rate limits collapse into
+  one shared bucket and audit logs record the proxy's address. `Frontend/nginx.conf` sets rather
+  than appends `X-Forwarded-For`, which is what makes trusting it safe. It also enables
+  `SECURE_PROXY_SSL_HEADER`, without which `ENABLE_SSL_REDIRECT` causes a redirect loop.
+- **Set `ENABLE_SSL_REDIRECT=True`** once TLS termination is confirmed. This also switches HSTS on.
+- **Tighten `CORPORATE_EMAIL_DOMAIN`** - it currently includes a public webmail domain that was
+  added for deliverability testing. Reported as `api.W004`.
+- **Set `SUPPORT_EMAIL`** to a monitored mailbox; it is printed in candidate emails as the
+  contact for technical problems. Reported as `api.W003`.
+- **Set `FRONTEND_ORIGIN` to the deployed URL.** Invitation links are built from it, and a
+  localhost value produces links that only work on the machine reading the email - they send
+  successfully and render a working button, so there is nothing to notice until a candidate
+  reports that the link does nothing. Check it before the first real invite.
+- **Set `SENTRY_DSN`** if you want error reporting; nothing is sent anywhere without it.
+- **`DB_SSLMODE` defaults to `require`.** Only set it to `disable` for a local Postgres with no
+  TLS configured.
+
+### Deliberately not installed
+
+`/admin/` is **not routed** and `django.contrib.admin` is not in `INSTALLED_APPS`. Every model
+had been registered there with no write protection, against `django.contrib.auth.User` - a
+different user table from the one this app authenticates with. That made it a full bypass of the
+app's own RBAC: an editable `AuditLog`, a readable `Question.correct_option`, and a login path
+with none of the rate limiting or lockout the real login has. Staff administration lives in the
+app's own User Management screen, which enforces the real permissions.
 - `ENABLE_SSL_REDIRECT` and `TRUST_X_FORWARDED_FOR` gate production transport/cookie hardening
   behind explicit opt-in flags - set both `True` behind a TLS-terminating proxy.
 - `CORPORATE_EMAIL_DOMAIN` currently includes a non-corporate domain for testing purposes -
@@ -187,9 +294,12 @@ real test suite is an open item, not something this README can claim is already 
 
 ## Architectural decisions log
 
-- **Batch visibility is org-wide, not per-owner**: any Staffing User can see and act on any
-  batch, not just ones assigned to them - see `Backend/api/services/access.py` for the single
-  seam this is enforced through.
+- **Batch visibility is per-creator; candidate visibility is not**: a Staffing User sees only
+  the batches they created (an Administrator sees all), but **All Candidates shows every
+  candidate regardless of who uploaded them**. The asymmetry is deliberate - the batch list is
+  a work queue, the candidate list is a directory of people. Both go through the single seam in
+  `Backend/api/services/access.py`, and both directions are pinned by
+  `Backend/api/tests/test_access_scoping.py`, because each has been reversed once already.
 - **Draft and Cancelled batches are excluded from the default dashboard/list view** but remain
   fully reachable via an explicit status filter - see `Backend/api/services/batch_status_filter.py`.
 - **Candidate/question bulk uploads are two-phase**: validate first (nothing written), then

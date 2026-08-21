@@ -103,6 +103,7 @@ def create_single_reinvite(candidate, user):
     )
 
 
+
 def summarize_send_error(exc):
     """A short, human-readable reason for a failed send, safe to show a TA.
 
@@ -170,56 +171,80 @@ def send_invite_email(invitation, base_url):
                         cta_label='Start Your Assessment')
 
 
+def send_invite_and_record(invitation, base_url):
+    """Send one invitation email and record the outcome on the row. Returns True if it sent.
+
+    The single place an invitation's email_status is written, so every caller behaves
+    identically: the background thread used by send_invites_async, and the retry sweep in
+    management/commands/retry_stalled_invite_emails.py. When this logic lived inline inside the
+    thread, the retry path could not reuse it and would have had to restate the status handling -
+    which is exactly how two copies drift apart.
+
+    Never raises: the outcome is the return value plus the row's own state. A caller looping
+    over many invitations must not have the remainder abandoned because one address was bad.
+    """
+    attempted_at = timezone.now()
+    try:
+        send_invite_email(invitation, base_url)
+    except EMAIL_SEND_ERRORS as exc:
+        # Recorded on the row, not just in the log. A FAILED status with no reason attached is
+        # close to useless - "unverified sender", "invalid address" and "timeout" need three
+        # different fixes, and only the message distinguishes them. Still logged too, with the
+        # traceback, for anything the summary loses.
+        logger.exception(
+            'Failed to send invite email for invitation_id=%s', invitation.invitation_id
+        )
+        invitation.email_status = Invitation.EmailStatus.FAILED
+        invitation.email_error = summarize_send_error(exc)
+        invitation.email_last_attempt_at = attempted_at
+        invitation.save(update_fields=[
+            'email_status', 'email_error', 'email_last_attempt_at',
+        ])
+        return False
+    except Exception as exc:
+        # A failure OUTSIDE the email backend's own exception family - a bug in rendering, a
+        # database error mid-loop. Previously this escaped the loop and every remaining
+        # invitation was silently left QUEUED, reading as "in progress" forever. Record it and
+        # let the caller carry on with the rest.
+        logger.exception(
+            'Unexpected error sending invite for invitation_id=%s', invitation.invitation_id,
+        )
+        invitation.email_status = Invitation.EmailStatus.FAILED
+        invitation.email_error = summarize_send_error(exc)
+        invitation.email_last_attempt_at = attempted_at
+        invitation.save(update_fields=[
+            'email_status', 'email_error', 'email_last_attempt_at',
+        ])
+        return False
+
+    invitation.email_status = Invitation.EmailStatus.SENT
+    invitation.email_sent_at = attempted_at
+    invitation.email_last_attempt_at = attempted_at
+    # Cleared, so a reason from an earlier failed attempt can't sit next to a SENT status and
+    # be read as current.
+    invitation.email_error = None
+    invitation.save(update_fields=[
+        'email_status', 'email_sent_at', 'email_last_attempt_at', 'email_error',
+    ])
+    return True
+
+
 def send_invites_async(invitations, base_url):
     """Fire off all invite emails on a single background thread (sequential, not one
     thread per candidate) - keeps the finalize/send-invites request fast regardless of
     batch size. Delivery outcome is tracked per-invitation via email_status.
+
+    The thread is a daemon, so a process shutdown - a deploy sending SIGTERM to the worker -
+    kills it mid-run and any invitation it had not reached yet stays QUEUED. That cannot be
+    recovered here, because the request that started it is long gone; it is covered by the
+    retry_stalled_invite_emails command, which re-sends anything still QUEUED past a grace
+    period. Making the thread non-daemon instead would delay every deploy by however long the
+    remaining sends take and still lose them on a hard kill.
     """
     def _worker():
         try:
             for invitation in invitations:
-                attempted_at = timezone.now()
-                try:
-                    send_invite_email(invitation, base_url)
-                except EMAIL_SEND_ERRORS as exc:
-                    # Recorded on the row, not just in the log. A FAILED status with no reason
-                    # attached is close to useless - "unverified sender", "invalid address" and
-                    # "timeout" need three different fixes, and only the message distinguishes
-                    # them. Still logged too, with the traceback, for anything the summary loses.
-                    logger.exception(
-                        'Failed to send invite email for invitation_id=%s', invitation.invitation_id
-                    )
-                    invitation.email_status = Invitation.EmailStatus.FAILED
-                    invitation.email_error = summarize_send_error(exc)
-                    invitation.email_last_attempt_at = attempted_at
-                    invitation.save(update_fields=[
-                        'email_status', 'email_error', 'email_last_attempt_at',
-                    ])
-                except Exception as exc:
-                    # A failure OUTSIDE the email backend's own exception family - a bug in
-                    # rendering, a database error mid-loop. Previously this escaped the loop
-                    # and every remaining invitation was silently left QUEUED, reading as
-                    # "in progress" forever. Record it and carry on with the rest.
-                    logger.exception(
-                        'Unexpected error sending invite for invitation_id=%s',
-                        invitation.invitation_id,
-                    )
-                    invitation.email_status = Invitation.EmailStatus.FAILED
-                    invitation.email_error = summarize_send_error(exc)
-                    invitation.email_last_attempt_at = attempted_at
-                    invitation.save(update_fields=[
-                        'email_status', 'email_error', 'email_last_attempt_at',
-                    ])
-                else:
-                    invitation.email_status = Invitation.EmailStatus.SENT
-                    invitation.email_sent_at = attempted_at
-                    invitation.email_last_attempt_at = attempted_at
-                    # Cleared, so a reason from an earlier failed attempt can't sit next to a
-                    # SENT status and be read as current.
-                    invitation.email_error = None
-                    invitation.save(update_fields=[
-                        'email_status', 'email_sent_at', 'email_last_attempt_at', 'email_error',
-                    ])
+                send_invite_and_record(invitation, base_url)
         finally:
             connections.close_all()
 

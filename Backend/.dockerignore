@@ -1,0 +1,17 @@
+# Keeps secrets and local state out of the build context. .env especially: it would otherwise be
+# baked into an image layer, where it survives even if a later layer deletes it.
+.env
+.env.*
+!.env.example
+venv/
+**/__pycache__/
+*.pyc
+*.log
+logs/
+media/
+staticfiles/
+db.sqlite3
+.admin_credentials.txt
+.gmail_test_admin_credentials.txt
+.git/
+.gitignore

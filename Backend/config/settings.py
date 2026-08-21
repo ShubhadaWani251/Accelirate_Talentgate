@@ -41,8 +41,14 @@ ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
 # Application definition
 
+# django.contrib.admin is deliberately NOT installed and /admin/ is not routed. Every model
+# was registered there with no write protection, which made it a full bypass of this app's own
+# RBAC (api/permissions.py): editable AuditLog rows, readable Question.correct_option, and a
+# login path with none of the rate limiting or lockout the real login has. Admin also
+# authenticates against django.contrib.auth.User - a different user table from the one this app
+# uses - so a single createsuperuser would have created an account outside the RBAC entirely.
+# django.contrib.auth stays: it supplies the password hashers and validators the app relies on.
 INSTALLED_APPS = [
-    'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
@@ -57,6 +63,11 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    # Serves collected static files in production. Django itself serves nothing when
+    # DEBUG=False, and this app is deployed without a separate web server in front of it doing
+    # static duty, so without WhiteNoise every /static/ URL 404s. Must sit directly after
+    # SecurityMiddleware, per WhiteNoise's documented ordering requirement.
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -95,7 +106,11 @@ DATABASES = {
         'HOST': os.environ.get('DB_HOST', 'localhost'),
         'PORT': os.environ.get('DB_PORT', '5432'),
         'OPTIONS': {
-            'sslmode': os.environ.get('DB_SSLMODE', 'disable'),
+            # Defaults to require: this app's Postgres is a managed cloud instance reached
+            # over the network, and an unencrypted connection there would put the database
+            # password and every candidate record on the wire in clear text. A local Postgres
+            # without TLS configured needs DB_SSLMODE=disable set explicitly in .env.
+            'sslmode': os.environ.get('DB_SSLMODE', 'require'),
         },
         'CONN_MAX_AGE': int(os.environ.get('DB_CONN_MAX_AGE', 0)),
     }
@@ -149,6 +164,25 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+# collectstatic's destination. Without this, `manage.py collectstatic` raises
+# ImproperlyConfigured and any deployment step that runs it fails outright. Already gitignored.
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+# Extra directory of app-owned static files, if present (templates/ has a sibling static/).
+STATICFILES_DIRS = [BASE_DIR / 'static'] if (BASE_DIR / 'static').is_dir() else []
+
+STORAGES = {
+    'default': {
+        'BACKEND': 'django.core.files.storage.FileSystemStorage',
+    },
+    'staticfiles': {
+        # Compresses and fingerprints collected files so they can be cached hard. The
+        # non-manifest variant is used deliberately: ManifestStaticFilesStorage raises at
+        # request time for any file missing from the manifest, which turns a cosmetic asset
+        # typo into a 500. Nothing here needs cache-busting badly enough to accept that.
+        'BACKEND': 'whitenoise.storage.CompressedStaticFilesStorage',
+    },
+}
+
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # CORS
@@ -170,6 +204,10 @@ REST_FRAMEWORK = {
     'DEFAULT_RENDERER_CLASSES': [
         'rest_framework.renderers.JSONRenderer',
     ],
+    # Without this, an exception DRF doesn't recognise escapes to Django and the client gets an
+    # HTML error page. Every caller here is an axios client that does res.data.detail, so an
+    # HTML body surfaces as an unreadable error in the UI and the real cause is lost.
+    'EXCEPTION_HANDLER': 'api.exception_handler.api_exception_handler',
 }
 
 # djangorestframework-simplejwt
@@ -203,6 +241,13 @@ OTP_RESEND_COOLDOWN_SECONDS = int(os.environ.get('OTP_RESEND_COOLDOWN_SECONDS', 
 # Refresh token cookie
 REFRESH_COOKIE_NAME = 'refresh_token'
 REFRESH_COOKIE_PATH = '/api/auth/'
+# Strict is right when the frontend and the API share a registrable domain (the intended
+# deployment: app.example.com + api.example.com are same-site). If they end up on genuinely
+# different sites - say a *.azurestaticapps.net frontend calling a *.azurewebsites.net API -
+# the browser silently withholds this cookie on every refresh call and users get logged out
+# mid-session with no error anywhere. That case needs 'None', which browsers only honour on a
+# Secure cookie, so it cannot be used over plain HTTP.
+REFRESH_COOKIE_SAMESITE = os.environ.get('REFRESH_COOKIE_SAMESITE', 'Strict')
 
 # Email - Microsoft Graph (app-only). Sending from inside the M365 tenant avoids the
 # external-sender quarantine that held @accelirate.com invites when this went via SendGrid.
@@ -276,6 +321,13 @@ SECURE_HSTS_PRELOAD = SECURE_SSL_REDIRECT
 # header to fake their source IP and bypass rate limiting entirely. Defaults to REMOTE_ADDR.
 TRUST_X_FORWARDED_FOR = os.environ.get('TRUST_X_FORWARDED_FOR', 'False') == 'True'
 
+# Tied to the same flag: behind a TLS-terminating proxy, Django sees plain HTTP and would
+# otherwise consider every request insecure - which breaks SECURE_SSL_REDIRECT (infinite
+# redirect loop) and request.is_secure(). Only meaningful when the proxy is trusted, which is
+# exactly what TRUST_X_FORWARDED_FOR asserts, so it is deliberately not a separate switch.
+if TRUST_X_FORWARDED_FOR:
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
 # Cache - backs django-ratelimit counters and the login-lockout counter. LocMemCache (the
 # Django default used when CACHES isn't set) is per-process, so in a multi-worker production
 # deployment each worker would rate-limit independently, undermining both. Set REDIS_URL to
@@ -288,3 +340,85 @@ if REDIS_URL:
             'LOCATION': REDIS_URL,
         }
     }
+# Logging.
+# Django's default configuration only attaches a console handler when DEBUG=True, and never
+# configures the root logger at all. The practical effect with DEBUG=False was that every
+# logger.info() in this codebase was discarded outright (the effective level fell back to
+# WARNING), and logger.exception() output went to logging's lastResort handler - bare stderr,
+# no timestamp, no logger name. That included the audit line recording which draft batches were
+# deleted, which is the only record that a deletion happened at all.
+#
+# Everything goes to stdout/stderr rather than a file on purpose: the process runs in a
+# container where the platform collects the streams, and a file inside the container would be
+# lost on every restart and invisible to log aggregation.
+LOG_LEVEL = os.environ.get('LOG_LEVEL', 'DEBUG' if DEBUG else 'INFO')
+
+LOGGING = {
+    'version': 1,
+    # Django's own default loggers are left in place rather than replaced.
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{asctime} {levelname} {name} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+    },
+    'root': {
+        # Catches anything without a more specific logger, so a stray library warning is not
+        # silently dropped the way it was before.
+        'handlers': ['console'],
+        'level': 'WARNING',
+    },
+    'loggers': {
+        'api': {
+            'handlers': ['console'],
+            'level': LOG_LEVEL,
+            # False, or every api.* record is emitted twice - once here and once at the root.
+            'propagate': False,
+        },
+        'django': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'django.request': {
+            # Unhandled exceptions in a view. ERROR so a 500 is always visible even if
+            # LOG_LEVEL is raised to quiet the app's own chatter.
+            'handlers': ['console'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
+        'django.db.backends': {
+            # Every SQL statement, only when explicitly asked for. Left off by default because
+            # it is enormous and echoes query parameters, which here include candidate PII.
+            'handlers': ['console'],
+            'level': os.environ.get('SQL_LOG_LEVEL', 'WARNING'),
+            'propagate': False,
+        },
+    },
+}
+
+# Error reporting (optional). sentry-sdk was already a pinned dependency but nothing ever
+# initialised it, so it reported nothing. Enabled only when SENTRY_DSN is set, which keeps
+# local development and CI from sending events anywhere.
+SENTRY_DSN = os.environ.get('SENTRY_DSN', '')
+if SENTRY_DSN:
+    import sentry_sdk
+
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        environment=os.environ.get('SENTRY_ENVIRONMENT', 'production' if not DEBUG else 'local'),
+        # Traces are off by default: this is an error reporter, and performance sampling on a
+        # low-traffic internal tool costs quota without telling anyone much.
+        traces_sample_rate=float(os.environ.get('SENTRY_TRACES_SAMPLE_RATE', '0')),
+        # send_default_pii would attach request bodies, headers and cookies to every event.
+        # Those carry candidate PII, JWTs and the refresh cookie, none of which should leave
+        # the tenant to a third-party service.
+        send_default_pii=False,
+    )

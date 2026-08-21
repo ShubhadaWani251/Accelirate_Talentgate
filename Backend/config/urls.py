@@ -16,11 +16,15 @@ Including another URLconf
 """
 from django.conf import settings
 from django.conf.urls.static import static
-from django.contrib import admin
 from django.urls import path, include
 
+# The Django admin is deliberately not routed here, and django.contrib.admin is not installed
+# (see INSTALLED_APPS in settings.py for the full reasoning). Short version: it registered every
+# model with no write protection, against a different user table than the one this app
+# authenticates with, so it was a complete bypass of the app's own role checks - including an
+# editable AuditLog and readable Question.correct_option. Staff administration lives in the app's
+# own User Management screen, which enforces the real permissions.
 urlpatterns = [
-    path('admin/', admin.site.urls),
     path('api/', include('api.urls')),
 ]
 

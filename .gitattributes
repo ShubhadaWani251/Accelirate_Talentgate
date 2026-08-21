@@ -1,0 +1,41 @@
+# Line-ending policy.
+#
+# This repo is developed on Windows with core.autocrlf=true, which rewrites text files to CRLF on
+# checkout. That is fine for Python and JavaScript, and fatal for anything a Linux container
+# executes: a shell script whose shebang line ends in CR is read as "#!/bin/sh\r", and the kernel
+# reports "no such file or directory" for an interpreter that plainly exists - one of the more
+# confusing failures to debug from a Docker build log.
+#
+# So the files that end up inside a container are pinned to LF regardless of platform.
+
+# Let Git decide for everything not named below.
+* text=auto
+
+# Executed inside the Linux images - MUST stay LF.
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.dockerignore text eol=lf
+docker-compose.yml text eol=lf
+
+# nginx refuses to parse a config with stray CRs in some directives.
+*.conf text eol=lf
+
+# Read by cron on the host, same shebang/parsing concern as above.
+deploy/crontab.example text eol=lf
+
+# PowerShell is fine with either, but CRLF is the platform norm for it.
+*.ps1 text eol=crlf
+
+# Binary - never touch.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.xlsx binary
+*.xls binary
+*.woff binary
+*.woff2 binary
+*.webm binary
+*.mp4 binary

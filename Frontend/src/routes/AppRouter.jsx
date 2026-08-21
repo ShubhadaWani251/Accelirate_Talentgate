@@ -1,36 +1,51 @@
-import { useEffect } from 'react';
+import { useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { authCheckStarted, credentialsReceived, sessionCleared, selectAuthStatus, selectRoleCode } from '../features/auth/authSlice';
 import * as authApi from '../api/authApi';
-import Login from '../features/auth/Login';
-import ForgotPassword from '../features/auth/ForgotPassword';
-import OtpVerification from '../features/auth/OtpVerification';
-import LoggedOut from '../features/auth/LoggedOut';
 import ProtectedRoute from '../components/common/ProtectedRoute';
 import ProtectedLayout from '../components/layout/ProtectedLayout';
-import Dashboard from '../pages/Dashboard';
-import Profile from '../pages/Profile';
-import BatchList from '../pages/batches/BatchList';
-import BatchDetail from '../pages/batches/BatchDetail';
-import BatchWizard from '../features/batches/BatchWizard';
-import AllCandidates from '../pages/candidates/AllCandidates';
-import CandidateDetail from '../pages/candidates/CandidateDetail';
-import QuestionBank from '../pages/questions/QuestionBank';
-import QuestionUpload from '../pages/questions/QuestionUpload';
-import UserManagement from '../pages/users/UserManagement';
-import AuditLogs from '../pages/audit/AuditLogs';
-import EditUser from '../pages/users/EditUser';
 import { FullPageSpinner } from '../components/loading/Spinner';
 import ErrorBoundary from '../components/error/ErrorBoundary';
 import NotFoundPage from '../components/error/NotFoundPage';
 import { ExamSessionProvider } from '../features/exam/ExamSessionProvider';
-import ExamVerify from '../pages/exam/ExamVerify';
-import ExamFullscreenGate from '../pages/exam/ExamFullscreenGate';
-import ExamCameraPermission from '../pages/exam/ExamCameraPermission';
-import ExamInstructions from '../pages/exam/ExamInstructions';
-import ExamIdVerify from '../pages/exam/ExamIdVerify';
-import ExamAttemptPage from '../pages/exam/ExamAttemptPage';
+
+// Eager: the auth screens. These are the first thing a staff user sees, so lazy-loading them
+// would add a network round trip to the critical path for no benefit.
+import Login from '../features/auth/Login';
+import ForgotPassword from '../features/auth/ForgotPassword';
+import OtpVerification from '../features/auth/OtpVerification';
+import LoggedOut from '../features/auth/LoggedOut';
+
+// Everything below is code-split. The whole app used to build as one 561 kB bundle, which meant
+// a candidate opening their assessment link downloaded the entire staff application - dashboard,
+// question bank, user management, audit log - before their exam would render, and a staff user
+// downloaded the exam portal and its webcam machinery. Neither ever uses the other's code.
+//
+// Splitting by route group rather than per page: these pages share enough (tables, modals, the
+// api layer) that finer granularity mostly produces chunks that are always fetched together.
+
+// --- staff application ---
+const Dashboard = lazy(() => import('../pages/Dashboard'));
+const Profile = lazy(() => import('../pages/Profile'));
+const BatchList = lazy(() => import('../pages/batches/BatchList'));
+const BatchDetail = lazy(() => import('../pages/batches/BatchDetail'));
+const BatchWizard = lazy(() => import('../features/batches/BatchWizard'));
+const AllCandidates = lazy(() => import('../pages/candidates/AllCandidates'));
+const CandidateDetail = lazy(() => import('../pages/candidates/CandidateDetail'));
+const QuestionBank = lazy(() => import('../pages/questions/QuestionBank'));
+const QuestionUpload = lazy(() => import('../pages/questions/QuestionUpload'));
+const UserManagement = lazy(() => import('../pages/users/UserManagement'));
+const EditUser = lazy(() => import('../pages/users/EditUser'));
+const AuditLogs = lazy(() => import('../pages/audit/AuditLogs'));
+
+// --- candidate exam portal ---
+const ExamVerify = lazy(() => import('../pages/exam/ExamVerify'));
+const ExamFullscreenGate = lazy(() => import('../pages/exam/ExamFullscreenGate'));
+const ExamCameraPermission = lazy(() => import('../pages/exam/ExamCameraPermission'));
+const ExamInstructions = lazy(() => import('../pages/exam/ExamInstructions'));
+const ExamIdVerify = lazy(() => import('../pages/exam/ExamIdVerify'));
+const ExamAttemptPage = lazy(() => import('../pages/exam/ExamAttemptPage'));
 
 // Wraps the candidate exam-taking routes in their own local session context - deliberately
 // NOT ProtectedRoute/ProtectedLayout, which assume a logged-in staff user.
@@ -69,9 +84,13 @@ export default function AppRouter() {
 
   return (
     // Wraps the whole routed tree: any unexpected render error below this becomes the 500 page
-    // rather than a blank white screen.
+    // rather than a blank white screen. It also catches a failed chunk fetch, which is what a
+    // lazy import rejects with when a deploy has replaced the assets mid-session.
     <ErrorBoundary>
     <BrowserRouter>
+      {/* One Suspense boundary around the routes rather than per route: a route change swaps
+          the whole page anyway, so a single fallback is what the user would see either way. */}
+      <Suspense fallback={<FullPageSpinner label="Loading" />}>
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
@@ -149,6 +168,7 @@ export default function AppRouter() {
             no idea the address was wrong. */}
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
+      </Suspense>
     </BrowserRouter>
     </ErrorBoundary>
   );
