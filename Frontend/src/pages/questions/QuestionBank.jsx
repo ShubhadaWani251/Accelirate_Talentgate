@@ -64,6 +64,34 @@ export default function QuestionBank() {
   return (
     <div>
       <h3>Question Bank Management</h3>
+
+      {/* Counts come from the API, not from the loaded page: the question list is paginated, so
+          the browser only ever holds one page and could not total a section itself. Clicking a
+          card filters the table to that section - the cards double as the section picker the
+          sidebar provides, which is what makes them worth the vertical space. */}
+      <div className="grid-4" style={{ marginBottom: 16 }}>
+        {sections.map((sec) => (
+          <button
+            key={sec.section_id}
+            type="button"
+            className={`stat-card qb-stat-card ${sectionKey === sec.section_key ? 'active' : ''}`}
+            onClick={() => setSectionKey(sec.section_key)}
+            style={{ textAlign: 'left', cursor: 'pointer', border: 'none', width: '100%' }}
+          >
+            <div className="stat-lbl" style={{ fontWeight: 600 }}>{sec.section_name}</div>
+            <div className="stat-num" style={{ fontSize: 26 }}>{sec.total_questions ?? '—'}</div>
+            <div className="stat-lbl">Total questions</div>
+            <div style={{ display: 'flex', gap: 10, marginTop: 6, fontSize: 11.5 }}>
+              <span style={{ color: 'var(--brand-green, #1a7f37)' }}>
+                Active: <b>{sec.active_questions ?? '—'}</b>
+              </span>
+              <span style={{ color: 'var(--muted)' }}>
+                Inactive: <b>{sec.inactive_questions ?? '—'}</b>
+              </span>
+            </div>
+          </button>
+        ))}
+      </div>
       
 
       {/* Was an inline `gridTemplateColumns: '220px 1fr'`, which had no responsive behaviour and
@@ -142,19 +170,24 @@ export default function QuestionBank() {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>ID</th><th>Question</th><th>Options</th><th>Correct Answer</th>
+                  {/* '#' is the question's position WITHIN its section (1..n), which is
+                      what the bank is read by. The global question_code is still stored and
+                      still searchable (see the search box) - it just isn't a column any more. */}
+                  <th>#</th><th>Section</th><th>Question</th><th>Options</th>
+                  <th>Correct Answer</th>
                   <th>Difficulty</th><th>Marks</th><th>Status</th><th></th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <SkeletonTableRows rows={6} columns={8} />
+                  <SkeletonTableRows rows={6} columns={9} />
                 ) : questions.length === 0 ? (
-                  <tr><td colSpan={8}>No questions found.</td></tr>
+                  <tr><td colSpan={9}>No questions found.</td></tr>
                 ) : (
                   questions.map((q) => (
                     <tr key={q.question_id}>
-                      <td>{q.question_code}</td>
+                      <td>{q.section_number ?? '—'}</td>
+                      <td>{q.section_name}</td>
                       <td style={{ whiteSpace: 'normal', minWidth: 220 }}>{q.question_text}</td>
                       <td style={{ whiteSpace: 'normal' }}>
                         A: {q.option_a}<br />B: {q.option_b}

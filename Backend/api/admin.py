@@ -9,7 +9,7 @@ from .models import (
     AuditLog,
     Setting
 )
-from .serializers.common import mask_aadhaar
+from .serializers.common import format_aadhaar_last4
 
 
 
@@ -69,18 +69,18 @@ class BatchAdmin(admin.ModelAdmin):
 
 @admin.register(Candidate)
 class CandidateAdmin(admin.ModelAdmin):
-    # aadhaar_number is deliberately never shown unmasked here, matching the API's own
+    # Only the last 4 digits exist at all now, matching the API's own
     # consistent masking (serializers/common.py) - Django admin access is governed by
     # django.contrib.auth's own is_staff flag, not this app's RBAC, so it shouldn't be a
     # backdoor to raw PII the rest of the app carefully never exposes.
-    list_display = ['full_name', 'email', 'batch', 'status', 'result', 'masked_aadhaar']
+    list_display = ['full_name', 'email', 'batch', 'status', 'result', 'aadhaar_last4_display']
     search_fields = ['first_name', 'last_name', 'email']
     list_filter = ['batch', 'status', 'result', 'validation_status']
-    exclude = ['aadhaar_number']
+    exclude = ['aadhaar_last4']
 
     @admin.display(description='Aadhaar')
-    def masked_aadhaar(self, obj):
-        return mask_aadhaar(obj.aadhaar_number)
+    def aadhaar_last4_display(self, obj):
+        return format_aadhaar_last4(obj.aadhaar_last4)
 
 
 @admin.register(Invitation)

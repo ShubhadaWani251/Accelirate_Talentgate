@@ -2,7 +2,8 @@ import logging
 
 from django.db import DataError
 from django.http import Http404, HttpResponse
-from django.db.models import Q
+from django.db.models import Count, F, Q, Window
+from django.db.models.functions import RowNumber
 from openpyxl.utils.exceptions import InvalidFileException
 from rest_framework import status
 from rest_framework.parsers import MultiPartParser
@@ -35,7 +36,19 @@ class QuestionSectionListView(APIView):
     permission_classes = [IsAdmin]
 
     def get(self, request):
-        sections = QuestionBankSection.objects.all()
+        """Sections, each carrying its own total / active / inactive question counts.
+
+        Counted here rather than in the browser because the question list is paginated - the
+        frontend only ever holds one page, so it cannot total a section from what it has. One
+        aggregate query with conditional Counts, not three queries per section.
+        """
+        sections = QuestionBankSection.objects.annotate(
+            total_questions=Count('question'),
+            active_questions=Count('question', filter=Q(question__status=Question.Status.ACTIVE)),
+            inactive_questions=Count(
+                'question', filter=Q(question__status=Question.Status.INACTIVE)
+            ),
+        )
         return Response(QuestionBankSectionSerializer(sections, many=True).data)
 
 
@@ -65,7 +78,21 @@ class QuestionListCreateView(APIView):
                 | Q(option_c__icontains=search) | Q(option_d__icontains=search)
             )
 
-        qs = qs.order_by('question_code')
+        # Number each question 1..n WITHIN its section, rather than showing the global
+        # question_code as the position. A window function rather than enumerating the page:
+        # the number has to be the question's absolute position in its section, so page 2 must
+        # continue from where page 1 stopped instead of restarting at 1.
+        #
+        # Deliberately computed here and not stored: a per-section counter column would have to
+        # be renumbered every time a question is added, deleted or moved between sections, and
+        # would silently develop gaps the first time that failed.
+        qs = qs.annotate(
+            section_number=Window(
+                expression=RowNumber(),
+                partition_by=[F('section_id')],
+                order_by=F('question_id').asc(),
+            )
+        ).order_by('section__section_name', 'section_number')
         paginator = StandardResultsPagination()
         page = paginator.paginate_queryset(qs, request, view=self)
         return paginator.get_paginated_response(QuestionSerializer(page, many=True).data)

@@ -630,3 +630,22 @@ table.data-table tbody tr:hover td { background: var(--accent-soft); }
   .page-body { padding: 12px 10px; }
   h3 { font-size: 15.5px; }
 }
+
+/* Question Bank section summary cards. They are <button>s so the whole card is one keyboard-
+   reachable control (it filters the table), which means the browser's default button styling
+   has to be neutralised rather than fought with inline overrides at each call site. */
+.qb-stat-card {
+  font: inherit;
+  color: inherit;
+  background: var(--card, #fff);
+  transition: box-shadow 120ms ease, border-color 120ms ease;
+}
+.qb-stat-card:hover { box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08); }
+.qb-stat-card.active {
+  outline: 2px solid var(--brand-blue, #0b5cab);
+  outline-offset: -2px;
+}
+.qb-stat-card:focus-visible {
+  outline: 2px solid var(--brand-blue, #0b5cab);
+  outline-offset: 2px;
+}

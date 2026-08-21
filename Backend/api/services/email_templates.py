@@ -294,7 +294,40 @@ def _linkify(escaped_text):
     return _EMAIL_RE.sub(email_repl, _URL_RE.sub(url_repl, escaped_text))
 
 
-def text_body_to_html(text):
+def _cta_button(url, label):
+    """A tappable button for the one action the email is asking for.
+
+    Built to survive the three renderers that matter, which disagree about almost everything:
+
+    - Outlook on Windows renders with Word, which IGNORES `display:inline-block` on an anchor.
+      A styled <a> therefore collapses to plain underlined text there - the exact failure this
+      is meant to fix. So the padding lives on the <td>, and the <a> is only text.
+    - Word also ignores border-radius, so the button is square in Outlook and rounded
+      elsewhere. That is accepted rather than worked around with VML, which would double the
+      markup for a cosmetic corner.
+    - Gmail strips <style> blocks, so everything here is inline; and it requires the anchor to
+      carry its own colour, since it recolours unstyled links itself.
+
+    `target="_blank"` and `rel="noopener"` keep the assessment out of the mail client's own
+    embedded viewer where possible - the exam needs a real browser for full-screen and camera.
+
+    The raw URL is still printed underneath by the caller. That redundancy is deliberate:
+    clients that block styling, and the plain-text part itself, both need the link readable.
+    """
+    return (
+        '<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
+        'style="margin:18px 0;border-collapse:separate;"><tr>'
+        '<td align="center" bgcolor="#0b5cab" '
+        'style="border-radius:6px;padding:14px 32px;mso-padding-alt:14px 32px;">'
+        f'<a href="{url}" target="_blank" rel="noopener" '
+        'style="font-family:Segoe UI,Helvetica,Arial,sans-serif;font-size:15px;'
+        'font-weight:700;color:#ffffff;text-decoration:none;line-height:1;'
+        f'white-space:nowrap;">{label}</a>'
+        '</td></tr></table>'
+    )
+
+
+def text_body_to_html(text, cta_url=None, cta_label='Start Your Assessment'):
     """Build the HTML alternative for a plain-text email body.
 
     Renders inside `white-space: pre-wrap` rather than reflowing into paragraphs and lists:
@@ -302,9 +335,27 @@ def text_body_to_html(text):
     preserving them verbatim means the HTML says exactly what the text says. Reconstructing
     paragraphs would be a second layout of approved wording that could disagree with it.
 
+    `cta_url`, when given and present in the text, gets a button rendered above the bare URL
+    at that spot - so the candidate has something obvious to click, and still has the link
+    itself if their client strips the styling. Callers that have no single primary action
+    (notifications, certification) leave it None and get plain linkified text.
+
     Styles are inline because email clients strip <style> blocks.
     """
     body = _linkify(html_lib.escape(text))
+
+    if cta_url:
+        # Matched against the escaped-and-linkified form, since that is what `body` now holds.
+        escaped_url = html_lib.escape(cta_url)
+        anchor = (f'<a href="{escaped_url}" style="color:#0b5cab;text-decoration:underline;'
+                  f'word-break:break-all;">{escaped_url}</a>')
+        if anchor in body:
+            body = body.replace(
+                anchor,
+                _cta_button(escaped_url, html_lib.escape(cta_label)) + anchor,
+                1,
+            )
+
     return (
         '<html><body style="margin:0;padding:0;background:#f6f7f9;">'
         '<div style="max-width:640px;margin:0 auto;padding:24px;'

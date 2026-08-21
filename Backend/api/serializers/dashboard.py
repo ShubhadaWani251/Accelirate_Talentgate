@@ -6,18 +6,18 @@ from api.models import Batch, Candidate, Question, QuestionBankSection, User
 from api.serializers.batch import annotate_batch_counts
 from api.serializers.question import normalize_question_text
 from api.services import draft_expiry
-from api.services.access import visible_candidates_qs
+from api.services.access import visible_batches_qs, visible_candidates_qs
 from api.services.batch_status_filter import filter_batches_by_status_group
 
 
 def _batches_qs_for(user):
-    # Every TA sees every batch, same as an admin - the owner narrowing that used to live here
-    # was removed deliberately (see services/access.py for the rationale). Kept as a function
-    # so the dashboard has the same single seam the other call sites do.
+    # A TA's dashboard counts and batch table cover only their own batches; an admin sees all
+    # of them (services/access.visible_batches_qs). Routed through that one helper so the
+    # dashboard, the batch list and can_access_batch can never drift apart.
     #
     # Expired drafts are excluded for the same reason as in the batch list: they're pending
     # deletion, so neither the Draft overview nor the stat cards should still be counting them.
-    return draft_expiry.exclude_expired(Batch.objects.filter(is_deleted=False))
+    return draft_expiry.exclude_expired(visible_batches_qs(user))
 
 
 def _build_stats(batches_qs, candidates_qs):

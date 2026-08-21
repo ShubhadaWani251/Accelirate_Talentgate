@@ -13,6 +13,7 @@ import CertificationModal from '../../features/candidates/CertificationModal';
 import ExportModal from '../../features/candidates/ExportModal';
 import PaginationControls from '../../components/common/PaginationControls';
 import ServerErrorPage from '../../components/error/ServerErrorPage';
+import { ButtonSpinner } from '../../components/loading/Spinner';
 import NotFoundPage from '../../components/error/NotFoundPage';
 import { isResourceMissing } from '../../utils/apiError';
 import { Skeleton, SkeletonCard, SkeletonPage, SkeletonTable } from '../../components/loading/Skeleton';
@@ -39,6 +40,8 @@ export default function BatchDetail() {
   const [selected, setSelected] = useState(new Set());
   const [editingCandidate, setEditingCandidate] = useState(null);
   const [notifyOpen, setNotifyOpen] = useState(false);
+  const [inviteConfirmOpen, setInviteConfirmOpen] = useState(false);
+  const [invitesSending, setInvitesSending] = useState(false);
   const [certificationOpen, setCertificationOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
 
@@ -80,9 +83,23 @@ export default function BatchDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  // Invites are not sent from this page. They go out from the upload wizard's Send Invites step
-  // (for a whole batch) and from Candidate Details / the Edit Candidate modal (for one person),
-  // so the bulk "Send Invite Link" control was removed from here rather than duplicating that.
+  // Confirmed before sending: this emails real candidates a brand-new link, which invalidates
+  // nothing but does mean the previous link is no longer the one they were told about.
+  async function handleSendInvites() {
+    setInvitesSending(true);
+    try {
+      const res = await candidateApi.resendInvitesBulk(Array.from(selected));
+      toast.success(res.detail);
+      setInviteConfirmOpen(false);
+      setSelected(new Set());
+      refreshCandidates();
+    } catch (err) {
+      toast.error(extractErrorMessage(err));
+    } finally {
+      setInvitesSending(false);
+    }
+  }
+
   function toggleRow(candidateId) {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -177,6 +194,7 @@ export default function BatchDetail() {
         onToggleRow={toggleRow}
         onToggleSelectAll={toggleSelectAll}
         onEdit={setEditingCandidate}
+        onOpenInvite={() => setInviteConfirmOpen(true)}
         onOpenNotify={() => setNotifyOpen(true)}
         onOpenCertification={() => setCertificationOpen(true)}
         onOpenExport={() => setExportOpen(true)}
@@ -205,6 +223,29 @@ export default function BatchDetail() {
           onSent={() => { setCertificationOpen(false); setSelected(new Set()); }}
         />
       )}
+      {inviteConfirmOpen && (
+        <div className="modal-overlay">
+          <div className="modal-box">
+            <h4>Send a new invite link?</h4>
+            <p>
+              {selected.size} selected candidate(s) will be emailed a <b>new</b> assessment
+              link. Any link they were sent previously will no longer be the one they should
+              use. Candidates who have already submitted or been terminated cannot retake the
+              assessment.
+            </p>
+            <div className="btn-row">
+              <button className="btn" type="button" onClick={() => setInviteConfirmOpen(false)}>
+                Cancel
+              </button>
+              <button className="btn primary" type="button" disabled={invitesSending}
+                      onClick={handleSendInvites}>
+                <ButtonSpinner loading={invitesSending}>Send New Link</ButtonSpinner>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {notifyOpen && (
         <NotifyModal
           candidateIds={Array.from(selected)}

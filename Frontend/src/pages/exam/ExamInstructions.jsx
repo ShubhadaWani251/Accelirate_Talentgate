@@ -34,14 +34,18 @@ export default function ExamInstructions() {
               Questions: <b>{instructions.total_questions}</b>
               <br />
               Sections: {instructions.sections.map((s) => s.label).join(', ')}
-              <br />
-              Passing: <b>{instructions.sections[0]?.cutoff}%</b> required in <b>each</b> section
+              {/* The section cutoff is deliberately NOT shown. It is a figure the TA can
+                  revise after seeing how a cohort scored (see BatchDetailView's
+                  EDITABLE_AFTER_DRAFT), so a number printed here could be out of date by the
+                  time results are graded. */}
             </div>
           </div>
 
           <div className="card">
             <div className="box-label">Please Note</div>
-            <ul style={{ fontSize: 12.5, margin: 0, paddingLeft: 18, lineHeight: 1.8 }}>
+            {/* Numbered rather than bulleted: these are rules a candidate may need to refer
+                back to ("rule 5 said..."), and an ordered list gives each one a handle. */}
+            <ol style={{ fontSize: 12.5, margin: 0, paddingLeft: 20, lineHeight: 1.8 }}>
               <li>Please be prepared with your government ID document before proceeding</li>
               <li>Your camera and microphone stay on for identity verification and continuous proctoring throughout the assessment</li>
               <li>You're now in full-screen mode for the rest of this assessment</li>
@@ -55,7 +59,7 @@ export default function ExamInstructions() {
               <li>The timer cannot be paused once started</li>
               <li>You may submit the assessment early at any time from the Submit button</li>
               <li>You will see only your section-wise marks at the end</li>
-            </ul>
+            </ol>
           </div>
 
           <button

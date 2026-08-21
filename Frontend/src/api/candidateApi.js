@@ -28,6 +28,13 @@ export const updateCandidate = (id, payload) =>
 
 export const resendInvite = (id) => axiosClient.post(`/candidates/${id}/resend-invite/`).then((r) => r.data);
 
+// Issues a FRESH link to each selected candidate. Not the same as the upload wizard's
+// send-invites step, which only covers candidates awaiting their first invite - this one
+// always mints a new token, which is what someone whose link expired actually needs.
+export const resendInvitesBulk = (candidateIds) =>
+  axiosClient.post('/candidates/resend-invite/', { candidate_ids: candidateIds })
+    .then((r) => r.data);
+
 export const getCandidateHistory = (id) =>
   axiosClient.get(`/candidates/${id}/history/`).then((r) => r.data);
 

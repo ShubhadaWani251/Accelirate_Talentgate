@@ -29,7 +29,7 @@ function lastAttemptText(candidate) {
 //
 // There is deliberately NO Validation column here. Every row reaching this step has already
 // passed validation - the previous step doesn't let you continue until its error list is empty -
-// so a column that always read "OK" would be pure noise. What matters here is the Aadhaar match
+// so a column that always read "OK" would be pure noise. What matters here is the duplicate match
 // against history, and who gets an invite.
 export default function ReviewStep({ batch, onFinalized }) {
   const [candidates, setCandidates] = useState([]);
@@ -127,7 +127,7 @@ export default function ReviewStep({ batch, onFinalized }) {
     <div className="card">
       <div className="box-label">Upload Review — duplicate check &amp; invite selection</div>
       <div className="annot">
-        Every row here has already passed validation. <b>Status</b> is the Aadhaar match against
+        Every row here has already passed validation. <b>Status</b> is the duplicate match against
         historical records; <b>History</b> opens that candidate&apos;s past attempt, or shows that
         none exists. Check the rows you want to act on, then either remove them or continue to
         invite them — anything left unchecked stays on the batch without being emailed.
@@ -162,7 +162,7 @@ export default function ReviewStep({ batch, onFinalized }) {
               <th>Row</th>
               <th>Name</th>
               <th>Email</th>
-              <th>Aadhaar</th>
+              <th>Aadhaar Last 4</th>
               <th>Status</th>
               <th>Last Attempt</th>
               <th>History</th>
@@ -183,7 +183,7 @@ export default function ReviewStep({ batch, onFinalized }) {
                   <td>{c.upload_row_number ?? '—'}</td>
                   <td>{c.full_name}</td>
                   <td>{c.email}</td>
-                  <td>{c.aadhaar_masked}</td>
+                  <td>{c.aadhaar_last4}</td>
                   <td>
                     <span className={`pill ${DUPLICATE_PILL[c.duplicate_status] || 'gray'}`}>
                       {c.duplicate_status_display || 'Not Checked'}

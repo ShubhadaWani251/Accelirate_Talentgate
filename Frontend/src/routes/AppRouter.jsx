@@ -19,6 +19,7 @@ import CandidateDetail from '../pages/candidates/CandidateDetail';
 import QuestionBank from '../pages/questions/QuestionBank';
 import QuestionUpload from '../pages/questions/QuestionUpload';
 import UserManagement from '../pages/users/UserManagement';
+import AuditLogs from '../pages/audit/AuditLogs';
 import EditUser from '../pages/users/EditUser';
 import { FullPageSpinner } from '../components/loading/Spinner';
 import ErrorBoundary from '../components/error/ErrorBoundary';
@@ -131,6 +132,14 @@ export default function AppRouter() {
           <Route
             path="/admin/users/:id"
             element={<ProtectedRoute allowedRoles={['admin']}><EditUser /></ProtectedRoute>}
+          />
+          {/* Admin-only: the audit log shows every user's activity, which is what makes it
+              useful for oversight and why a Staffing User must not see it. Enforced on the
+              server too (IsAdmin on the endpoint) - this route guard is convenience, not
+              the control. */}
+          <Route
+            path="/admin/audit-logs"
+            element={<ProtectedRoute allowedRoles={['admin']}><AuditLogs /></ProtectedRoute>}
           />
         </Route>
 

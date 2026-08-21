@@ -37,8 +37,8 @@ export default function CandidateFilters({ filters, onChange, batches, onApply, 
           <input value={filters.email} onChange={(e) => set('email', e.target.value)} placeholder="Search email…" />
         </div>
         <div className="field">
-          <label>Aadhaar</label>
-          <input value={filters.aadhaar} onChange={(e) => set('aadhaar', e.target.value)} placeholder="Search Aadhaar…" />
+          <label>Aadhaar Last 4 Digits</label>
+          <input value={filters.aadhaar} onChange={(e) => set('aadhaar', e.target.value)} placeholder="Last 4 digits…" maxLength={4} />
         </div>
         {showBatchFilter ? (
           <div className="field">

@@ -91,6 +91,16 @@ def build_candidate_history(candidate):
     for record in records:
         events.extend(_events_for_record(record))
 
+    # Newest first: the history panel is read to answer "what happened to this candidate
+    # most recently", so the latest event belongs at the top rather than at the bottom of a
+    # list the reader has to scroll through.
+    #
     # Events with no usable timestamp would break sorting - they can't happen given the
-    # fallbacks above, but sort defensively rather than risk a 500 on a null.
-    return sorted(events, key=lambda e: (e['timestamp'] is None, e['timestamp']))
+    # fallbacks above, but sort defensively rather than risk a 500 on a null. Nulls stay last
+    # in both directions, which is why the reverse is applied to the timestamp only and not by
+    # passing reverse=True (that would float the nulls to the top).
+    return sorted(
+        events,
+        key=lambda e: (e['timestamp'] is None, -(e['timestamp'].timestamp())
+                       if e['timestamp'] else 0),
+    )

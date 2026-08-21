@@ -104,7 +104,28 @@ export default function CandidateDetail() {
           <div className="box-label">Personal Info</div>
           <div className="field"><label>Name</label><div>{candidate.full_name}</div></div>
           <div className="field"><label>Email</label><div>{candidate.email}</div></div>
-          <div className="field"><label>Aadhaar</label><div>{candidate.aadhaar_masked || '—'}</div></div>
+          <div className="field"><label>Aadhaar Last 4 Digits</label><div>{candidate.aadhaar_last4 || '—'}</div></div>
+          {/* Shown here as well as in the list, with the full failure reason - this is where
+              someone lands when investigating why a candidate never got their link. */}
+          <div className="field">
+            <label>Invitation Email</label>
+            <div>
+              {candidate.email_status_display || 'Not invited'}
+              {candidate.email_sent_at && (
+                <span style={{ color: 'var(--muted)' }}>
+                  {' '}— {new Date(candidate.email_sent_at).toLocaleString()}
+                </span>
+              )}
+            </div>
+            {candidate.email_status === 'failed' && (
+              <div className="field-error" style={{ whiteSpace: 'normal' }}>
+                {candidate.email_error || 'The email service reported a failure.'}
+                {candidate.email_last_attempt_at && (
+                  <> (last tried {new Date(candidate.email_last_attempt_at).toLocaleString()})</>
+                )}
+              </div>
+            )}
+          </div>
           <div className="field"><label>College</label><div>{candidate.college_name || '—'}</div></div>
           <div className="field"><label>Degree</label><div>{candidate.degree || '—'}</div></div>
           <div className="field"><label>Stream</label><div>{candidate.stream || '—'}</div></div>

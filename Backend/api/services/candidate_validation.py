@@ -29,7 +29,7 @@ EDITABLE_FIELDS = {
     'last_name': 'Last Name',
     'email': 'Email',
     'phone': 'Mobile',
-    'aadhaar_number': 'Aadhaar Number',
+    'aadhaar_last4': 'Aadhaar Last 4 Digits',
     'college_name': 'College Name',
     'degree': 'Degree',
     'stream': 'Stream',
@@ -38,7 +38,7 @@ EDITABLE_FIELDS = {
     'location': 'Location',
 }
 
-_AADHAAR_RE = re.compile(r'^\d{12}$')
+_AADHAAR_RE = re.compile(r'^\d{4}$')
 _MOBILE_STRIP_RE = re.compile(r'[\s\-().]')
 _MOBILE_RE = re.compile(r'^\+?\d{10,15}$')
 # A text field that is nothing but digits/punctuation is a mis-shifted column, not a real name
@@ -76,6 +76,42 @@ _REQUIRED_TEXT_FIELDS = (
 
 def normalize_email(value):
     return (value or '').strip().lower()
+
+
+def normalize_name(value):
+    """Casefold and collapse whitespace, so "Asha  Rao" and "asha rao" are one person."""
+    return ' '.join((value or '').split()).casefold()
+
+
+def identity_key(values):
+    """The composite key that identifies a candidate across uploads and batches.
+
+    Only the last 4 Aadhaar digits are stored, and 4 digits is far too weak to identify anyone
+    on its own - there are 10,000 possible values, so in a 50-row batch there is roughly a 1-in-8
+    chance two unrelated candidates share a suffix. Pairing the digits with the name makes a
+    collision require both, which is rare enough to treat as the same person.
+
+    The trade-off is the opposite failure: the same person entered under a differently spelled
+    name (or a maiden name) reads as two people. That is the safer direction - a missed duplicate
+    is reviewed by a human, whereas a false duplicate can block a legitimate candidate from
+    being invited at all.
+
+    `values` is the dict shape returned by _values_of / used by validate_candidate_values.
+    """
+    last4 = (values.get('aadhaar_last4') or '').strip()
+    name = normalize_name(
+        f"{values.get('first_name') or ''} {values.get('last_name') or ''}"
+    )
+    return (last4, name)
+
+
+def candidate_identity_key(candidate):
+    """identity_key for a saved Candidate row."""
+    return identity_key({
+        'aadhaar_last4': candidate.aadhaar_last4,
+        'first_name': candidate.first_name,
+        'last_name': candidate.last_name,
+    })
 
 
 def is_valid_email(value):
@@ -132,18 +168,19 @@ def validate_candidate_values(values, email_counts=None, raw=None, aadhaar_count
         fail(_VS.DUPLICATE_EMAIL, 'Email', 'Duplicate email in this batch')
 
     # --- Aadhaar (required, exactly 12 digits, unique within the batch) --------------
-    # Aadhaar identifies the person, so the same number twice in one upload is one candidate
-    # entered twice - left unflagged they would both be invited and both sit the assessment.
-    # This is only about repeats WITHIN the batch; the same Aadhaar appearing in an earlier
-    # batch is the cooling-off check in services/duplicate_check.py, which is a status the TA
-    # judges rather than an error that blocks.
-    aadhaar = (values.get('aadhaar_number') or '').strip()
+    # Only the last 4 digits are held (see models/candidate.py), so on their own they are a
+    # weak identifier - 10,000 possible values means unrelated people collide routinely. The
+    # within-batch duplicate check is therefore on (last 4 + name), not the digits alone;
+    # flagging every shared suffix would bury the reviewer in false duplicates. The
+    # cross-batch cooling-off check keys on the same pair - see services/duplicate_check.py.
+    aadhaar = (values.get('aadhaar_last4') or '').strip()
     if not aadhaar:
-        fail(_VS.MISSING_AADHAAR, 'Aadhaar Number', 'Aadhaar required')
+        fail(_VS.MISSING_AADHAAR, 'Aadhaar Last 4 Digits', 'Aadhaar last 4 digits required')
     elif not _AADHAAR_RE.match(aadhaar):
-        fail(_VS.INVALID_AADHAAR, 'Aadhaar Number', 'Must be 12 digits')
-    elif aadhaar_counts and aadhaar_counts.get(aadhaar, 0) > 1:
-        fail(_VS.DUPLICATE_AADHAAR, 'Aadhaar Number', 'Duplicate Aadhaar in this batch')
+        fail(_VS.INVALID_AADHAAR, 'Aadhaar Last 4 Digits', 'Must be exactly 4 digits')
+    elif aadhaar_counts and aadhaar_counts.get(identity_key(values), 0) > 1:
+        fail(_VS.DUPLICATE_AADHAAR, 'Aadhaar Last 4 Digits',
+             'Same name and Aadhaar last 4 digits already appear in this batch')
 
     # --- College (required) ----------------------------------------------------------
     if not (values.get('college_name') or '').strip():
@@ -218,8 +255,9 @@ def revalidate_batch_candidates(batch, candidates=None):
     email_counts = Counter(
         normalize_email(c.email) for c in candidates if (c.email or '').strip()
     )
+    # Keyed on (last 4 + normalized name), matching the check in validate_candidate_values.
     aadhaar_counts = Counter(
-        c.aadhaar_number.strip() for c in candidates if (c.aadhaar_number or '').strip()
+        identity_key(_values_of(c)) for c in candidates if (c.aadhaar_last4 or '').strip()
     )
 
     changed = []

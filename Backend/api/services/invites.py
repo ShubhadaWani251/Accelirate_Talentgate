@@ -1,4 +1,5 @@
 import logging
+import re
 import secrets
 import threading
 
@@ -102,7 +103,31 @@ def create_single_reinvite(candidate, user):
     )
 
 
-def send_candidate_email(subject, body, to_address):
+def summarize_send_error(exc):
+    """A short, human-readable reason for a failed send, safe to show a TA.
+
+    Email-service errors arrive as multi-line dumps with the full request and response
+    embedded. The useful sentence is usually the API's own "message" field, so that is pulled
+    out when present; otherwise the first line is used. Truncated, because this is rendered in
+    a table cell and the full traceback is in the application log either way.
+
+    Deliberately does NOT include the raw response body wholesale: it can carry the API key
+    header back in a request echo, and this value is served to the browser.
+    """
+    text = str(exc) or exc.__class__.__name__
+    match = re.search(r'"message"\s*:\s*"([^"]+)"', text)
+    if match:
+        detail = match.group(1)
+    else:
+        detail = next((line.strip() for line in text.splitlines() if line.strip()), text)
+    detail = ' '.join(detail.split())
+    if len(detail) > 300:
+        detail = detail[:297] + '...'
+    return f'{exc.__class__.__name__}: {detail}'
+
+
+def send_candidate_email(subject, body, to_address, cta_url=None,
+                        cta_label='Start Your Assessment'):
     """Send one candidate-facing email as multipart text + HTML.
 
     Single seam for every candidate email (invitation, notifications, certification) so they
@@ -121,7 +146,9 @@ def send_candidate_email(subject, body, to_address):
         from_email=settings.DEFAULT_FROM_EMAIL,
         to=[to_address],
     )
-    message.attach_alternative(text_body_to_html(body), 'text/html')
+    message.attach_alternative(
+        text_body_to_html(body, cta_url=cta_url, cta_label=cta_label), 'text/html',
+    )
     # Matches the previous send_mail(fail_silently=False): callers rely on the exception to
     # mark an invitation FAILED rather than reporting a silent success.
     message.send(fail_silently=False)
@@ -137,7 +164,10 @@ def send_invite_email(invitation, base_url):
     candidate = invitation.candidate
     link = f"{base_url.rstrip('/')}/t/{invitation.unique_link_token}"
     subject, body = render_invitation_email(candidate, invitation.batch, link)
-    send_candidate_email(subject, body, candidate.email)
+    # cta_url turns the assessment link into a real button in the HTML part; the bare URL
+    # is still printed beneath it and in the plain-text part.
+    send_candidate_email(subject, body, candidate.email, cta_url=link,
+                        cta_label='Start Your Assessment')
 
 
 def send_invites_async(invitations, base_url):
@@ -148,17 +178,48 @@ def send_invites_async(invitations, base_url):
     def _worker():
         try:
             for invitation in invitations:
+                attempted_at = timezone.now()
                 try:
                     send_invite_email(invitation, base_url)
-                    invitation.email_status = Invitation.EmailStatus.SENT
-                    invitation.email_sent_at = timezone.now()
-                    invitation.save(update_fields=['email_status', 'email_sent_at'])
-                except EMAIL_SEND_ERRORS:
+                except EMAIL_SEND_ERRORS as exc:
+                    # Recorded on the row, not just in the log. A FAILED status with no reason
+                    # attached is close to useless - "unverified sender", "invalid address" and
+                    # "timeout" need three different fixes, and only the message distinguishes
+                    # them. Still logged too, with the traceback, for anything the summary loses.
                     logger.exception(
                         'Failed to send invite email for invitation_id=%s', invitation.invitation_id
                     )
                     invitation.email_status = Invitation.EmailStatus.FAILED
-                    invitation.save(update_fields=['email_status'])
+                    invitation.email_error = summarize_send_error(exc)
+                    invitation.email_last_attempt_at = attempted_at
+                    invitation.save(update_fields=[
+                        'email_status', 'email_error', 'email_last_attempt_at',
+                    ])
+                except Exception as exc:
+                    # A failure OUTSIDE the email backend's own exception family - a bug in
+                    # rendering, a database error mid-loop. Previously this escaped the loop
+                    # and every remaining invitation was silently left QUEUED, reading as
+                    # "in progress" forever. Record it and carry on with the rest.
+                    logger.exception(
+                        'Unexpected error sending invite for invitation_id=%s',
+                        invitation.invitation_id,
+                    )
+                    invitation.email_status = Invitation.EmailStatus.FAILED
+                    invitation.email_error = summarize_send_error(exc)
+                    invitation.email_last_attempt_at = attempted_at
+                    invitation.save(update_fields=[
+                        'email_status', 'email_error', 'email_last_attempt_at',
+                    ])
+                else:
+                    invitation.email_status = Invitation.EmailStatus.SENT
+                    invitation.email_sent_at = attempted_at
+                    invitation.email_last_attempt_at = attempted_at
+                    # Cleared, so a reason from an earlier failed attempt can't sit next to a
+                    # SENT status and be read as current.
+                    invitation.email_error = None
+                    invitation.save(update_fields=[
+                        'email_status', 'email_sent_at', 'email_last_attempt_at', 'email_error',
+                    ])
         finally:
             connections.close_all()
 

@@ -15,13 +15,13 @@ class Candidate(models.Model):
         """
         OK = 'ok', 'OK'
         MISSING_EMAIL = 'missing_email', 'Missing Email'
-        MISSING_AADHAAR = 'missing_aadhaar', 'Missing Aadhaar'
+        MISSING_AADHAAR = 'missing_aadhaar', 'Missing Aadhaar Last 4 Digits'
         MISSING_NAME = 'missing_name', 'Missing Name'
         MISSING_COLLEGE = 'missing_college', 'Missing College'
         INVALID_EMAIL = 'invalid_email', 'Invalid Email'
         DUPLICATE_EMAIL = 'duplicate_email', 'Duplicate Email'
-        INVALID_AADHAAR = 'invalid_aadhaar', 'Invalid Aadhaar'
-        DUPLICATE_AADHAAR = 'duplicate_aadhaar', 'Duplicate Aadhaar'
+        INVALID_AADHAAR = 'invalid_aadhaar', 'Invalid Aadhaar Last 4 Digits'
+        DUPLICATE_AADHAAR = 'duplicate_aadhaar', 'Duplicate Aadhaar Last 4 Digits'
         INVALID_MOBILE = 'invalid_mobile', 'Invalid Mobile'
         INVALID_TEXT = 'invalid_text', 'Invalid Text Field'
         INVALID_PERCENTAGE = 'invalid_percentage', 'Invalid Percentage'
@@ -51,7 +51,16 @@ class Candidate(models.Model):
     last_name = models.CharField(max_length=80, null=True, blank=True)
     email = models.EmailField(max_length=150)
     phone = models.CharField(max_length=20, null=True, blank=True)
-    aadhaar_number = models.CharField(max_length=255)
+    # Only the last four digits are ever stored. A full Aadhaar number is sensitive identity
+    # data the platform has no use for: it existed purely as a duplicate-detection key, and
+    # that job is now done by (last four + name) - see services/duplicate_check.py. Four digits
+    # alone collide often (10,000 possible values), which is exactly why the name is part of
+    # the key rather than this field being trusted on its own.
+    aadhaar_last4 = models.CharField(
+        max_length=4,
+        help_text="Last 4 digits of the candidate's Aadhaar number. The full number is never "
+                  "stored.",
+    )
 
     # Education
     college_name = models.CharField(max_length=150, null=True, blank=True)
@@ -101,7 +110,7 @@ class Candidate(models.Model):
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['batch', 'status'], name='ix_candidates_batch_status'),
-            models.Index(fields=['aadhaar_number'], name='ix_candidates_aadhaar'),
+            models.Index(fields=['aadhaar_last4'], name='ix_candidates_aadhaar'),
             models.Index(fields=['email'], name='ix_candidates_email'),
             models.Index(fields=['status'], name='ix_candidates_status'),
             models.Index(fields=['result'], name='ix_candidates_result'),
@@ -169,6 +178,19 @@ class Invitation(models.Model):
     email_status = models.CharField(max_length=10, choices=EmailStatus.choices,
                                     default=EmailStatus.QUEUED)
     email_sent_at = models.DateTimeField(null=True, blank=True)
+    # Why the send failed, when it did. Previously the exception went only to the application
+    # log, so the UI could say FAILED without anyone being able to find out why - and the
+    # common causes (an unverified sender, a mistyped address, a timeout) need completely
+    # different fixes. Cleared on a successful send so a stale reason can't linger next to a
+    # SENT status.
+    email_error = models.TextField(
+        null=True, blank=True,
+        help_text="Error reported by the email service on the last failed attempt. Null when "
+                  "the last attempt succeeded.",
+    )
+    # When the last send was ATTEMPTED, successful or not. email_sent_at only moves on success,
+    # so without this a repeatedly-failing invitation looks like nothing was ever tried.
+    email_last_attempt_at = models.DateTimeField(null=True, blank=True)
     link_clicked_at = models.DateTimeField(null=True, blank=True)
     is_link_used = models.BooleanField(default=False)
     link_expired_at = models.DateTimeField()

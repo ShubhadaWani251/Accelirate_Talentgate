@@ -38,9 +38,17 @@ urlpatterns = [
 
     path('dashboard/', views.DashboardSummaryView.as_view(), name='dashboard-summary'),
 
+    # Read-only oversight screen (admin only). Append-only by design - there is
+    # deliberately no write endpoint for audit rows.
+    path('audit-logs/', views.AuditLogListView.as_view(), name='audit-log-list'),
+    path('audit-logs/filters/', views.AuditLogFilterOptionsView.as_view(),
+         name='audit-log-filters'),
+
     path('candidates/', views.CandidateListView.as_view(), name='candidate-list'),
     path('candidates/export/', views.CandidateExportView.as_view(), name='candidate-export'),
     path('candidates/notify/', views.CandidateNotifyView.as_view(), name='candidate-notify'),
+    path('candidates/resend-invite/', views.CandidateBulkResendInviteView.as_view(),
+         name='candidate-bulk-resend-invite'),
     path('candidates/send-certification/', views.CandidateCertificationView.as_view(),
          name='candidate-send-certification'),
     path('candidates/notify/templates/', views.NotificationTemplateListView.as_view(),

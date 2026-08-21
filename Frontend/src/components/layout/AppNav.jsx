@@ -11,6 +11,8 @@ const NAV_LINKS = {
     { label: 'All Candidates', to: '/candidates' },
     { label: 'Question Bank', to: '/admin/question-bank' },
     { label: 'Users', to: '/admin/users' },
+    // Admin only - deliberately absent from the ta list below.
+    { label: 'Audit Log', to: '/admin/audit-logs' },
   ],
   ta: [
     { label: 'Dashboard', to: '/ta/dashboard' },

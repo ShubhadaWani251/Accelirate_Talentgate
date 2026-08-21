@@ -4,7 +4,7 @@ import * as candidateApi from '../../api/candidateApi';
 import { extractErrorMessage } from '../../utils/passwordSchema';
 import { ButtonSpinner } from '../../components/loading/Spinner';
 
-// Deliberately excludes Aadhaar and Batch from the editable fields - the backend
+// Deliberately excludes Aadhaar last 4 and Batch from the editable fields - the backend
 // (CandidateUpdateSerializer) rejects them too, since changing either would silently invalidate
 // the duplicate-check that already ran against this candidate's current values.
 export default function EditCandidateModal({ candidate, onClose, onSaved }) {

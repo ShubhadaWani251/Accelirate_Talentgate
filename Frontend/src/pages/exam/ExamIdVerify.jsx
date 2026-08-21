@@ -4,6 +4,7 @@ import * as examApi from '../../api/examApi';
 import { useExamSession } from '../../features/exam/ExamSessionProvider';
 import RequireFullscreen from '../../features/exam/proctoring/RequireFullscreen';
 import PhotoCapture from '../../features/exam/webcam/PhotoCapture';
+import useDisplayGuard from '../../features/exam/proctoring/useDisplayGuard';
 import BrandHeader from '../../components/layout/BrandHeader';
 import BrandFooter from '../../components/layout/BrandFooter';
 import { ButtonSpinner } from '../../components/loading/Spinner';
@@ -35,6 +36,8 @@ export default function ExamIdVerify() {
   const [idPhoto, setIdPhoto] = useState(null);
   const [facePhoto, setFacePhoto] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  // Watched continuously, so plugging a monitor in after this screen loads is caught too.
+  const { extended: extraDisplay } = useDisplayGuard(true);
   const [submitError, setSubmitError] = useState('');
 
   const stream = mediaStreamRef.current;
@@ -107,16 +110,27 @@ export default function ExamIdVerify() {
                 stream={stream}
                 label="Government ID"
                 hint="Aadhaar / PAN / Passport / Driving Licence"
-                captured={Boolean(idPhoto)}
+                captured={idPhoto}
                 onCapture={setIdPhoto}
               />
               <PhotoCapture
                 stream={stream}
                 label="Live Face Photo"
                 hint="Center your face in the frame"
-                captured={Boolean(facePhoto)}
+                captured={facePhoto}
                 onCapture={setFacePhoto}
               />
+            </div>
+          )}
+
+          {/* A second display is the setup that makes screen sharing useful for cheating,
+              and unlike the sharing itself it IS detectable. Blocking here rather than after
+              the clock starts, so the candidate can unplug and continue without losing time. */}
+          {extraDisplay && (
+            <div className="alert error" style={{ marginTop: 14 }}>
+              <b>More than one display detected.</b> The assessment must be taken on a single
+              screen. Please disconnect any additional monitor, projector or screen-sharing
+              session, then this message will clear on its own.
             </div>
           )}
 
@@ -124,10 +138,10 @@ export default function ExamIdVerify() {
             className="btn primary block"
             type="button"
             style={{ marginTop: 14 }}
-            disabled={!bothCaptured || submitting}
+            disabled={!bothCaptured || submitting || extraDisplay}
             onClick={onStartAssessment}
           >
-            <ButtonSpinner loading={submitting}>Verified — Start Assessment</ButtonSpinner>
+            <ButtonSpinner loading={submitting}>Start Exam</ButtonSpinner>
           </button>
         </div>
       </div>

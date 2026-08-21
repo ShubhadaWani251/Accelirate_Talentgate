@@ -18,7 +18,7 @@ from api.permissions import IsAdminOrTA
 from api.serializers.batch import (
     BatchDefaultsSerializer, BatchSerializer, CandidateStagingSerializer, annotate_batch_counts,
 )
-from api.services.access import can_access_batch
+from api.services.access import can_access_batch, visible_batches_qs
 from api.services.audit import log_action
 from api.services.batch_defaults import get_batch_defaults, save_batch_defaults
 from api.services.batch_status_filter import filter_batches_by_status_group
@@ -68,11 +68,15 @@ class BatchListCreateView(APIView):
     permission_classes = [IsAdminOrTA]
 
     def get(self, request):
-        # Unscoped by owner on purpose - every TA sees every batch (see services/access.py).
+        # Scoped to batches this user may see - own batches for a TA, all of them for an
+        # admin (services/access.visible_batches_qs). Routed through the same helper
+        # can_access_batch uses, so the list and the detail page can never disagree about
+        # which batches exist.
+        #
         # Expired drafts are dropped so the list is right the instant one expires rather than
         # at the next scheduler tick; the deletion itself happens in draft_expiry, not here.
         qs = draft_expiry.exclude_expired(
-            Batch.objects.select_related('primary_ta_user').filter(is_deleted=False)
+            visible_batches_qs(request.user).select_related('primary_ta_user')
         )
 
         # Unified Batch Status filter - 'active' (In Progress + Completed) by default, or
@@ -339,7 +343,7 @@ class BatchCandidateRowView(APIView):
         except Candidate.DoesNotExist:
             raise Http404
 
-        original_aadhaar = candidate.aadhaar_number
+        original_aadhaar = candidate.aadhaar_last4
         updates = []
         for field in EDITABLE_FIELDS:
             if field not in request.data:
@@ -347,10 +351,10 @@ class BatchCandidateRowView(APIView):
             value = request.data[field]
             value = value.strip() if isinstance(value, str) else value
 
-            if field == 'aadhaar_number' and not value:
-                # The browser only ever receives the masked number, so a blank Aadhaar box
-                # means "leave it as it is" - not "erase it". Clearing it deliberately isn't
-                # something the review screen needs to support.
+            if field == 'aadhaar_last4' and not value:
+                # A blank Aadhaar box means "leave it as it is" - not "erase it". Clearing it
+                # deliberately isn't something the review screen needs to support, and the
+                # field is required for a row to validate.
                 continue
             if field in ('percentage', 'passing_out_year'):
                 # Record what was actually typed as well as the parsed value: "abc" parses to
@@ -373,9 +377,10 @@ class BatchCandidateRowView(APIView):
 
         candidate.save(update_fields=updates)
 
-        # A corrected Aadhaar is a different person as far as the duplicate history goes, so
-        # the previous check's verdict no longer describes this row.
-        if candidate.aadhaar_number != original_aadhaar:
+        # A corrected Aadhaar suffix (or name) makes this a different person as far as the
+        # duplicate history goes, so the previous check's verdict no longer describes this row.
+        # See services/candidate_validation.identity_key for what "the same person" means now.
+        if candidate.aadhaar_last4 != original_aadhaar:
             run_duplicate_check(candidate)
 
         revalidate_batch_candidates(batch)

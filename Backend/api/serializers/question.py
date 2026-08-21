@@ -38,27 +38,45 @@ def find_duplicate_question(text, exclude_pk=None):
 
 
 class QuestionBankSectionSerializer(serializers.ModelSerializer):
+    """A section, plus its question counts when the view annotated them.
+
+    The three counts default to None rather than 0 when absent, so a caller that forgot to
+    annotate is visibly missing data instead of silently reporting every section as empty.
+    """
+    total_questions = serializers.IntegerField(read_only=True, default=None)
+    active_questions = serializers.IntegerField(read_only=True, default=None)
+    inactive_questions = serializers.IntegerField(read_only=True, default=None)
+
     class Meta:
         model = QuestionBankSection
-        fields = ['section_id', 'section_name', 'section_key', 'min_required_active']
+        fields = [
+            'section_id', 'section_name', 'section_key', 'min_required_active',
+            'total_questions', 'active_questions', 'inactive_questions',
+        ]
 
 
 class QuestionSerializer(serializers.ModelSerializer):
     """Used for both create (Add Question) and edit (Edit Question modal)."""
     section_name = serializers.CharField(source='section.section_name', read_only=True)
     section_key = serializers.CharField(source='section.section_key', read_only=True)
+    # Annotated by QuestionListCreateView.get only. A create/update response serializes a bare
+    # model instance with no annotation, so this must tolerate its absence rather than raising.
+    section_number = serializers.IntegerField(read_only=True, default=None)
     difficulty_display = serializers.CharField(source='get_difficulty_display', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
 
     class Meta:
         model = Question
         fields = [
-            'question_id', 'question_code', 'section', 'section_name', 'section_key',
+            'question_id', 'question_code', 'section_number', 'section', 'section_name',
+            'section_key',
             'question_text', 'option_a', 'option_b', 'option_c', 'option_d', 'correct_option',
             'difficulty', 'difficulty_display', 'marks', 'status', 'status_display',
             'created_at', 'updated_at',
         ]
-        read_only_fields = ['question_id', 'question_code', 'created_at', 'updated_at']
+        read_only_fields = [
+            'question_id', 'question_code', 'section_number', 'created_at', 'updated_at',
+        ]
 
     def validate_question_text(self, value):
         duplicate = find_duplicate_question(

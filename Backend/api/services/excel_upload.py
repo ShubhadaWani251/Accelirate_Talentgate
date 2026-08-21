@@ -2,14 +2,16 @@ from django.db import transaction
 from openpyxl import Workbook, load_workbook
 
 from api.models import Candidate
-from api.services.candidate_validation import revalidate_batch_candidates
+from api.services.candidate_validation import (
+    candidate_identity_key, identity_key, revalidate_batch_candidates,
+)
 from api.services.duplicate_check import preload_duplicate_lookup, run_duplicate_check
 
 # Every column is mandatory - a sheet missing one is reported by name (see missing_columns
 # below) rather than silently importing blanks for it, and validate_candidate_values() rejects
 # any row where one of these is blank.
 TEMPLATE_COLUMNS = [
-    'Name', 'Email', 'Mobile', 'Aadhaar Number', 'College Name', 'Degree',
+    'Name', 'Email', 'Mobile', 'Aadhaar Last 4 Digits', 'College Name', 'Degree',
     'Stream', 'Percentage', 'Passing Out Year', 'Location',
 ]
 
@@ -41,18 +43,23 @@ _HEADER_MAP = {
     'contact': 'phone',
     'contact number': 'phone',
     'contact no': 'phone',
-    'aadhaar number': 'aadhaar_number',
-    'aadhaar no': 'aadhaar_number',
-    'aadhaar no.': 'aadhaar_number',
-    'aadhaar': 'aadhaar_number',
+    'aadhaar last 4 digits': 'aadhaar_last4',
+    'aadhaar last 4': 'aadhaar_last4',
+    'aadhaar last four digits': 'aadhaar_last4',
+    'adhar last 4 digits': 'aadhaar_last4',
+    'adhaar last 4 digits': 'aadhaar_last4',
+    'aadhaar number': 'aadhaar_last4',
+    'aadhaar no': 'aadhaar_last4',
+    'aadhaar no.': 'aadhaar_last4',
+    'aadhaar': 'aadhaar_last4',
     # "Aadhar" (one 'a') is at least as common in practice as the official spelling.
-    'aadhar number': 'aadhaar_number',
-    'aadhar no': 'aadhaar_number',
-    'aadhar no.': 'aadhaar_number',
-    'aadhar': 'aadhaar_number',
-    'adhaar': 'aadhaar_number',
-    'adhar': 'aadhaar_number',
-    'uid': 'aadhaar_number',
+    'aadhar number': 'aadhaar_last4',
+    'aadhar no': 'aadhaar_last4',
+    'aadhar no.': 'aadhaar_last4',
+    'aadhar': 'aadhaar_last4',
+    'adhaar': 'aadhaar_last4',
+    'adhar': 'aadhaar_last4',
+    'uid': 'aadhaar_last4',
     'college name': 'college_name',
     'college': 'college_name',
     'institute': 'college_name',
@@ -80,7 +87,7 @@ _FIELD_TO_COLUMN = {
     'name': 'Name',
     'email': 'Email',
     'phone': 'Mobile',
-    'aadhaar_number': 'Aadhaar Number',
+    'aadhaar_last4': 'Aadhaar Last 4 Digits',
     'college_name': 'College Name',
     'degree': 'Degree',
     'stream': 'Stream',
@@ -101,7 +108,7 @@ def generate_template_workbook():
 
 
 VALIDATION_REPORT_COLUMNS = [
-    'Row', 'Name', 'Email', 'Mobile', 'Aadhaar Number', 'College Name',
+    'Row', 'Name', 'Email', 'Mobile', 'Aadhaar Last 4 Digits', 'College Name',
     'Status', 'Fields At Fault', 'Errors',
 ]
 
@@ -109,10 +116,10 @@ VALIDATION_REPORT_COLUMNS = [
 def generate_validation_report_workbook(candidates):
     """The invalid rows of an upload, with every error spelled out.
 
-    Aadhaar is masked here as it is everywhere else - the report exists to tell someone which
+    Only the last 4 Aadhaar digits exist at all now, so there is nothing left to mask - the
+    report exists to tell someone which
     rows to fix, and naming the column is enough for that.
     """
-    from api.serializers.common import mask_aadhaar
 
     wb = Workbook()
     ws = wb.active
@@ -125,7 +132,7 @@ def generate_validation_report_workbook(candidates):
             candidate.full_name,
             candidate.email,
             candidate.phone,
-            mask_aadhaar(candidate.aadhaar_number),
+            candidate.aadhaar_last4,
             candidate.college_name,
             candidate.get_validation_status_display(),
             ', '.join(dict.fromkeys(e['field'] for e in errors)),
@@ -183,8 +190,8 @@ def _normalize_header(value):
 
 
 def _cell_to_text(value):
-    """Excel hands back numbers as floats, so a 12-digit Aadhaar arrives as
-    123456789012.0 and a passing-out year as 2025.0. Rendering those straight through
+    """Excel hands back numbers as floats, so a 4-digit Aadhaar suffix arrives as
+    1234.0 and a passing-out year as 2025.0. Rendering those straight through
     str() produced values that failed every format check for no reason the reviewer
     could see - trim the meaningless trailing .0 on whole numbers.
     """
@@ -280,15 +287,20 @@ def stage_candidates_from_workbook(batch, file_obj, user, cooling_off_months=3):
     """
     rows, missing_columns = parse_uploaded_workbook(file_obj)
     duplicate_lookup = preload_duplicate_lookup(
-        (row.get('aadhaar_number') or '').strip() for row in rows
+        (row.get('aadhaar_last4') or '').strip() for row in rows
     )
 
     # Seeded from what's already on the batch so a second upload into the same draft collapses
     # against the first, not just against itself.
-    seen_aadhaar, seen_email = set(), set()
-    for existing in batch.candidate_set.filter(is_deleted=False).only('aadhaar_number', 'email'):
-        if existing.aadhaar_number.strip():
-            seen_aadhaar.add(existing.aadhaar_number.strip())
+    #
+    # Keyed on (Aadhaar last 4 + name) rather than the digits alone: with only 4 digits stored,
+    # collapsing on the suffix by itself would silently DROP unrelated candidates who happen
+    # to share one - a far worse failure than letting a near-duplicate through to review.
+    seen_identity, seen_email = set(), set()
+    for existing in (batch.candidate_set.filter(is_deleted=False)
+                     .only('aadhaar_last4', 'first_name', 'last_name', 'email')):
+        if (existing.aadhaar_last4 or '').strip():
+            seen_identity.add(candidate_identity_key(existing))
         if existing.email.strip():
             seen_email.add(existing.email.strip().lower())
 
@@ -299,14 +311,17 @@ def stage_candidates_from_workbook(batch, file_obj, user, cooling_off_months=3):
         name_parts = name.split(None, 1)
         first_name = name_parts[0] if name_parts else ''
         last_name = name_parts[1] if len(name_parts) > 1 else ''
-        aadhaar = (data.get('aadhaar_number') or '').strip()
+        aadhaar = (data.get('aadhaar_last4') or '').strip()
         email = (data.get('email') or '').strip()
+        row_identity = identity_key({
+            'aadhaar_last4': aadhaar, 'first_name': first_name, 'last_name': last_name,
+        })
 
-        # Only one row per person. Aadhaar is the identity, so it decides first; a repeated
-        # email is treated the same way, since the same address twice is the same inbox.
+        # Only one row per person. Name + Aadhaar suffix decides first; a repeated email is
+        # treated the same way, since the same address twice is the same inbox.
         matched_on = None
-        if aadhaar and aadhaar in seen_aadhaar:
-            matched_on = 'Aadhaar Number'
+        if aadhaar and row_identity in seen_identity:
+            matched_on = 'Name + Aadhaar Last 4 Digits'
         elif email and email.lower() in seen_email:
             matched_on = 'Email'
         if matched_on:
@@ -318,7 +333,7 @@ def stage_candidates_from_workbook(batch, file_obj, user, cooling_off_months=3):
             })
             continue
         if aadhaar:
-            seen_aadhaar.add(aadhaar)
+            seen_identity.add(row_identity)
         if email:
             seen_email.add(email.lower())
 
@@ -329,7 +344,7 @@ def stage_candidates_from_workbook(batch, file_obj, user, cooling_off_months=3):
             last_name=last_name or None,
             email=data.get('email', '') or '',
             phone=data.get('phone') or None,
-            aadhaar_number=data.get('aadhaar_number', '') or '',
+            aadhaar_last4=data.get('aadhaar_last4', '') or '',
             college_name=data.get('college_name') or None,
             degree=data.get('degree') or None,
             stream=data.get('stream') or None,
@@ -346,11 +361,11 @@ def stage_candidates_from_workbook(batch, file_obj, user, cooling_off_months=3):
             created_by=user,
         )
         run_duplicate_check(candidate, cooling_off_months=cooling_off_months, existing_lookup=duplicate_lookup)
-        if candidate.aadhaar_number:
-            # Keep the lookup current so a later row in this SAME upload that repeats an
-            # Aadhaar number is still caught as a duplicate against this one, not just against
+        if candidate.aadhaar_last4:
+            # Keep the lookup current so a later row in this SAME upload that repeats a
+            # person is still caught as a duplicate against this one, not just against
             # candidates that existed before the upload started.
-            duplicate_lookup.setdefault(candidate.aadhaar_number, []).insert(0, candidate)
+            duplicate_lookup.setdefault(candidate_identity_key(candidate), []).insert(0, candidate)
         created.append(candidate)
 
     # Over the whole batch, not just this upload: a second file added to the same draft can

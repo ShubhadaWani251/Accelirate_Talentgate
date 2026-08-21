@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from api.models import AuditLog, Candidate, ExamAttempt
-from api.serializers.common import mask_aadhaar
+from api.serializers.common import format_aadhaar_last4
 from api.services.exam_session import termination_label
 
 SECTION_LABELS = {
@@ -94,9 +94,57 @@ def _effective_status(candidate):
     return candidate.status, candidate.get_status_display()
 
 
+def _latest_invitation(candidate):
+    """The most recent invitation for this candidate, or None.
+
+    Ordered by invitation_id rather than email_sent_at: a FAILED send never sets email_sent_at,
+    so ordering by it would rank the newest failure below an older success and report the
+    candidate as SENT when their latest attempt actually failed - the precise thing this is
+    meant to surface.
+    """
+    if not hasattr(candidate, '_cached_latest_invitation'):
+        # `.all()` reuses the prefetch cache (see views/candidates._with_latest_attempt);
+        # any other queryset method would build a new query and bypass it, turning this into
+        # one round-trip per row.
+        invitations = list(candidate.invitation_set.all())
+        candidate._cached_latest_invitation = (
+            max(invitations, key=lambda inv: inv.invitation_id) if invitations else None
+        )
+    return candidate._cached_latest_invitation
+
+
+def _email_delivery(candidate):
+    """Email send state for the candidate's latest invitation.
+
+    `status` is null when no invitation exists at all - which is different from "pending": one
+    means nothing was ever attempted, the other means it is queued and in flight. The UI needs
+    to tell those apart, so this does not collapse them into a single value.
+    """
+    if hasattr(candidate, '_cached_email_delivery'):
+        return candidate._cached_email_delivery
+    invitation = _latest_invitation(candidate)
+    if invitation is None:
+        candidate._cached_email_delivery = {
+            'email_status': None,
+            'email_status_display': 'Not invited',
+            'email_error': None,
+            'email_sent_at': None,
+            'email_last_attempt_at': None,
+        }
+        return candidate._cached_email_delivery
+    candidate._cached_email_delivery = {
+        'email_status': invitation.email_status,
+        'email_status_display': invitation.get_email_status_display(),
+        'email_error': invitation.email_error,
+        'email_sent_at': invitation.email_sent_at,
+        'email_last_attempt_at': invitation.email_last_attempt_at,
+    }
+    return candidate._cached_email_delivery
+
+
 class CandidateListSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(read_only=True)
-    aadhaar_masked = serializers.SerializerMethodField()
+    aadhaar_last4 = serializers.SerializerMethodField()
     batch_name = serializers.CharField(source='batch.batch_name', read_only=True)
     status = serializers.SerializerMethodField()
     status_display = serializers.SerializerMethodField()
@@ -109,19 +157,40 @@ class CandidateListSerializer(serializers.ModelSerializer):
     total_correct = serializers.SerializerMethodField()
     overall_total = serializers.SerializerMethodField()
     has_attempt = serializers.SerializerMethodField()
+    # Email delivery state for the latest invitation, so All Candidates can show which
+    # people never actually received their link. Candidate.status flips to INVITED when the
+    # invitation row is created, which is BEFORE the send is attempted - so on its own it
+    # reads as success even when the email bounced.
+    email_status = serializers.SerializerMethodField()
+    email_status_display = serializers.SerializerMethodField()
+    email_error = serializers.SerializerMethodField()
+    email_sent_at = serializers.SerializerMethodField()
 
     class Meta:
         model = Candidate
         fields = [
             'candidate_id', 'full_name', 'email', 'phone', 'batch_id', 'batch_name',
             'college_name', 'degree', 'stream', 'percentage', 'passing_out_year', 'location',
-            'aadhaar_masked', 'status', 'status_display', 'result', 'result_display',
+            'aadhaar_last4', 'status', 'status_display', 'result', 'result_display',
             'logical_score', 'quantitative_score', 'verbal_score', 'programming_score',
             'overall_score', 'total_correct', 'overall_total', 'has_attempt',
+            'email_status', 'email_status_display', 'email_error', 'email_sent_at',
         ]
 
-    def get_aadhaar_masked(self, candidate):
-        return mask_aadhaar(candidate.aadhaar_number)
+    def get_aadhaar_last4(self, candidate):
+        return format_aadhaar_last4(candidate.aadhaar_last4)
+
+    def get_email_status(self, candidate):
+        return _email_delivery(candidate)['email_status']
+
+    def get_email_status_display(self, candidate):
+        return _email_delivery(candidate)['email_status_display']
+
+    def get_email_error(self, candidate):
+        return _email_delivery(candidate)['email_error']
+
+    def get_email_sent_at(self, candidate):
+        return _email_delivery(candidate)['email_sent_at']
 
     def get_status(self, candidate):
         return _effective_status(candidate)[0]
@@ -167,7 +236,7 @@ class CandidateListSerializer(serializers.ModelSerializer):
 
 
 class CandidateUpdateSerializer(serializers.ModelSerializer):
-    """Deliberately excludes aadhaar_number and batch - changing either would silently
+    """Deliberately excludes aadhaar_last4 and batch - changing either would silently
     invalidate the duplicate-check that already ran against this candidate's current values.
     """
     class Meta:
@@ -180,7 +249,7 @@ class CandidateUpdateSerializer(serializers.ModelSerializer):
 
 class CandidateDetailSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(read_only=True)
-    aadhaar_masked = serializers.SerializerMethodField()
+    aadhaar_last4 = serializers.SerializerMethodField()
     batch_name = serializers.CharField(source='batch.batch_name', read_only=True)
     status = serializers.SerializerMethodField()
     status_display = serializers.SerializerMethodField()
@@ -191,20 +260,42 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
     total_correct = serializers.SerializerMethodField()
     evidence = serializers.SerializerMethodField()
     timeline = serializers.SerializerMethodField()
+    email_status = serializers.SerializerMethodField()
+    email_status_display = serializers.SerializerMethodField()
+    email_error = serializers.SerializerMethodField()
+    email_sent_at = serializers.SerializerMethodField()
+    email_last_attempt_at = serializers.SerializerMethodField()
 
     class Meta:
         model = Candidate
         fields = [
             'candidate_id', 'full_name', 'email', 'phone',
             'college_name', 'degree', 'stream', 'percentage', 'passing_out_year', 'location',
-            'aadhaar_masked', 'batch_id', 'batch_name', 'status', 'status_display',
+            'aadhaar_last4', 'batch_id', 'batch_name', 'status', 'status_display',
             'result', 'result_display', 'overall_score', 'overall_total', 'total_correct',
             'section_results',
             'evidence', 'timeline',
+            'email_status', 'email_status_display', 'email_error', 'email_sent_at',
+            'email_last_attempt_at',
         ]
 
-    def get_aadhaar_masked(self, candidate):
-        return mask_aadhaar(candidate.aadhaar_number)
+    def get_aadhaar_last4(self, candidate):
+        return format_aadhaar_last4(candidate.aadhaar_last4)
+
+    def get_email_status(self, candidate):
+        return _email_delivery(candidate)['email_status']
+
+    def get_email_status_display(self, candidate):
+        return _email_delivery(candidate)['email_status_display']
+
+    def get_email_error(self, candidate):
+        return _email_delivery(candidate)['email_error']
+
+    def get_email_sent_at(self, candidate):
+        return _email_delivery(candidate)['email_sent_at']
+
+    def get_email_last_attempt_at(self, candidate):
+        return _email_delivery(candidate)['email_last_attempt_at']
 
     def get_status(self, candidate):
         return _effective_status(candidate)[0]
@@ -316,7 +407,11 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
                     'details': termination_label(attempt.termination_reason),
                 })
 
-        events.sort(key=lambda e: e['timestamp'])
+        # Newest first. NOTE there are two history renderings and they must agree: this one
+        # (Candidate Details -> Process / Status History) and services/candidate_history.py
+        # (the upload History modal). Only the latter was reordered at first, so this table
+        # kept showing oldest-first while the modal showed newest-first.
+        events.sort(key=lambda e: e['timestamp'], reverse=True)
         # Every event on this screen belongs to the candidate's own batch (unlike the upload
         # History modal, which spans the duplicate-matched record too). Stamped once here so
         # the table's Batch column doesn't need it repeated at each append site above.

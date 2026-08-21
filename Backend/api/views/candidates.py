@@ -25,7 +25,7 @@ from api.serializers.candidates import (
     _effective_status,
     _latest_attempt,
 )
-from api.services.access import can_access_batch, visible_candidates_qs
+from api.services.access import visible_candidates_qs
 from api.services.audit import log_action
 from api.services.candidate_history import build_candidate_history
 from api.services.email_templates import (
@@ -48,8 +48,13 @@ def _get_candidate_or_404(user, candidate_id):
         )
     except Candidate.DoesNotExist:
         raise Http404
-    if not can_access_batch(user, candidate.batch):
-        raise Http404  # don't reveal existence of candidates the caller can't access
+    # Deliberately NOT gated on can_access_batch: candidates are visible to every admin/TA
+    # regardless of who uploaded them (see services/access.visible_candidates_qs). Gating here
+    # while the list is unscoped would make every row in All Candidates that belongs to another
+    # user's batch 404 the moment it is clicked.
+    #
+    # Access to this function still requires an authenticated admin or TA - IsAdminOrTA on the
+    # views - so this widens visibility within those roles, not beyond them.
     return candidate
 
 
@@ -124,7 +129,10 @@ def _with_latest_attempt(qs):
     """
     return qs.prefetch_related(
         Prefetch('examattempt_set', queryset=ExamAttempt.objects.order_by('-started_at'),
-                 to_attr='prefetched_latest_attempts')
+                 to_attr='prefetched_latest_attempts'),
+        # Invitations too, for the Email Status column. Without this the column would fire one
+        # query per row; serializers/candidates._latest_invitation reads this cache via .all().
+        'invitation_set',
     )
 
 
@@ -144,7 +152,7 @@ class CandidateListView(APIView):
 
         aadhaar = request.query_params.get('aadhaar', '').strip()
         if aadhaar:
-            qs = qs.filter(aadhaar_number__icontains=aadhaar)
+            qs = qs.filter(aadhaar_last4__icontains=aadhaar)
 
         batch_id = request.query_params.get('batch_id')
         if batch_id:
@@ -209,6 +217,77 @@ class CandidateResendInviteView(APIView):
         log_action(request, request.user, 'invite_sent', 'candidate', candidate.candidate_id,
                    details={'re_invite': True})
         return Response({'detail': f'Invite re-sent to {candidate.email}.'})
+
+
+class CandidateBulkResendInviteView(APIView):
+    """POST /api/candidates/resend-invite/ - issue a FRESH assessment link to each selected
+    candidate, from Batch Details.
+
+    Distinct from /batches/<id>/send-invites/, which only covers candidates still awaiting
+    their first invite and silently skips anyone already invited. This one always mints a new
+    token (create_single_reinvite), which is what "send a new invite link" has to mean - a
+    candidate whose link expired or was lost needs a different link, not a resend of the dead one.
+
+    Done as one request rather than the browser looping over the per-candidate endpoint: 50
+    selected candidates would otherwise be 50 round-trips, each able to fail independently and
+    leave the operator guessing which ones went out.
+    """
+    permission_classes = [IsAdminOrTA]
+
+    def post(self, request):
+        candidate_ids = request.data.get('candidate_ids')
+        if not isinstance(candidate_ids, list) or not candidate_ids:
+            return Response({'detail': 'Select the candidates to send a new invite link to.'},
+                             status=status.HTTP_400_BAD_REQUEST)
+
+        # Scoped through the same per-candidate accessor the single endpoint uses, so a TA
+        # cannot re-invite a candidate on someone else's batch by posting their id.
+        candidates = []
+        for candidate_id in candidate_ids:
+            try:
+                candidates.append(_get_candidate_or_404(request.user, int(candidate_id)))
+            except (TypeError, ValueError):
+                continue
+            except Http404:
+                continue
+
+        if not candidates:
+            return Response({'detail': 'None of the selected candidates are available to you.'},
+                             status=status.HTTP_400_BAD_REQUEST)
+
+        # A candidate with no address on file would otherwise be reported as sent - send_mail
+        # accepts a blank recipient without raising (see services/invites).
+        sendable, skipped_no_email = partition_by_deliverable(candidates)
+
+        invitations, blocked = [], None
+        for candidate in sendable:
+            try:
+                invitations.append(create_single_reinvite(candidate, request.user))
+            except BatchNotInvitableError as exc:
+                # Batch status is a property of the batch, not the candidate, so the first
+                # refusal applies to every candidate from that batch - report it once.
+                blocked = str(exc)
+                break
+
+        if not invitations:
+            return Response({'detail': blocked or 'No invitations could be sent.'},
+                             status=status.HTTP_400_BAD_REQUEST)
+
+        send_invites_async(invitations, settings.FRONTEND_ORIGIN)
+        for invitation in invitations:
+            log_action(request, request.user, 'invite_sent', 'candidate', invitation.candidate_id,
+                       details={'re_invite': True, 'bulk': True})
+
+        detail = f'A new assessment link has been sent to {len(invitations)} candidate(s).'
+        if skipped_no_email:
+            detail += f' {len(skipped_no_email)} skipped - no email address on record.'
+        if blocked:
+            detail += f' Stopped early: {blocked}'
+        return Response({
+            'sent_count': len(invitations),
+            'skipped_count': len(skipped_no_email),
+            'detail': detail,
+        })
 
 
 class NotificationTemplateListView(APIView):

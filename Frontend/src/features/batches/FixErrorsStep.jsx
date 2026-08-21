@@ -146,7 +146,7 @@ export default function FixErrorsStep({ batch, onDone }) {
                 <th>Name</th>
                 <th>Email</th>
                 <th>Mobile</th>
-                <th>Aadhaar</th>
+                <th>Aadhaar Last 4</th>
                 <th>College Name</th>
                 <th>Degree</th>
                 <th>Stream</th>

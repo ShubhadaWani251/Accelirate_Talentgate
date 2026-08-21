@@ -246,6 +246,14 @@ def begin_exam(attempt):
     if attempt.started_at is None:
         attempt.started_at = timezone.now()
         attempt.save(update_fields=['started_at'])
+        # The link is consumed at exactly this moment - the candidate is now in the exam
+        # window and the clock has started. Doing it here rather than at identity capture
+        # means an abandoned photo step doesn't burn the invitation. Guarded by the same
+        # started_at check so a reload/resume doesn't rewrite it.
+        invitation = attempt.invitation
+        if not invitation.is_link_used:
+            invitation.is_link_used = True
+            invitation.save(update_fields=['is_link_used'])
     return attempt
 
 
@@ -294,8 +302,10 @@ def start_or_resume_attempt(invitation_id, ip_address, user_agent):
         user_agent=(user_agent or '')[:255],
     )
     _assign_questions(attempt, invitation.batch)
-    invitation.is_link_used = True
-    invitation.save(update_fields=['is_link_used'])
+    # is_link_used is NOT set here. Identity capture is not the point of no return - a
+    # candidate whose browser dies while taking their ID photo must still be able to reopen
+    # the link and resume. The link is spent when they actually enter the exam window; see
+    # begin_exam, which is the one place that flips it.
     return attempt, True
 
 

@@ -8,7 +8,7 @@ const EDITABLE = [
   { key: 'last_name', label: 'Last Name' },
   { key: 'email', label: 'Email' },
   { key: 'phone', label: 'Mobile' },
-  { key: 'aadhaar_number', label: 'Aadhaar Number', type: 'aadhaar' },
+  { key: 'aadhaar_last4', label: 'Aadhaar Last 4 Digits', type: 'aadhaar' },
   { key: 'college_name', label: 'College Name' },
   { key: 'degree', label: 'Degree' },
   { key: 'stream', label: 'Stream' },
@@ -31,14 +31,14 @@ export default function CandidateErrorRow({
   const [draft, setDraft] = useState({});
 
   function startEdit() {
-    // Aadhaar is deliberately absent: the browser only ever receives the masked number, so
+    // Aadhaar is deliberately absent from the prefill: only the last 4 digits exist, so
     // the box starts empty and an empty box means "leave it alone".
     setDraft({
       first_name: row.first_name || '',
       last_name: row.last_name || '',
       email: row.email || '',
       phone: row.phone || '',
-      aadhaar_number: '',
+      aadhaar_last4: '',
       college_name: row.college_name || '',
       degree: row.degree || '',
       stream: row.stream || '',
@@ -51,7 +51,7 @@ export default function CandidateErrorRow({
 
   async function save() {
     const payload = { ...draft };
-    if (!payload.aadhaar_number) delete payload.aadhaar_number;
+    if (!payload.aadhaar_last4) delete payload.aadhaar_last4;
     const ok = await onSave(row.candidate_id, payload);
     if (ok) setEditing(false);
   }
@@ -73,14 +73,14 @@ export default function CandidateErrorRow({
                   {f.label}
                   {f.type === 'aadhaar' && (
                     <span style={{ color: 'var(--muted)', fontWeight: 400 }}>
-                      {' '}— currently {row.aadhaar_masked || 'not set'}
+                      {' '}— currently {row.aadhaar_last4 || 'not set'}
                     </span>
                   )}
                 </label>
                 <input
                   value={draft[f.key] ?? ''}
                   className={errorFields.has(f.label) ? 'has-error' : ''}
-                  placeholder={f.type === 'aadhaar' ? 'Leave blank to keep the current number' : ''}
+                  placeholder={f.type === 'aadhaar' ? 'Leave blank to keep the current value' : '4 digits'}
                   onChange={(e) => setDraft({ ...draft, [f.key]: e.target.value })}
                 />
               </div>
@@ -103,7 +103,7 @@ export default function CandidateErrorRow({
       <td className={cell('Name')}>{row.full_name || '(missing)'}</td>
       <td className={cell('Email')}>{row.email || '(missing)'}</td>
       <td className={cell('Mobile')}>{row.phone || '—'}</td>
-      <td className={cell('Aadhaar Number')}>{row.aadhaar_masked || '(missing)'}</td>
+      <td className={cell('Aadhaar Last 4 Digits')}>{row.aadhaar_last4 || '(missing)'}</td>
       <td className={cell('College Name')}>{row.college_name || '(missing)'}</td>
       <td className={cell('Degree')}>{row.degree || '—'}</td>
       <td className={cell('Stream')}>{row.stream || '—'}</td>

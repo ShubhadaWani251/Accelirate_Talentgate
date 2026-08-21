@@ -6,6 +6,7 @@ import useExamTimer from '../../features/exam/timer/useExamTimer';
 import useTabSwitchGuard from '../../features/exam/proctoring/useTabSwitchGuard';
 import useFullscreenGuard from '../../features/exam/proctoring/useFullscreenGuard';
 import useExamLockdown from '../../features/exam/proctoring/useExamLockdown';
+import useDisplayGuard from '../../features/exam/proctoring/useDisplayGuard';
 import useSessionRecorder from '../../features/exam/webcam/useSessionRecorder';
 import {
   FULLSCREEN_SUPPORTED, enterFullscreen, exitFullscreen, isFullscreen,
@@ -220,6 +221,19 @@ export default function ExamAttemptPage() {
   useExamLockdown(examActive, onViolation, windowGuardGen);
   useSessionRecorder(mediaStreamRef.current, examActive);
 
+  // A second display appearing mid-exam is treated the same way as leaving the window: one
+  // warning, then the attempt ends. It rides on the existing violation pipeline rather than
+  // having its own path, so the warning count is shared - a candidate cannot spend one warning
+  // on a tab switch and another on a monitor.
+  //
+  // Reported as window_blur because that is the closest existing reason code, and the candidate
+  // is shown the extraDisplay banner below explaining the real cause. A dedicated reason code
+  // would need a matching TERMINATION_MESSAGES entry on the server to avoid a KeyError.
+  const { extended: extraDisplay } = useDisplayGuard(examActive);
+  useEffect(() => {
+    if (examActive && extraDisplay) onViolation('window_blur');
+  }, [examActive, extraDisplay, onViolation]);
+
   // "System issue" - the camera/mic feed the recorder depends on disappearing mid-exam (device
   // unplugged, OS revokes permission, laptop lid closed). Not the candidate's fault, so
   // finalize_attempt/is_violation_reason on the backend keeps this out of their violation record
@@ -323,6 +337,12 @@ export default function ExamAttemptPage() {
     <div className="app-shell">
       <BrandHeader roleCode="candidate" />
       <div style={{ flex: 1, padding: '20px 16px', maxWidth: 760, margin: '0 auto', width: '100%' }}>
+        {extraDisplay && (
+          <div className="alert error" style={{ marginBottom: 10 }}>
+            <b>More than one display detected.</b> The assessment must be taken on a single
+            screen. Disconnect the additional display immediately.
+          </div>
+        )}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
           <h3 style={{ margin: 0 }}>Assessment — All Questions</h3>
           <div className={`timer-badge${lowTime ? ' low-time' : ''}`}>⏱ {timer.formatted} remaining</div>

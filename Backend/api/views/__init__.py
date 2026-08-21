@@ -28,6 +28,7 @@ from .candidates import (
     CandidateListView,
     CandidateDetailView,
     CandidateHistoryView,
+    CandidateBulkResendInviteView,
     CandidateResendInviteView,
     CandidateNotifyView,
     CandidateCertificationView,
@@ -35,6 +36,7 @@ from .candidates import (
     CandidateExportView,
     CandidateEvidenceZipView,
 )
+from .audit import AuditLogFilterOptionsView, AuditLogListView
 from .dashboard import DashboardSummaryView
 from .questions import (
     QuestionSectionListView,
@@ -58,6 +60,8 @@ from .exam import (
 )
 
 __all__ = [
+    'CandidateBulkResendInviteView',
+    'AuditLogListView', 'AuditLogFilterOptionsView',
     'health_check',
     'LoginView', 'LogoutView', 'RefreshView',
     'ForgotPasswordView', 'ResendOtpView', 'VerifyOtpResetView',
