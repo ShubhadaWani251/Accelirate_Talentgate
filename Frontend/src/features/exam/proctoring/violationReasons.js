@@ -9,6 +9,11 @@ const PRIORITY = {
   window_blur: 1,       // catch-all: any focus loss
   tab_switch: 2,        // more specific than blur: the tab itself became hidden
   fullscreen_exit: 3,
+  // Above the window reasons on purpose: switching the camera off often means opening OS camera
+  // settings or another app, which blurs the window too. Without this, the vaguer window_blur
+  // would win and the candidate would be told they left the window when the real, more specific
+  // cause was the camera.
+  camera_off: 4,
   system_issue: 4,      // device-level, not a candidate choice
   view_source_attempt: 5,
   devtools_attempt: 5,

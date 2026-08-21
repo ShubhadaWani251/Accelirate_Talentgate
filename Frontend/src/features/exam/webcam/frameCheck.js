@@ -22,10 +22,28 @@ const SAMPLE_GAP_MS = 250;
 const WARMUP_MS = 600;
 const READY_TIMEOUT_MS = 5000;
 
-function statsFromVideo(video) {
-  const width = video.videoWidth;
-  const height = video.videoHeight;
-  if (!width || !height) return null;
+/**
+ * Mean and standard deviation of frame luma.
+ *
+ * `maxWidth` optionally analyses a downscaled copy of the frame. Omitted, the frame is read at
+ * its native resolution - which is what the one-off entry check does, and its thresholds were
+ * calibrated there. The in-exam monitor (proctoring/useCameraGuard) passes a small value because
+ * it runs every couple of seconds and a full-resolution getImageData is 40-70ms of main-thread
+ * work, enough to be felt alongside the session recorder's encoding.
+ *
+ * Downscaling averages neighbouring pixels, which lowers stddev and therefore risks calling a
+ * real-but-dim room uniform. Measured before choosing the default: a dim, textured scene reads
+ * stddev 12.2 at 1280x720 and 11.5 at 320x240, against a threshold of 5 - so the margin
+ * survives comfortably, while a covered lens stays at 0.0 either way.
+ */
+function statsFromVideo(video, maxWidth = null) {
+  const nativeWidth = video.videoWidth;
+  const nativeHeight = video.videoHeight;
+  if (!nativeWidth || !nativeHeight) return null;
+
+  const scale = maxWidth && nativeWidth > maxWidth ? maxWidth / nativeWidth : 1;
+  const width = Math.max(1, Math.round(nativeWidth * scale));
+  const height = Math.max(1, Math.round(nativeHeight * scale));
 
   const canvas = document.createElement('canvas');
   canvas.width = width;

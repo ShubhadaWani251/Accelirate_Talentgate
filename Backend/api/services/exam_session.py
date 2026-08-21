@@ -28,6 +28,7 @@ class TerminationReason:
     DEVTOOLS_ATTEMPT = 'devtools_attempt'
     VIEW_SOURCE_ATTEMPT = 'view_source_attempt'
     SCREENSHOT_ATTEMPT = 'screenshot_attempt'
+    CAMERA_OFF = 'camera_off'
     SYSTEM_ISSUE = 'system_issue'
 
 
@@ -46,6 +47,9 @@ TERMINATION_MESSAGES = {
         'Your assessment was ended because you attempted to view the page source.',
     TerminationReason.SCREENSHOT_ATTEMPT:
         'Your assessment was ended because a screenshot attempt (Print Screen) was detected.',
+    TerminationReason.CAMERA_OFF:
+        'Your assessment was ended because your camera was switched off or blocked. Continuous '
+        'video is required for the whole assessment.',
     TerminationReason.SYSTEM_ISSUE:
         'Your assessment was ended because of a technical issue - camera/microphone access was lost.',
 }
@@ -60,6 +64,7 @@ TERMINATION_LABELS = {
     TerminationReason.DEVTOOLS_ATTEMPT: 'Tried to open developer tools',
     TerminationReason.VIEW_SOURCE_ATTEMPT: 'Tried to view page source',
     TerminationReason.SCREENSHOT_ATTEMPT: 'Screenshot attempt (Print Screen)',
+    TerminationReason.CAMERA_OFF: 'Camera switched off or blocked during the exam',
     TerminationReason.SYSTEM_ISSUE: 'Technical issue - camera/microphone lost',
 }
 
@@ -104,6 +109,17 @@ WARNABLE_REASONS = {
     TerminationReason.TAB_SWITCH,
     TerminationReason.WINDOW_BLUR,
     TerminationReason.FULLSCREEN_EXIT,
+    # The camera going off is warnable for a different reason than the window ones: it is often
+    # recoverable. A privacy shutter, the OS camera toggle, or another application grabbing the
+    # device all look identical to deliberately covering the lens, and the honest response to an
+    # ambiguous signal is to say so and give the candidate a chance to put it right - which
+    # terminating cannot. The second occurrence ends the attempt, so this is not a free pass.
+    #
+    # Note this is still a VIOLATION (it is not in _NON_VIOLATION_REASONS): the candidate was
+    # told the camera must stay on, so it belongs on their record either way. system_issue stays
+    # separate and non-violation for the case where the whole feed dies, which is not
+    # recoverable and not something a warning can help with.
+    TerminationReason.CAMERA_OFF,
 }
 
 # One warning, then out. Counted server-side (see record_violation) rather than in the browser,
@@ -118,19 +134,34 @@ _WARNING_CAUSES = {
         'taskbar, or opening another application',
     TerminationReason.FULLSCREEN_EXIT:
         'the assessment left full-screen mode',
+    TerminationReason.CAMERA_OFF:
+        'your camera stopped sending video - it may be switched off, covered, blocked by a '
+        'privacy shutter, or in use by another application',
 }
 
 
+# What the candidate should actually DO about it, which is not the same for every cause. Telling
+# someone whose camera was switched off to "stay in the assessment window" is useless advice at
+# the one moment they are relying on it.
+_WARNING_REMEDIES = {
+    TerminationReason.CAMERA_OFF:
+        'Turn your camera back on now and leave it on until you submit',
+}
+_DEFAULT_WARNING_REMEDY = 'Stay in the assessment window until you submit'
+
+
 def warning_message(reason_code):
-    """The candidate-facing warning text - names the specific cause, then the consequence.
+    """The candidate-facing warning text - names the specific cause, what to do, then the
+    consequence.
 
     Same principle as TERMINATION_MESSAGES: never one generic "you did something wrong" for
     every cause. The consequence is stated in full because this is the only notice they get.
     """
     cause = _WARNING_CAUSES.get(reason_code, 'the assessment window was left')
+    remedy = _WARNING_REMEDIES.get(reason_code, _DEFAULT_WARNING_REMEDY)
     return (
         f'Warning: {cause}. '
-        f'This is your only warning. Stay in the assessment window until you submit - if this '
+        f'This is your only warning. {remedy} - if this '
         f'happens again your assessment will be ended immediately, your answers will be '
         f'submitted as they are, and it cannot be resumed.'
     )

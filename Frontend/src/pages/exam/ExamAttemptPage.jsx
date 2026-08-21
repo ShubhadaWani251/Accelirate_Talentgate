@@ -7,6 +7,7 @@ import useTabSwitchGuard from '../../features/exam/proctoring/useTabSwitchGuard'
 import useFullscreenGuard from '../../features/exam/proctoring/useFullscreenGuard';
 import useExamLockdown from '../../features/exam/proctoring/useExamLockdown';
 import useDisplayGuard from '../../features/exam/proctoring/useDisplayGuard';
+import useCameraGuard from '../../features/exam/proctoring/useCameraGuard';
 import useSessionRecorder from '../../features/exam/webcam/useSessionRecorder';
 import {
   FULLSCREEN_SUPPORTED, enterFullscreen, exitFullscreen, isFullscreen,
@@ -234,15 +235,27 @@ export default function ExamAttemptPage() {
     if (examActive && extraDisplay) onViolation('window_blur');
   }, [examActive, extraDisplay, onViolation]);
 
-  // "System issue" - the camera/mic feed the recorder depends on disappearing mid-exam (device
-  // unplugged, OS revokes permission, laptop lid closed). Not the candidate's fault, so
-  // finalize_attempt/is_violation_reason on the backend keeps this out of their violation record
-  // even though the attempt still has to end - the recording can't continue without it.
+  // The camera going off mid-exam - switched off, covered by a privacy shutter, or taken by
+  // another application. Warnable (see exam_session.WARNABLE_REASONS): the candidate gets one
+  // chance to turn it back on, and the banner below tells them to. Video is handled here rather
+  // than by the system_issue listener beneath because the two need different outcomes, and
+  // because the signals differ - see useCameraGuard for why watching only `ended` missed this
+  // entirely.
+  const { cameraOff } = useCameraGuard(mediaStreamRef, examActive, onViolation);
+
+  // "System issue" - the MICROPHONE feed the recorder depends on disappearing mid-exam. Not the
+  // candidate's fault, so finalize_attempt/is_violation_reason on the backend keeps this out of
+  // their violation record even though the attempt still has to end: unlike the camera, there is
+  // nothing a warning could ask them to do about it.
+  //
+  // Scoped to audio tracks only. It used to cover every track, which meant a camera switched off
+  // hard enough to end its track was reported as a technical fault and terminated silently
+  // instead of earning the warning it should.
   useEffect(() => {
     if (!examActive) return undefined;
     const stream = mediaStreamRef.current;
     if (!stream) return undefined;
-    const tracks = stream.getTracks();
+    const tracks = stream.getAudioTracks();
     function handleEnded() {
       onViolation('system_issue');
     }
@@ -341,6 +354,18 @@ export default function ExamAttemptPage() {
           <div className="alert error" style={{ marginBottom: 10 }}>
             <b>More than one display detected.</b> The assessment must be taken on a single
             screen. Disconnect the additional display immediately.
+          </div>
+        )}
+
+        {/* Stays visible for as long as the camera is off, unlike the warning modal which the
+            candidate dismisses. That matters: the guard reports once per switch-off and will not
+            nag, so without a persistent banner someone who dismissed the warning before fixing
+            the camera would have nothing left telling them the exam is still unproctored. */}
+        {cameraOff && (
+          <div className="alert error" style={{ marginBottom: 10 }}>
+            <b>Your camera is not sending video.</b> Turn it back on now - check for a privacy
+            shutter, your camera switch, or another app (Teams, Zoom) using the camera. If it
+            goes off again your assessment will be ended.
           </div>
         )}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
