@@ -14,9 +14,10 @@ from rest_framework.views import APIView
 
 from api.models import Batch, Candidate, Invitation
 from api.pagination import StandardResultsPagination
-from api.permissions import IsAdminOrTA
+from api.permissions import IsAdmin, IsAdminOrTA
 from api.serializers.batch import (
     BatchDefaultsSerializer, BatchSerializer, CandidateStagingSerializer, annotate_batch_counts,
+    link_window_error,
 )
 from api.services.access import can_access_batch, visible_batches_qs
 from api.services.audit import log_action
@@ -24,7 +25,7 @@ from api.services.batch_defaults import get_batch_defaults, save_batch_defaults
 from api.services.batch_status_filter import filter_batches_by_status_group
 from api.services import draft_expiry
 from api.services.candidate_validation import (
-    EDITABLE_FIELDS, revalidate_batch_candidates, summarize_candidates,
+    EDITABLE_FIELDS, clamp_aadhaar_to_last4, revalidate_batch_candidates, summarize_candidates,
 )
 from api.services import exam_session
 from api.services.duplicate_check import clear_duplicate, run_duplicate_check
@@ -94,12 +95,22 @@ class BatchListCreateView(APIView):
         return paginator.get_paginated_response(BatchSerializer(page, many=True).data)
 
     def post(self, request):
+        # Only batch_name and college_name come from the request now - the exam schedule,
+        # question counts and cutoffs are the admin-configured org-wide defaults
+        # (services/batch_defaults.py), snapshotted onto this batch at creation via the
+        # explicit kwargs below. Passed as save() kwargs rather than left to the serializer's
+        # own (now read-only, for 5 of these 9 fields - see BatchSerializer.Meta) field handling
+        # specifically so this is unconditional: kwargs always win over whatever validated_data
+        # holds, so even a request that also supplied its own values for the 4 still-writable
+        # cutoff fields gets the current defaults instead. A batch's configuration should never
+        # depend on what a particular create request happened to send.
         serializer = BatchSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         batch = serializer.save(
             primary_ta_user=request.user,
             created_by=request.user,
             status=Batch.Status.DRAFT,
+            **get_batch_defaults(),
         )
         log_action(request, request.user, 'create', 'batch', batch.batch_id)
         return Response(BatchSerializer(batch).data, status=status.HTTP_201_CREATED)
@@ -183,7 +194,12 @@ class BatchDeactivateView(APIView):
 
 
 class BatchDefaultsView(APIView):
-    permission_classes = [IsAdminOrTA]
+    """Reads/writes the org-wide default exam configuration new batches are created
+    with. Admin-only: this affects every batch anyone creates from here on, which is a bigger
+    blast radius than any single TA's own work and shouldn't be changeable from inside the
+    upload wizard the way it used to be - see services/batch_defaults.py.
+    """
+    permission_classes = [IsAdmin]
 
     def get(self, request):
         return Response(get_batch_defaults())
@@ -259,6 +275,23 @@ class BatchUploadView(APIView):
             )
 
         if not created:
+            # Every parsed row lands in exactly one of these two lists (see
+            # stage_candidates_from_workbook), so an empty `created` with a non-empty
+            # `skipped_duplicates` means the file had real rows - they just all matched a
+            # candidate already staged on this batch (dedup is seeded from the batch's existing
+            # rows specifically so a second file added to the same draft collapses against the
+            # first). That is a completely different situation from an empty/unreadable file,
+            # and "no data rows found" told the uploader the wrong thing about their own file -
+            # most commonly hit by going back to Upload and picking the same file again.
+            if skipped_duplicates:
+                return Response(
+                    {'detail': f'Every row in this file matches a candidate already on this '
+                               f'batch ({len(skipped_duplicates)} duplicate(s) skipped) - '
+                               f'nothing new to add. Upload a different file, or continue to '
+                               f'the candidates already staged.',
+                     'skipped_duplicates': skipped_duplicates},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             return Response({'detail': 'No data rows found in that file.'}, status=status.HTTP_400_BAD_REQUEST)
 
         batch.total_candidates = len(staged)
@@ -352,11 +385,17 @@ class BatchCandidateRowView(APIView):
             value = request.data[field]
             value = value.strip() if isinstance(value, str) else value
 
-            if field == 'aadhaar_last4' and not value:
-                # A blank Aadhaar box means "leave it as it is" - not "erase it". Clearing it
-                # deliberately isn't something the review screen needs to support, and the
-                # field is required for a row to validate.
-                continue
+            if field == 'aadhaar_last4':
+                if not value:
+                    # A blank Aadhaar box means "leave it as it is" - not "erase it". Clearing it
+                    # deliberately isn't something the review screen needs to support, and the
+                    # field is required for a row to validate.
+                    continue
+                # Same reason as excel_upload.py's identical clamp: this writes straight to the
+                # ORM (setattr + save below), bypassing any serializer-level max_length check, so
+                # a reviewer pasting a full Aadhaar number here would otherwise hit a raw
+                # DataError from Postgres instead of a normal validation message.
+                value = clamp_aadhaar_to_last4(value)
             if field in ('percentage', 'passing_out_year'):
                 # Record what was actually typed as well as the parsed value: "abc" parses to
                 # None, and without the raw text the reviewer would be told the field is empty
@@ -528,6 +567,23 @@ class BatchFinalizeView(APIView):
                  'candidate_ids': [c.candidate_id for c in invalid]},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        # The assessment link window is set on the wizard's "Review & Send Invite" step (a PATCH
+        # to this batch), not at creation any more - a batch's link_valid_from/until can
+        # genuinely still be null here if that PATCH was skipped, or has already been through it
+        # if the frontend called it first as intended. Checked here regardless: this is the last
+        # point before invites can go out, and it must not trust an earlier step to have run.
+        if not (batch.link_valid_from and batch.link_valid_until):
+            return Response(
+                {'detail': "Set the assessment link's valid-from and valid-until dates before "
+                           "sending invites."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        window_error = link_window_error(
+            batch.link_valid_from, batch.link_valid_until, batch.exam_duration_minutes,
+        )
+        if window_error:
+            return Response({'detail': window_error}, status=status.HTTP_400_BAD_REQUEST)
 
         # Activation and the draft-expiry sweep can reach the same row at the same moment, and
         # the two must not both win. Taking the row lock and re-reading status/created_at

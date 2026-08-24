@@ -13,9 +13,15 @@ class Batch(models.Model):
 
     batch_id = models.BigAutoField(primary_key=True)
     batch_name = models.CharField(max_length=150)
-    college_name = models.CharField(max_length=150)
-    link_valid_from = models.DateTimeField()
-    link_valid_until = models.DateTimeField()
+    # Optional at the batch level: each candidate already carries their own college_name from the
+    # upload sheet (a batch can be a mixed drive), so this was often redundant with what candidate
+    # rows already record.
+    college_name = models.CharField(max_length=150, null=True, blank=True)
+    # Nullable: a batch is created from just its name and college (see BatchListCreateView.post)
+    # and doesn't have an assessment window yet - that's set on the "Review & Send Invite" step,
+    # immediately before the invite goes out. Never null once a batch has ever had invites sent.
+    link_valid_from = models.DateTimeField(null=True, blank=True)
+    link_valid_until = models.DateTimeField(null=True, blank=True)
 
     # Exam configuration
     logical_questions = models.SmallIntegerField(default=10)

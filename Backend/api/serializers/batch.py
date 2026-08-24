@@ -4,9 +4,36 @@ from rest_framework import serializers
 from api.models import Batch, Candidate, DuplicateCheck
 from api.serializers.common import format_aadhaar_last4
 from api.services import draft_expiry
+from api.services.batch_defaults import get_batch_defaults
 
 
 SECTION_FIELDS = ['logical', 'quantitative', 'verbal', 'programming']
+
+
+def link_window_error(link_from, link_until, duration):
+    """None if the assessment link window is at least as long as the exam, else an error string.
+
+    Shared between BatchSerializer.validate (the PATCH that sets the window, on the wizard's
+    Review & Send Invite step) and BatchFinalizeView (the last point before invites can go out) -
+    one call site setting the window and a different one gating the send both need the identical
+    rule, and a caller that skipped the PATCH must not be able to finalize with no window at all.
+
+    Returns None (not raising) when any input is missing, so callers decide for themselves
+    whether "unset" is acceptable at that point in the flow - it is fine mid-PATCH-validation
+    (see validate()'s own touches_window/link_from/link_until/duration guard) and never fine at
+    finalize, which checks for None explicitly before ever calling this.
+    """
+    if not (link_from and link_until and duration):
+        return None
+    window_minutes = (link_until - link_from).total_seconds() / 60
+    if window_minutes >= duration:
+        return None
+    return (
+        f'The link window is {int(window_minutes)} minutes, which is shorter than the '
+        f'{duration}-minute exam. A candidate who needs to reconnect mid-exam would be locked '
+        f'out while their timer is still running. Extend the end time to at least {duration} '
+        f'minutes after the start.'
+    )
 
 
 def annotate_batch_counts(queryset):
@@ -47,6 +74,16 @@ class BatchSerializer(serializers.ModelSerializer):
         read_only_fields = [
             'batch_id', 'status', 'status_display', 'total_candidates',
             'primary_ta_user', 'primary_ta_user_name', 'created_at', 'draft_expires_at',
+            # The exam schedule and question counts are set once, org-wide, on the admin-only
+            # Configure Default Batch screen (services/batch_defaults.py) and snapshotted onto
+            # each batch at creation (BatchListCreateView.post) - never client-writable, at
+            # creation or afterwards. Cutoffs are the one exception: they stay writable so a TA
+            # can revise them after a finalized batch's cohort has been scored (see
+            # ConfigureBatchStep's cutoffs-only edit mode) - creation still snapshots them from
+            # the same defaults, but that happens server-side via explicit save() kwargs, not
+            # through this required-ness setting.
+            'exam_duration_minutes', 'logical_questions', 'quantitative_questions',
+            'verbal_questions', 'programming_questions',
         ]
 
     def get_draft_expires_at(self, batch):
@@ -103,21 +140,21 @@ class BatchSerializer(serializers.ModelSerializer):
         # be changed, so an unconditional check would have blocked the single edit still
         # permitted on it, for a reason the TA could not act on. Grandfathering the existing row
         # while refusing to create or worsen one is the useful behaviour.
-        touches_window = {
-            'link_valid_from', 'link_valid_until', 'exam_duration_minutes',
-        } & set(attrs)
-        duration = attrs.get(
-            'exam_duration_minutes', getattr(self.instance, 'exam_duration_minutes', None)
+        # exam_duration_minutes is read-only (see Meta.read_only_fields), so it never appears in
+        # attrs regardless of what the request sent - attrs.get() alone would silently resolve to
+        # None on every create, since there's no instance yet either, and this check would never
+        # fire for a create that supplied link dates directly. Falling back to the org-wide
+        # default predicts the actual value BatchListCreateView.post is about to snapshot, which
+        # is what will really end up on the row.
+        touches_window = {'link_valid_from', 'link_valid_until'} & set(attrs)
+        duration = (
+            self.instance.exam_duration_minutes if self.instance
+            else get_batch_defaults()['exam_duration_minutes']
         )
-        if touches_window and link_from and link_until and duration:
-            window_minutes = (link_until - link_from).total_seconds() / 60
-            if window_minutes < duration:
-                raise serializers.ValidationError({'link_valid_until': (
-                    f'The link window is {int(window_minutes)} minutes, which is shorter than the '
-                    f'{duration}-minute exam. A candidate who needs to reconnect mid-exam would be '
-                    f'locked out while their timer is still running. Extend the end time to at '
-                    f'least {duration} minutes after the start.'
-                )})
+        if touches_window:
+            error = link_window_error(link_from, link_until, duration)
+            if error:
+                raise serializers.ValidationError({'link_valid_until': error})
         for section in SECTION_FIELDS:
             count_field = f'{section}_questions'
             cutoff_field = f'{section}_cutoff'

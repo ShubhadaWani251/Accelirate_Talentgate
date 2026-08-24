@@ -4,7 +4,7 @@ from api.services.xlsx_safety import harden_workbook
 
 from api.models import Candidate
 from api.services.candidate_validation import (
-    candidate_identity_key, identity_key, revalidate_batch_candidates,
+    candidate_identity_key, clamp_aadhaar_to_last4, identity_key, revalidate_batch_candidates,
 )
 from api.services.duplicate_check import preload_duplicate_lookup, run_duplicate_check
 
@@ -103,7 +103,11 @@ def generate_template_workbook():
     ws = wb.active
     ws.title = 'Candidates'
     ws.append(TEMPLATE_COLUMNS)
-    ws.append(['Jane Doe', 'jane.doe@example.com', '9876543210', '123456789012',
+    # The Aadhaar example is 4 digits, matching what the column actually stores (aadhaar_last4
+    # is a varchar(4)) - it used to show a full 12-digit number, which uploaded this exact
+    # template's own sample row straight into a DataError ("value too long for type character
+    # varying(4)"), surfaced to the user as an opaque "could not read that file".
+    ws.append(['Jane Doe', 'jane.doe@example.com', '9876543210', '1234',
                'XYZ College', 'B.Tech', 'Computer Science', '78.5', '2025', 'Pune'])
     return harden_workbook(wb)
 
@@ -312,7 +316,10 @@ def stage_candidates_from_workbook(batch, file_obj, user, cooling_off_months=3):
         name_parts = name.split(None, 1)
         first_name = name_parts[0] if name_parts else ''
         last_name = name_parts[1] if len(name_parts) > 1 else ''
-        aadhaar = (data.get('aadhaar_last4') or '').strip()
+        # Clamped BEFORE it's used for anything - the identity key below, duplicate matching,
+        # and the Candidate.objects.create() call further down all need to see the same,
+        # DB-safe value. See clamp_aadhaar_to_last4 for why this exists at all.
+        aadhaar = clamp_aadhaar_to_last4((data.get('aadhaar_last4') or '').strip())
         email = (data.get('email') or '').strip()
         row_identity = identity_key({
             'aadhaar_last4': aadhaar, 'first_name': first_name, 'last_name': last_name,
@@ -345,7 +352,9 @@ def stage_candidates_from_workbook(batch, file_obj, user, cooling_off_months=3):
             last_name=last_name or None,
             email=data.get('email', '') or '',
             phone=data.get('phone') or None,
-            aadhaar_last4=data.get('aadhaar_last4', '') or '',
+            # The already-clamped local, not a fresh read of data['aadhaar_last4'] - re-reading
+            # here would silently undo the clamp above and bring the DataError crash right back.
+            aadhaar_last4=aadhaar,
             college_name=data.get('college_name') or None,
             degree=data.get('degree') or None,
             stream=data.get('stream') or None,

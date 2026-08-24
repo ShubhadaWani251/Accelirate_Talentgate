@@ -39,6 +39,29 @@ EDITABLE_FIELDS = {
 }
 
 _AADHAAR_RE = re.compile(r'^\d{4}$')
+
+
+def clamp_aadhaar_to_last4(value):
+    """Keep at most the last 4 characters of whatever was typed/pasted.
+
+    aadhaar_last4 is a database varchar(4). Nothing enforces that length before a write reaches
+    the two places a candidate's Aadhaar value is actually SET - the bulk upload
+    (services/excel_upload.py) and the inline row-edit (views/batches.BatchCandidateRowView) -
+    both call the ORM directly rather than going through a serializer, so Django's own
+    max_length validation never runs. A recruiter pasting a full 12-digit Aadhaar number (the
+    format every external HR export still uses, and what candidates were asked for before this
+    field was cut down to a suffix) raised a raw DataError that rolled back the ENTIRE upload
+    transaction - not just that one row - discarding every other candidate in the same file
+    behind an unhelpful "could not read that file" message.
+
+    Truncating to the LAST 4 characters, not rejecting outright, matches how this system already
+    treats a full number: migration 0013 truncated every existing full Aadhaar number in the
+    database the same way when this field was first cut down. A well-formed 12-digit number
+    becomes a valid 4-digit suffix and passes validation normally; genuine garbage (letters, too
+    short) still fails _AADHAAR_RE afterward exactly as it did before - this only prevents the
+    crash, it does not loosen what counts as valid.
+    """
+    return (value or '')[-4:]
 _MOBILE_STRIP_RE = re.compile(r'[\s\-().]')
 _MOBILE_RE = re.compile(r'^\+?\d{10,15}$')
 # A text field that is nothing but digits/punctuation is a mis-shifted column, not a real name
