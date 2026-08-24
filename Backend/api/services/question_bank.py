@@ -1,5 +1,6 @@
 from django.db import transaction
 from openpyxl import Workbook, load_workbook
+from api.services.xlsx_safety import harden_workbook
 
 from api.models import Question, QuestionBankSection
 from api.serializers.question import generate_question_code, normalize_question_text
@@ -91,7 +92,7 @@ def generate_question_template_workbook():
         ws = wb.create_sheet(title='Questions')
         ws.append(TEMPLATE_COLUMNS)
         ws.freeze_panes = 'A2'
-    return wb
+    return harden_workbook(wb)
 
 
 def _normalize_header(value):

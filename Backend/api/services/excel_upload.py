@@ -1,5 +1,6 @@
 from django.db import transaction
 from openpyxl import Workbook, load_workbook
+from api.services.xlsx_safety import harden_workbook
 
 from api.models import Candidate
 from api.services.candidate_validation import (
@@ -104,7 +105,7 @@ def generate_template_workbook():
     ws.append(TEMPLATE_COLUMNS)
     ws.append(['Jane Doe', 'jane.doe@example.com', '9876543210', '123456789012',
                'XYZ College', 'B.Tech', 'Computer Science', '78.5', '2025', 'Pune'])
-    return wb
+    return harden_workbook(wb)
 
 
 VALIDATION_REPORT_COLUMNS = [
@@ -138,7 +139,7 @@ def generate_validation_report_workbook(candidates):
             ', '.join(dict.fromkeys(e['field'] for e in errors)),
             ' '.join(e['message'] for e in errors),
         ])
-    return wb
+    return harden_workbook(wb)
 
 
 EXPORT_COLUMNS = [
@@ -178,7 +179,7 @@ def generate_candidates_workbook(candidates, latest_attempt_fn, status_display_f
             candidate.get_result_display(),
             float(overall_score) if overall_score is not None else None,
         ])
-    return wb
+    return harden_workbook(wb)
 
 
 def _normalize_header(value):

@@ -23,6 +23,7 @@ from api.authentication import CandidateAttemptAuthentication
 from api.models import ExamAnswer, ExamAttempt, Invitation
 from api.serializers.exam import AnswerSerializer, EmailVerifySerializer, TerminateSerializer
 from api.services import blob_storage, exam_session
+from api.services.image_validation import InvalidImageUpload, validate_identity_photo
 from api.services.exam_session import TerminationReason
 from api.services.question_selection import SECTION_LABELS, SECTION_ORDER, InsufficientQuestionsError
 from api.services.tokens import issue_attempt_token
@@ -198,6 +199,20 @@ class ExamIdentityCaptureView(APIView):
         if not id_photo or not face_photo:
             return Response({'detail': 'Both an ID photo and a face photo are required.'},
                              status=status.HTTP_400_BAD_REQUEST)
+
+        # The declared content type on a multipart file is whatever the CLIENT asserts, not a
+        # property of the bytes. Unvalidated, it was stored verbatim on the blob and later
+        # rendered by a TA's browser (Candidate Details opens the evidence URL directly,
+        # target="_blank", no `download` attribute) - so a malicious upload declaring
+        # image/svg+xml or text/html with embedded script would have executed in the storage
+        # origin the moment staff opened it as "evidence". This endpoint is unauthenticated by
+        # necessity (a candidate hasn't started their exam yet), so the only gate is a valid
+        # invitation token - not a meaningful barrier to a candidate targeting their own link.
+        try:
+            validate_identity_photo(id_photo, 'ID photo')
+            validate_identity_photo(face_photo, 'Face photo')
+        except InvalidImageUpload as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             attempt, _created = exam_session.start_or_resume_attempt(
