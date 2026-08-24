@@ -47,6 +47,12 @@ const ExamInstructions = lazy(() => import('../pages/exam/ExamInstructions'));
 const ExamIdVerify = lazy(() => import('../pages/exam/ExamIdVerify'));
 const ExamAttemptPage = lazy(() => import('../pages/exam/ExamAttemptPage'));
 
+// --- footer pages ---
+// No auth requirement: the footer that links here renders on every screen, staff console and
+// candidate exam portal alike, logged in or not.
+const HelpSupport = lazy(() => import('../pages/support/HelpSupport'));
+const PrivacyPolicy = lazy(() => import('../pages/legal/PrivacyPolicy'));
+
 // Wraps the candidate exam-taking routes in their own local session context - deliberately
 // NOT ProtectedRoute/ProtectedLayout, which assume a logged-in staff user.
 function ExamPortalLayout() {
@@ -96,6 +102,8 @@ export default function AppRouter() {
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/verify-otp" element={<OtpVerification />} />
         <Route path="/logged-out" element={<LoggedOut />} />
+        <Route path="/help" element={<HelpSupport />} />
+        <Route path="/privacy" element={<PrivacyPolicy />} />
 
         <Route element={<ExamPortalLayout />}>
           <Route path="/t/:token" element={<ExamVerify />} />
