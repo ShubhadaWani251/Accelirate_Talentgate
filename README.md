@@ -9,9 +9,12 @@ manage a shared question bank, and review results.
 
 The TA/Admin portal (auth, batches, candidate upload & validation, question bank, user
 management, dashboards, email notifications) is built and in active use against a shared Azure
-Postgres instance. **The candidate-facing assessment flow does not exist yet** — invitation
-emails currently link to a `/t/<token>` route that has no frontend page and no backend exam
-endpoints behind it. That's the next major piece of work, not a bug in what's described below.
+Postgres instance.
+
+The candidate-facing assessment flow behind the `/t/<token>` invitation link is now built too:
+email verification, identity capture, webcam proctoring with violation handling, the timed
+attempt itself, scoring, and the result and termination screens. The endpoints are in
+`Backend/api/views/exam.py` and the screens in `Frontend/src/pages/exam/`.
 
 ## Architecture
 
@@ -230,6 +233,32 @@ migrations against the wrong target. Point `DB_*` in `Backend/.env` at the real 
 For a host without Docker, `Backend/Dockerfile` and `Backend/docker-entrypoint.sh` document the
 same sequence: `migrate`, `collectstatic`, then `gunicorn --config gunicorn.conf.py
 config.wsgi:application`.
+
+### Azure App Service (staging)
+
+`azure-pipelines.yml` builds and deploys to a single App Service in `rg-talentgate-staging`:
+
+| Resource | Name |
+|---|---|
+| App Service (Django + SPA) | `app-talentgate-staging` |
+| App Service plan | `asp-talentgate-staging` (Linux B1) |
+| PostgreSQL flexible server | `recruitmentapptitudeteststaging` (database `QA_TalentDB`) |
+| Storage (proctoring evidence) | `sttalentgatestaging`, container `proctoring-evidence` |
+
+**One App Service serves both the API and the frontend**, for the same-origin reason above.
+There is no Static Web App: routing the API through one would have meant the Standard plan and,
+worse, a hard 45-second ceiling on every `/api` request — which `gunicorn.conf.py` deliberately
+sets to 120s because a few thousand candidate rows arrive in a single upload. Instead the pipeline
+copies the Vite build into `Backend/frontend/` (`FRONTEND_DIST`), where WhiteNoise serves the
+hashed bundles and the catch-all in `config/urls.py` returns `index.html` for client-side routes.
+`config/spa.py` has the details.
+
+Because App Service runs the app from a zip on its own Python image, it never invokes
+`docker-entrypoint.sh`. `Backend/startup.sh` is the equivalent and is set as the startup command;
+**it is the only thing that applies migrations on this host**, so keep the two files in step.
+
+The pipeline needs one thing that is not in source control: an ARM service connection named
+`TalentGate-Staging` (the `azureServiceConnection` variable), scoped to `rg-talentgate-staging`.
 
 ### Scheduled jobs
 

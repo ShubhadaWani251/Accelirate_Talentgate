@@ -276,9 +276,23 @@ class TestAdminIsNotReachable:
         """It registered every model with no write protection, against a different user table
         than the app authenticates with - an editable AuditLog and a readable
         Question.correct_option, on a login path with no rate limiting or lockout.
+
+        This deliberately does not assert a 404 any more. The SPA catch-all in config/urls.py owns
+        every non-/api path, and the React app has its own /admin/* screens (User Management,
+        Question Bank, Audit Logs), so what /admin/ returns now depends on whether a frontend
+        build is present - which differs between a developer's checkout and the backend CI job.
+        The property worth pinning is that nothing under /admin/ is Django's admin, whichever of
+        those two it is.
         """
-        assert api_client.get('/admin/').status_code == 404
-        assert api_client.get('/admin/login/').status_code == 404
+        from django.urls import NoReverseMatch, reverse
+
+        with pytest.raises(NoReverseMatch):
+            reverse('admin:index')
+
+        for path in ('/admin/', '/admin/login/'):
+            body = api_client.get(path).content
+            assert b'Django administration' not in body
+            assert b'id="login-form"' not in body
 
     def test_the_admin_app_is_not_installed(self):
         from django.conf import settings

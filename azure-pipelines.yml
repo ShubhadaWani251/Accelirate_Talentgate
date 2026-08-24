@@ -1,0 +1,172 @@
+# CI/CD for TalentGate.
+#
+# The app deploys as ONE App Service: gunicorn serves the Django API and, via WhiteNoise, the
+# built React bundle from the same origin. That is not a packaging convenience - the refresh
+# token rides in a SameSite cookie the browser withholds across sites, so splitting the frontend
+# onto its own hostname logs users out mid-session. See config/spa.py and Frontend/nginx.conf.
+# The practical consequence for this file: the frontend build is copied *into* the backend
+# artifact rather than published anywhere separately.
+
+trigger:
+  branches:
+    include:
+      - main
+      - feature/*
+
+pr:
+  branches:
+    include:
+      - main
+
+variables:
+  # Matches Backend/Dockerfile and the App Service runtime, so a dependency that resolves
+  # differently across minor versions fails in CI rather than only after deployment.
+  pythonVersion: '3.13'
+  nodeVersion: '24.x'
+  azureServiceConnection: 'TalentGate-Staging'
+  resourceGroupName: 'rg-talentgate-staging'
+  webAppName: 'app-talentgate-staging'
+
+stages:
+  - stage: CI
+    displayName: Build and test
+    jobs:
+      - job: BackendTests
+        displayName: Backend tests
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - task: UsePythonVersion@0
+            displayName: Use Python $(pythonVersion)
+            inputs:
+              versionSpec: '$(pythonVersion)'
+
+          - script: |
+              set -e
+              python -m pip install --upgrade pip
+              pip install -r requirements.txt
+            workingDirectory: Backend
+            displayName: Install backend dependencies
+
+          - script: |
+              set -e
+              python -m pytest -q --junitxml=$(Build.ArtifactStagingDirectory)/pytest.xml
+            workingDirectory: Backend
+            displayName: Run pytest
+            # pytest.ini points at config.settings_test, which uses in-memory SQLite. No database
+            # service or secret is needed here, and none should be added - the suite is designed
+            # never to touch the shared Postgres.
+
+          - task: PublishTestResults@2
+            displayName: Publish test results
+            condition: succeededOrFailed()
+            inputs:
+              testResultsFormat: JUnit
+              testResultsFiles: '$(Build.ArtifactStagingDirectory)/pytest.xml'
+              testRunTitle: 'Backend pytest'
+
+      - job: Package
+        displayName: Build frontend and package app
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - task: NodeTool@0
+            displayName: Use Node $(nodeVersion)
+            inputs:
+              versionSpec: '$(nodeVersion)'
+
+          - script: npm ci
+            workingDirectory: Frontend
+            displayName: Install frontend dependencies
+
+          - script: npm run lint
+            workingDirectory: Frontend
+            displayName: Lint frontend
+            # Report-only for now. eslint-plugin-react-hooks 7.x adds the React Compiler rules
+            # (set-state-in-effect, refs), which flag 27 pre-existing instances of the ordinary
+            # fetch-on-mount pattern across the pages. None of them is a live defect, so failing
+            # the build on them would block every deployment on unrelated refactoring work.
+            # Drop this flag once those are cleaned up, so new violations can't creep in.
+            continueOnError: true
+
+          - script: npm run build
+            workingDirectory: Frontend
+            displayName: Build frontend
+            env:
+              # Relative, not absolute: the API is same-origin now, so the bundle must not bake in
+              # a hostname. This is also what Frontend/Dockerfile passes for the nginx stack.
+              VITE_API_BASE_URL: /api
+
+          - script: |
+              set -e
+              STAGE="$(Build.ArtifactStagingDirectory)/app"
+              mkdir -p "$STAGE"
+
+              # Everything the app needs at runtime, and nothing that is either local state or
+              # rebuilt on the server. requirements.txt has to survive: Oryx reads it on the
+              # App Service side to install dependencies during deployment.
+              rsync -a \
+                --exclude 'venv/' \
+                --exclude '__pycache__/' \
+                --exclude '*.pyc' \
+                --exclude '.env' \
+                --exclude 'media/' \
+                --exclude 'logs/' \
+                --exclude 'staticfiles/' \
+                Backend/ "$STAGE/"
+
+              # The React bundle lands where FRONTEND_DIST expects it (Backend/frontend/), which
+              # is how WhiteNoise and config/spa.py find index.html and the hashed assets.
+              mkdir -p "$STAGE/frontend"
+              cp -r Frontend/dist/. "$STAGE/frontend/"
+
+              test -f "$STAGE/manage.py"
+              test -f "$STAGE/frontend/index.html"
+            displayName: Assemble single-origin deployment package
+
+          - task: ArchiveFiles@2
+            displayName: Archive package
+            inputs:
+              rootFolderOrFile: '$(Build.ArtifactStagingDirectory)/app'
+              includeRootFolder: false
+              archiveType: zip
+              archiveFile: '$(Build.ArtifactStagingDirectory)/talentgate.zip'
+              replaceExistingArchive: true
+
+          - task: PublishPipelineArtifact@1
+            displayName: Publish package artifact
+            inputs:
+              targetPath: '$(Build.ArtifactStagingDirectory)/talentgate.zip'
+              artifact: talentgate
+
+  - stage: DeployStaging
+    displayName: Deploy to staging
+    dependsOn: CI
+    # Only main deploys. Feature branches still get the full build and test run above, which is
+    # the point of triggering on them.
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - deployment: DeployWebApp
+        displayName: Deploy App Service
+        pool:
+          vmImage: ubuntu-latest
+        environment: talentgate-staging
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: talentgate
+
+                - task: AzureWebApp@1
+                  displayName: Deploy to $(webAppName)
+                  inputs:
+                    azureSubscription: '$(azureServiceConnection)'
+                    appType: webAppLinux
+                    appName: '$(webAppName)'
+                    resourceGroupName: '$(resourceGroupName)'
+                    package: '$(Pipeline.Workspace)/talentgate/talentgate.zip'
+                    # Runs migrations and collectstatic before handing off to gunicorn. App Service
+                    # never runs docker-entrypoint.sh on a code deployment, so this script is the
+                    # only thing that applies migrations - see Backend/startup.sh.
+                    startUpCommand: 'sh startup.sh'

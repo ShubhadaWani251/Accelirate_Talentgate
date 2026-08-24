@@ -16,7 +16,9 @@ Including another URLconf
 """
 from django.conf import settings
 from django.conf.urls.static import static
-from django.urls import path, include
+from django.urls import path, include, re_path
+
+from . import spa
 
 # The Django admin is deliberately not routed here, and django.contrib.admin is not installed
 # (see INSTALLED_APPS in settings.py for the full reasoning). Short version: it registered every
@@ -32,3 +34,10 @@ if settings.DEBUG:
     # Serves the local-disk evidence fallback (api/services/blob_storage.py) when no Azure
     # connection string is configured - never active in production.
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+
+# SPA catch-all, last so it can never shadow the patterns above. Every client-side route -
+# including the candidate assessment links at /t/<token> - has to return index.html rather than
+# a 404, because those paths exist only in the React router. The negative lookahead keeps
+# unmatched /api/ paths returning a real 404 instead of quietly handing back the HTML shell,
+# which would otherwise turn every API typo into a confusing parse error on the client.
+urlpatterns += [re_path(r'^(?!api/).*$', spa.index, name='spa')]
