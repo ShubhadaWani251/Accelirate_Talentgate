@@ -102,10 +102,6 @@ export default function CandidateFilters({ filters, onChange, batches, onApply, 
         <button className="btn" onClick={onClear}>Clear Filters</button>
         <button className="btn primary" onClick={onApply}>Apply Filters</button>
       </div>
-      <div className="annot">
-        Combine a score band with the row checkboxes below to shortlist candidates (e.g. borderline
-        or on-hold) and notify just them.
-      </div>
     </div>
   );
 }
