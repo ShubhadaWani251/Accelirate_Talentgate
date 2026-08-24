@@ -38,6 +38,7 @@ const QuestionUpload = lazy(() => import('../pages/questions/QuestionUpload'));
 const UserManagement = lazy(() => import('../pages/users/UserManagement'));
 const EditUser = lazy(() => import('../pages/users/EditUser'));
 const AuditLogs = lazy(() => import('../pages/audit/AuditLogs'));
+const ConfigureDefaultBatch = lazy(() => import('../pages/settings/ConfigureDefaultBatch'));
 
 // --- candidate exam portal ---
 const ExamVerify = lazy(() => import('../pages/exam/ExamVerify'));
@@ -167,6 +168,13 @@ export default function AppRouter() {
           <Route
             path="/admin/audit-logs"
             element={<ProtectedRoute allowedRoles={['admin']}><AuditLogs /></ProtectedRoute>}
+          />
+          {/* Admin-only for the same reason as the audit log: this sets the org-wide default
+              every NEW batch is created with, a bigger blast radius than a TA's own batches.
+              Enforced server-side too (IsAdmin on GET/PUT /api/batches/defaults/). */}
+          <Route
+            path="/admin/default-batch-config"
+            element={<ProtectedRoute allowedRoles={['admin']}><ConfigureDefaultBatch /></ProtectedRoute>}
           />
         </Route>
 

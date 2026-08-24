@@ -39,7 +39,11 @@ export default function UploadStep({ batch, onUploaded }) {
         setHeaderWarning(result.missing_columns);
         return;
       }
-      onUploaded();
+      // Passed explicitly - BatchWizard's onUploaded takes the batch as a parameter rather
+      // than reading its own state, which can otherwise be stale for a batch just created a
+      // moment ago (see BatchSetupStep for the failure this caused there). `batch` here is a
+      // plain prop, always correct, but the signature has to match either way.
+      onUploaded(batch);
     } catch (err) {
       toast.error(extractErrorMessage(err));
     } finally {
@@ -67,7 +71,7 @@ export default function UploadStep({ batch, onUploaded }) {
           >
             ⬇ Download Template
           </button>
-          <button className="btn primary" onClick={onUploaded}>
+          <button className="btn primary" onClick={() => onUploaded(batch)}>
             Continue to Validation
           </button>
         </div>

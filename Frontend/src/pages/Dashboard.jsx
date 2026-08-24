@@ -110,6 +110,15 @@ export default function Dashboard() {
           View All Candidates
         </Link>
         <button className="btn" onClick={() => setExportOpen(true)}>⬇ Export All Candidates (Excel)</button>
+        {/* Admin-only: this sets the exam schedule/question counts/cutoffs every NEW batch is
+            created with (services/batch_defaults.py on the backend). Deliberately not reachable
+            by a TA, and no longer buried inside the upload wizard - a change here has a bigger
+            blast radius (every future batch, org-wide) than any one TA's own work. */}
+        {isAdmin && (
+          <Link to="/admin/default-batch-config" className="btn">
+            ⚙ Configure Default Batch
+          </Link>
+        )}
       </div>
 
       {exportOpen && <ExportModal onClose={() => setExportOpen(false)} />}

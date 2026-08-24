@@ -4,7 +4,7 @@ import { yupResolver } from '@hookform/resolvers/yup';
 import * as yup from 'yup';
 import toast from 'react-hot-toast';
 import * as batchApi from '../../api/batchApi';
-import { fromDatetimeLocalValue, toDatetimeLocalValue } from '../../utils/datetime';
+import { toDatetimeLocalValue } from '../../utils/datetime';
 import { extractErrorMessage } from '../../utils/passwordSchema';
 import { ButtonSpinner } from '../../components/loading/Spinner';
 
@@ -15,125 +15,62 @@ const SECTIONS = [
   { key: 'programming', label: 'Programming' },
 ];
 
+// Only the cutoffs are ever actually submitted from this form (see onSubmit) - everything else
+// here is read-only display. No validation is declared for the display-only fields; the cutoff
+// bounds still are, since those are real input.
 const schema = yup.object({
-  batch_name: yup.string().required('Batch name is required'),
-  college_name: yup.string().required('College name is required'),
-  link_valid_from: yup.string().required('Required'),
-  link_valid_until: yup.string().required('Required')
-    .test('after-from', 'Must be after Link Valid From', function (value) {
-      return !value || !this.parent.link_valid_from || value > this.parent.link_valid_from;
-    })
-    // Mirrors the same rule in BatchSerializer.validate, which is the one that actually
-    // enforces it. Repeated here only so the TA sees it on the field while filling the form
-    // instead of as a toast after submitting - the server stays authoritative.
-    .test('covers-exam', function (value) {
-      const { link_valid_from: from, exam_duration_minutes: duration } = this.parent;
-      if (!value || !from || !duration) return true;
-      const windowMinutes = (new Date(value) - new Date(from)) / 60000;
-      if (!Number.isFinite(windowMinutes) || windowMinutes >= duration) return true;
-      return this.createError({
-        message: `Only ${Math.round(windowMinutes)} minutes long, but the exam runs for `
-          + `${duration}. A candidate reconnecting mid-exam would be locked out - make this at `
-          + `least ${duration} minutes after the start.`,
-      });
-    }),
-  exam_duration_minutes: yup.number().typeError('Required').min(1).required(),
-  logical_questions: yup.number().typeError('Required').min(1).required(),
-  quantitative_questions: yup.number().typeError('Required').min(1).required(),
-  verbal_questions: yup.number().typeError('Required').min(1).required(),
-  programming_questions: yup.number().typeError('Required').min(1).required(),
   logical_cutoff: yup.number().typeError('Required').min(0).max(100).required(),
   quantitative_cutoff: yup.number().typeError('Required').min(0).max(100).required(),
   verbal_cutoff: yup.number().typeError('Required').min(0).max(100).required(),
   programming_cutoff: yup.number().typeError('Required').min(0).max(100).required(),
 });
 
-// `readOnly` means "this batch is past Draft": the dates, question counts and duration are
-// frozen because candidates may already have sat the exam against them, but the section cutoffs
-// stay editable so a TA can still revise them after seeing how the cohort scored. A deactivated
-// batch is frozen outright - `locked` covers that case.
+// Read-only display of one batch's configuration, from its own Details page - the exam
+// schedule, question counts and cutoffs it was created with (services/batch_defaults.py sets
+// these org-wide; this component only ever shows what a specific batch already has).
+//
+// The one thing still editable per-batch is the section cutoffs, and only once the batch has
+// left Draft: a TA may need to revise them after seeing how a cohort actually scored. That edit
+// is scoped to this one batch's own row (a PATCH to /api/batches/<id>/) and never touches the
+// org-wide defaults - editing one batch's cutoff must never reconfigure every other batch.
+//
+// `locked` (a deactivated batch) freezes even the cutoffs; short of that, `readOnly` covers
+// everything else. Both are always true from this component's one caller (BatchDetail.jsx) -
+// kept as separate props rather than collapsed into one, because they answer different
+// questions ("has this batch left Draft" vs "is it deactivated") and BatchDetail computes them
+// separately.
 export default function ConfigureBatchStep({ onCreated, existingBatch, readOnly = false, locked = false }) {
   const cutoffsOnly = readOnly && !locked;
   const [submitting, setSubmitting] = useState(false);
-  const [savingDefaults, setSavingDefaults] = useState(false);
   const {
     register,
     handleSubmit,
     reset,
-    getValues,
     formState: { errors },
   } = useForm({ resolver: yupResolver(schema) });
 
   useEffect(() => {
-    if (existingBatch) {
-      reset({
-        ...existingBatch,
-        link_valid_from: toDatetimeLocalValue(existingBatch.link_valid_from),
-        link_valid_until: toDatetimeLocalValue(existingBatch.link_valid_until),
-      });
-      return;
-    }
-    batchApi.getBatchDefaults()
-      .then((defaults) => {
-        reset({
-          batch_name: '',
-          college_name: '',
-          link_valid_from: '',
-          link_valid_until: '',
-          ...defaults,
-        });
-      })
-      .catch((err) => toast.error(extractErrorMessage(err)));
+    reset({
+      ...existingBatch,
+      link_valid_from: toDatetimeLocalValue(existingBatch.link_valid_from),
+      link_valid_until: toDatetimeLocalValue(existingBatch.link_valid_until),
+    });
   }, [existingBatch, reset]);
 
   async function onSubmit(values) {
     setSubmitting(true);
     try {
-      // Once a batch is finalized only the cutoffs are still editable, so send just those -
-      // the backend rejects a PATCH carrying any of the frozen fields.
-      const payload = cutoffsOnly
-        ? {
-            logical_cutoff: values.logical_cutoff,
-            quantitative_cutoff: values.quantitative_cutoff,
-            verbal_cutoff: values.verbal_cutoff,
-            programming_cutoff: values.programming_cutoff,
-          }
-        : {
-            ...values,
-            link_valid_from: fromDatetimeLocalValue(values.link_valid_from),
-            link_valid_until: fromDatetimeLocalValue(values.link_valid_until),
-          };
-      const batch = existingBatch
-        ? await batchApi.updateBatch(existingBatch.batch_id, payload)
-        : await batchApi.createBatch(payload);
-      onCreated(batch);
-    } catch (err) {
-      toast.error(extractErrorMessage(err, ['batch_name', 'college_name', 'link_valid_until']));
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function handleSaveDefaults() {
-    setSavingDefaults(true);
-    try {
-      const values = getValues();
-      await batchApi.saveBatchDefaults({
-        exam_duration_minutes: values.exam_duration_minutes,
-        logical_questions: values.logical_questions,
-        quantitative_questions: values.quantitative_questions,
-        verbal_questions: values.verbal_questions,
-        programming_questions: values.programming_questions,
+      const batch = await batchApi.updateBatch(existingBatch.batch_id, {
         logical_cutoff: values.logical_cutoff,
         quantitative_cutoff: values.quantitative_cutoff,
         verbal_cutoff: values.verbal_cutoff,
         programming_cutoff: values.programming_cutoff,
       });
-      toast.success('Saved as default for new batches (this batch is unaffected).');
+      onCreated(batch);
     } catch (err) {
       toast.error(extractErrorMessage(err));
     } finally {
-      setSavingDefaults(false);
+      setSubmitting(false);
     }
   }
 
@@ -149,59 +86,45 @@ export default function ConfigureBatchStep({ onCreated, existingBatch, readOnly 
         </div>
       )}
       <form onSubmit={handleSubmit(onSubmit)} noValidate>
-        <fieldset disabled={readOnly} style={{ border: 'none', padding: 0, margin: 0 }}>
+        <fieldset disabled style={{ border: 'none', padding: 0, margin: 0 }}>
           <div className="grid-2">
             <div className="field">
               <label htmlFor="batch_name">Batch Name</label>
-              <input id="batch_name" className={errors.batch_name ? 'has-error' : ''} {...register('batch_name')} />
-              {errors.batch_name && <div className="field-error">{errors.batch_name.message}</div>}
+              <input id="batch_name" {...register('batch_name')} />
             </div>
             <div className="field">
               <label htmlFor="college_name">College Name</label>
-              <input id="college_name" className={errors.college_name ? 'has-error' : ''} {...register('college_name')} />
-              {errors.college_name && <div className="field-error">{errors.college_name.message}</div>}
+              <input id="college_name" {...register('college_name')} />
             </div>
           </div>
 
           <div className="grid-2">
             <div className="field">
               <label htmlFor="link_valid_from">Link Valid From</label>
-              <input id="link_valid_from" type="datetime-local"
-                className={errors.link_valid_from ? 'has-error' : ''} {...register('link_valid_from')} />
-              {errors.link_valid_from && <div className="field-error">{errors.link_valid_from.message}</div>}
+              <input id="link_valid_from" type="datetime-local" {...register('link_valid_from')} />
             </div>
             <div className="field">
               <label htmlFor="link_valid_until">Link Valid Until</label>
-              <input id="link_valid_until" type="datetime-local"
-                className={errors.link_valid_until ? 'has-error' : ''} {...register('link_valid_until')} />
-              {errors.link_valid_until && <div className="field-error">{errors.link_valid_until.message}</div>}
+              <input id="link_valid_until" type="datetime-local" {...register('link_valid_until')} />
             </div>
           </div>
 
           <div className="field" style={{ maxWidth: 220 }}>
             <label htmlFor="exam_duration_minutes">Exam Duration (minutes)</label>
-            <input id="exam_duration_minutes" type="number"
-              className={errors.exam_duration_minutes ? 'has-error' : ''} {...register('exam_duration_minutes')} />
-            {errors.exam_duration_minutes && <div className="field-error">{errors.exam_duration_minutes.message}</div>}
+            <input id="exam_duration_minutes" type="number" {...register('exam_duration_minutes')} />
           </div>
 
           <div className="grid-4">
             {SECTIONS.map((s) => (
               <div key={s.key} className="field">
                 <label htmlFor={`${s.key}_questions`}>{s.label} Questions</label>
-                <input id={`${s.key}_questions`} type="number"
-                  className={errors[`${s.key}_questions`] ? 'has-error' : ''}
-                  {...register(`${s.key}_questions`)} />
-                {errors[`${s.key}_questions`] && (
-                  <div className="field-error">{errors[`${s.key}_questions`].message}</div>
-                )}
+                <input id={`${s.key}_questions`} type="number" {...register(`${s.key}_questions`)} />
               </div>
             ))}
           </div>
         </fieldset>
 
-        {/* Deliberately outside the fieldset above so cutoffs stay editable on a finalized
-            batch - see the component's note. A deactivated batch disables them too. */}
+        {/* The one live sub-form: disabled only when the whole batch is locked (deactivated). */}
         <fieldset disabled={locked} style={{ border: 'none', padding: 0, margin: 0 }}>
           <div className="grid-4">
             {SECTIONS.map((s) => (
@@ -216,18 +139,15 @@ export default function ConfigureBatchStep({ onCreated, existingBatch, readOnly 
           </div>
         </fieldset>
 
-        <div className="btn-row" style={{ display: 'flex', gap: 10, marginTop: 8 }}>
-          <button type="button" className="btn" onClick={handleSaveDefaults} disabled={savingDefaults}>
-            <ButtonSpinner loading={savingDefaults}>Save as Default for New Batches</ButtonSpinner>
-          </button>
-          {!locked && (
+        {!locked && (
+          <div className="btn-row" style={{ display: 'flex', gap: 10, marginTop: 8 }}>
             <button type="submit" className="btn primary" disabled={submitting}>
-              {submitting ? 'Saving…'
-                : cutoffsOnly ? 'Save Cutoffs'
-                : existingBatch ? 'Save Batch Configuration' : 'Continue to Upload →'}
+              <ButtonSpinner loading={submitting}>
+                {cutoffsOnly ? 'Save Cutoffs' : 'Save Batch Configuration'}
+              </ButtonSpinner>
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </form>
     </div>
   );

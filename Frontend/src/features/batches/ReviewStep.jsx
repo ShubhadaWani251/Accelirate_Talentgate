@@ -107,8 +107,12 @@ export default function ReviewStep({ batch, onFinalized }) {
       link_valid_from: batch.link_valid_from,
       link_valid_until: batch.link_valid_until,
       exam_duration_minutes: batch.exam_duration_minutes,
-      total_questions: batch.logical_questions + batch.quantitative_questions
-        + batch.verbal_questions + batch.programming_questions,
+      // Per-section, not just the sum - InviteConfirmationStep displays these in the same
+      // per-section grid as the admin's Configure Default Batch screen, not a single total.
+      logical_questions: batch.logical_questions,
+      quantitative_questions: batch.quantitative_questions,
+      verbal_questions: batch.verbal_questions,
+      programming_questions: batch.programming_questions,
       logical_cutoff: batch.logical_cutoff,
       quantitative_cutoff: batch.quantitative_cutoff,
       verbal_cutoff: batch.verbal_cutoff,
@@ -125,13 +129,7 @@ export default function ReviewStep({ batch, onFinalized }) {
 
   return (
     <div className="card">
-      <div className="box-label">Upload Review — duplicate check &amp; invite selection</div>
-      <div className="annot">
-        Every row here has already passed validation. <b>Status</b> is the duplicate match against
-        historical records; <b>History</b> opens that candidate&apos;s past attempt, or shows that
-        none exists. Check the rows you want to act on, then either remove them or continue to
-        invite them — anything left unchecked stays on the batch without being emailed.
-      </div>
+      <div className="box-label">Review and Confirmation — duplicate check &amp; invite selection</div>
 
       <div className="btn-row" style={{ display: 'flex', gap: 10, alignItems: 'center',
                                        flexWrap: 'wrap', marginBottom: 12 }}>

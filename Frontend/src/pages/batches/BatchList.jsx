@@ -149,7 +149,9 @@ export default function BatchList() {
                         so nothing is shown on a finalized batch. */}
                     <DraftExpiryNote batch={b} />
                   </td>
-                  <td>{b.college_name}</td>
+                  {/* Optional at the batch level now - a mixed-college drive is normal, since
+                      each candidate already carries their own college_name from the upload. */}
+                  <td>{b.college_name || '—'}</td>
                   <td>{b.primary_ta_user_name}</td>
                   <td>{b.total_candidates}</td>
                   <td><span className={`pill ${STATUS_PILL[b.status] || 'gray'}`}>{b.status_display}</span></td>

@@ -3,8 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import * as batchApi from '../../api/batchApi';
 import { Skeleton, SkeletonCard, SkeletonPage } from '../../components/loading/Skeleton';
-import ConfigureBatchStep from './ConfigureBatchStep';
-import UploadStep from './UploadStep';
+import BatchSetupStep from './BatchSetupStep';
 import FixErrorsStep from './FixErrorsStep';
 import ReviewStep from './ReviewStep';
 import InviteConfirmationStep from './InviteConfirmationStep';
@@ -14,14 +13,18 @@ import {
 } from '../../utils/draftExpiry';
 import { extractErrorMessage } from '../../utils/passwordSchema';
 
-// Validation and review are separate steps on purpose: step 3 lists only the rows that failed
-// and is finished when that list is empty, which is what lets step 4 drop its Validation column.
+// Validation and review are separate steps on purpose: step 2 lists only the rows that failed
+// and is finished when that list is empty, which is what lets step 3 drop its Validation column.
+//
+// Configuring the exam (schedule/question counts/cutoffs) is not a step here at all any more -
+// it's the admin-only org-wide default (services/batch_defaults.py), snapshotted onto the batch
+// the moment it's created. Step 1 only identifies the batch and takes the candidate list; step 4
+// is where the assessment link's window gets set, immediately before the invite goes out.
 const STEPS = [
-  { key: 'configure', label: '1. Configure Batch' },
-  { key: 'upload', label: '2. Upload Excel' },
-  { key: 'validate', label: '3. Validate Candidates' },
-  { key: 'review', label: '4. Upload Review' },
-  { key: 'invite', label: '5. Send Invite' },
+  { key: 'setup', label: '1. Batch Details' },
+  { key: 'validate', label: '2. Validate Candidates' },
+  { key: 'review', label: '3. Review and Confirmation' },
+  { key: 'invite', label: '4. Review & Send Invite' },
 ];
 
 // Serves two routes:
@@ -34,7 +37,7 @@ const STEPS = [
 export default function BatchWizard() {
   const navigate = useNavigate();
   const { id } = useParams();
-  const [stepKey, setStepKey] = useState(id ? null : 'configure');
+  const [stepKey, setStepKey] = useState(id ? null : 'setup');
   const [batch, setBatch] = useState(null);
   const [finalizeSummary, setFinalizeSummary] = useState(null);
 
@@ -54,7 +57,7 @@ export default function BatchWizard() {
         setBatch(existing);
         // Resume at the first step that still has work: if candidates were uploaded before
         // this draft was abandoned, they're waiting to be validated.
-        setStepKey(existing.total_candidates > 0 ? 'validate' : 'upload');
+        setStepKey(existing.total_candidates > 0 ? 'validate' : 'setup');
       } catch (err) {
         if (!cancelled) {
           // A draft that has passed its 24 hours is deleted by the backend and then 404s, so
@@ -117,43 +120,46 @@ export default function BatchWizard() {
         </div>
       )}
       <div className="wizard-steps">
+        {/* Clickable for the current step and any already-completed one - each is exactly
+            equivalent to the "← Back to ..." button already on the step it lands on, just
+            reachable in one click from anywhere instead of only from the step immediately
+            after it. A step not yet reached stays inert: jumping to "4. Review & Send Invite"
+            before Review has produced a finalizeSummary would land on a blank pane, since that
+            step's render is gated on having one (see stepKey === 'invite' below). */}
         {STEPS.map((s, i) => (
-          <span key={s.key} className={`wstep ${i === stepIndex ? 'active' : i < stepIndex ? 'done' : ''}`}>
+          <button
+            key={s.key}
+            type="button"
+            className={`wstep ${i === stepIndex ? 'active' : i < stepIndex ? 'done' : ''}`}
+            disabled={i > stepIndex}
+            onClick={() => setStepKey(s.key)}
+          >
             {s.label}
-          </span>
+          </button>
         ))}
       </div>
 
-      {stepKey === 'configure' && (
-        <ConfigureBatchStep
-          onCreated={(createdBatch) => {
-            setBatch(createdBatch);
-            setStepKey('upload');
-          }}
-        />
-      )}
-
-      {/* A resumed draft can still have its configuration corrected - it's a draft, nothing is
-          committed. A brand-new one has just come through this step, so it isn't shown twice. */}
-      {id && batch && stepKey !== 'invite' && (
-        <ConfigureBatchStep existingBatch={batch} onCreated={setBatch} />
-      )}
-
-      {stepKey === 'upload' && batch && (
+      {stepKey === 'setup' && (
         <>
-          <UploadStep
-            batch={batch}
-            onUploaded={async () => {
+          <BatchSetupStep
+            existingBatch={batch}
+            onCreated={setBatch}
+            // Takes the batch as a parameter rather than reading this component's own `batch`
+            // state - that state may not have caught up yet to a batch BatchSetupStep just
+            // created in the same call, since setBatch (via onCreated above) only takes effect
+            // on BatchWizard's NEXT render, and this closure is bound at the render BEFORE
+            // that. Reading `batch` here for a batch created a moment ago could still see null.
+            onUploaded={async (uploadedBatch) => {
               // Re-read the batch so the review step sees the new candidate count.
               try {
-                setBatch(await batchApi.getBatch(batch.batch_id));
+                setBatch(await batchApi.getBatch(uploadedBatch.batch_id));
               } catch { /* the validate step refetches its own rows regardless */ }
               setStepKey('validate');
             }}
           />
           {/* A resumed draft may already hold rows from an earlier upload - always offer the
               way forward rather than making another upload the only exit from this step. */}
-          {id && (
+          {id && batch && (
             <div className="btn-row" style={{ marginTop: 12 }}>
               <button className="btn" onClick={() => setStepKey('validate')}>
                 Skip upload — validate the candidates already on this batch →
@@ -167,7 +173,7 @@ export default function BatchWizard() {
         <>
           <FixErrorsStep batch={batch} onDone={() => setStepKey('review')} />
           <div className="btn-row" style={{ marginTop: 12 }}>
-            <button className="btn" onClick={() => setStepKey('upload')}>
+            <button className="btn" onClick={() => setStepKey('setup')}>
               ← Upload another file
             </button>
           </div>
