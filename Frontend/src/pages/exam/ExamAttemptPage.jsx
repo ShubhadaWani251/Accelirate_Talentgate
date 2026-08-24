@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import * as examApi from '../../api/examApi';
-import { useExamSession } from '../../features/exam/ExamSessionProvider';
+import { useExamSession } from '../../features/exam/examSessionContext';
 import useExamTimer from '../../features/exam/timer/useExamTimer';
 import useTabSwitchGuard from '../../features/exam/proctoring/useTabSwitchGuard';
 import useFullscreenGuard from '../../features/exam/proctoring/useFullscreenGuard';

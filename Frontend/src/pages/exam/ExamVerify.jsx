@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import * as examApi from '../../api/examApi';
-import { useExamSession } from '../../features/exam/ExamSessionProvider';
+import { useExamSession } from '../../features/exam/examSessionContext';
 import BrandHeader from '../../components/layout/BrandHeader';
 import BrandFooter from '../../components/layout/BrandFooter';
 

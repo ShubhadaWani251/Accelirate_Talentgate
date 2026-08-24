@@ -82,12 +82,9 @@ stages:
           - script: npm run lint
             workingDirectory: Frontend
             displayName: Lint frontend
-            # Report-only for now. eslint-plugin-react-hooks 7.x adds the React Compiler rules
-            # (set-state-in-effect, refs), which flag 27 pre-existing instances of the ordinary
-            # fetch-on-mount pattern across the pages. None of them is a live defect, so failing
-            # the build on them would block every deployment on unrelated refactoring work.
-            # Drop this flag once those are cleaned up, so new violations can't creep in.
-            continueOnError: true
+            # Blocking, so a new violation can't reach main. The two React Compiler rules that
+            # the existing code does not satisfy are switched off in Frontend/eslint.config.js
+            # with the reasoning, rather than the whole run being made advisory here.
 
           - script: npm run build
             workingDirectory: Frontend

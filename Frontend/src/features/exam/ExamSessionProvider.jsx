@@ -1,10 +1,6 @@
-import { createContext, useCallback, useContext, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { setAttemptToken as setAxiosAttemptToken } from '../../api/examAxiosClient';
-
-// Local Context, deliberately NOT the app's Redux store (app/store.js) - this flow is
-// short-lived and single-session and never shares state with the staff app shell a candidate
-// never sees.
-const ExamSessionContext = createContext(null);
+import { ExamSessionContext } from './examSessionContext';
 
 function storageKey(linkToken) {
   return `examAttemptToken:${linkToken}`;
@@ -43,10 +39,4 @@ export function ExamSessionProvider({ children }) {
   };
 
   return <ExamSessionContext.Provider value={value}>{children}</ExamSessionContext.Provider>;
-}
-
-export function useExamSession() {
-  const ctx = useContext(ExamSessionContext);
-  if (!ctx) throw new Error('useExamSession must be used within ExamSessionProvider');
-  return ctx;
 }
