@@ -260,6 +260,42 @@ Because App Service runs the app from a zip on its own Python image, it never in
 The pipeline needs one thing that is not in source control: an ARM service connection named
 `TalentGate-Staging` (the `azureServiceConnection` variable), scoped to `rg-talentgate-staging`.
 
+### First deployment
+
+Nothing has been deployed to this App Service yet, and the database it points at holds real
+candidate data. The order below matters because step 3 is a one-way door.
+
+1. **Create the `TalentGate-Staging` service connection.** The pipeline will not run *at all*
+   without it, not even on a feature branch: Azure DevOps validates every service connection
+   referenced anywhere in the YAML when a build is queued, including the deploy stage that a
+   feature branch's condition skips.
+
+2. **Set the secrets that cannot live in source control.** Without `DB_PASSWORD`, `startup.sh`
+   fails at `migrate` and the site never starts. Without the Graph values it starts fine but
+   invitation emails don't send.
+
+   ```bash
+   az webapp config appsettings set -g rg-talentgate-staging -n app-talentgate-staging \
+     --settings DB_PASSWORD='...' GRAPH_TENANT_ID='...' GRAPH_CLIENT_ID='...' \
+                GRAPH_CLIENT_SECRET='...' GRAPH_SENDER='...'
+   ```
+
+3. **Check which migrations are actually pending, against the real server**, with
+   `python manage.py showmigrations api`. Twelve migrations (`0006`–`0017`) exist here and not on
+   `main`, so a first deploy from `main` may apply all of them. One of those,
+   `0013_candidate_aadhaar_last4`, runs `UPDATE candidates SET aadhaar_number = RIGHT(...)` across
+   every row and is deliberately irreversible — the leading digits are gone once it runs. Confirm
+   whether whoever has been developing against the shared server has already applied it.
+
+4. **Write down the restore point first.** The server keeps 7 days of automatic backups with
+   point-in-time restore, and that is the only way back from step 3. Restoring produces a *new*
+   server rather than rewinding this one, so recovery also means repointing `DB_HOST`.
+
+5. **Merge to `main`.** Only `main` deploys; feature branches build and test and stop there.
+
+6. **Repoint the pipeline's default branch to `main`.** The `TalentGate-CI` pipeline was created
+   against `feature/candidate-exam-portal`, because that is where the YAML existed first.
+
 ### Scheduled jobs
 
 Wire the three commands in the table above into whatever scheduler the host has. Ready-made:
