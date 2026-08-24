@@ -194,14 +194,16 @@ export default function Dashboard() {
               // own intrinsic width and pushes the whole page sideways on a phone.
               <div className="table-scroll">
               <table className="data-table">
-                <thead><tr><th>Section</th><th>Unique Active</th><th>Duplicates</th><th>Status</th></tr></thead>
+                <thead><tr><th>Section</th><th>Total Questions</th><th>Duplicates</th><th>Status</th></tr></thead>
                 <tbody>
                   {qbankHealth.map((s) => (
                     <tr key={s.section_name}>
                       <td>{s.section_name}</td>
                       {/* Distinct questions, not row count - a section can hold 84 rows of 6
-                          questions, which won't fill a 10-question section. */}
-                      <td>{s.active_count} / {s.min_required_active}</td>
+                          questions, which won't fill a 10-question section. Just the count per
+                          request; the /min_required_active context still rides along as a
+                          tooltip since the Status pill alone doesn't say how far short it is. */}
+                      <td title={`Minimum required: ${s.min_required_active}`}>{s.active_count}</td>
                       <td>{s.duplicate_count > 0
                         ? <span className="pill amber">{s.duplicate_count}</span>
                         : '—'}</td>
