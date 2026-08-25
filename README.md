@@ -281,28 +281,32 @@ candidate data.
                 GRAPH_CLIENT_SECRET='...' GRAPH_SENDER='...'
    ```
 
-3. **Merge to `main`.** Only `main` deploys; feature branches build and test and stop there.
+3. **Deploy from `main`.** Only `main` deploys; feature branches build and test and stop there.
+   `feature/candidate-exam-portal` is already merged, so `main` is deployable as it stands.
 
 4. **Repoint the pipeline's default branch to `main`.** The `TalentGate-CI` pipeline was created
    against `feature/candidate-exam-portal`, because that is where the YAML existed first.
 
-#### Migration state: the database is ahead of `main`, not behind it
+#### Migration state: `main` and the database are in step
 
-Checked against the server on 2026-08-24: all 17 `api` migrations are recorded as applied, so
-**the first deploy applies none of them**. That includes `0013_candidate_aadhaar_last4`, whose
-`UPDATE candidates SET aadhaar_number = RIGHT(...)` is deliberately irreversible — it has already
-run, so there are no full Aadhaar numbers left to lose.
+Checked on 2026-08-25: `main` contains all 17 `api` migrations, through
+`0017_batch_college_name_optional`, and `makemigrations --check` reports no uncommitted model
+changes. The server was recorded as having all 17 applied on 2026-08-24, so **the first deploy
+applies none of them**. That includes `0013_candidate_aadhaar_last4`, whose `UPDATE candidates SET
+aadhaar_number = RIGHT(...)` is deliberately irreversible — it has already run, so there are no
+full Aadhaar numbers left to lose.
 
-The live risk is the inverse one, and it is easy to walk into. `main` currently contains migrations
-only through `0005`, while the database is at `0017`: the schema has `aadhaar_last4` where `main`'s
-code still expects `aadhaar_number`. **Deploying `main` as it stands today would therefore fail at
-runtime against this database, and no migration step would warn you** — `migrate` is a no-op and
-ignores history rows whose files it cannot see. Merge this branch before deploying anything, and
-don't deploy `main` from before the merge.
+**Never deploy a branch whose migrations stop short of the database.** `migrate` is a no-op against
+history rows whose files it cannot see, so nothing warns you at deploy time: the schema has
+`aadhaar_last4` where older code still expects `aadhaar_number`, and the failure surfaces at
+runtime. Every other branch in this repo is in exactly that position — `fix/auth-refresh-dedupe`
+stops at `0005`, `phase-3-dashboards-candidates` at `0007`, `refactor/modular-architecture` at
+`0011`, `phase-4-ta-portal-hardening` at `0012`. Only `main` is safe to deploy against this
+database.
 
-Verify with `python manage.py showmigrations api` against the real server if time has passed. The
-server keeps 7 days of automatic backups with point-in-time restore; note that restoring produces
-a *new* server rather than rewinding this one, so recovery also means repointing `DB_HOST`.
+Re-verify with `python manage.py showmigrations api` against the real server if time has passed.
+The server keeps 7 days of automatic backups with point-in-time restore; note that restoring
+produces a *new* server rather than rewinding this one, so recovery also means repointing `DB_HOST`.
 
 ### Scheduled jobs
 
