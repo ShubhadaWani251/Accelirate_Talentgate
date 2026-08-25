@@ -22,3 +22,8 @@ Thumbs.db
 
 # Local DB backups - recovery artifacts, not source
 backups/
+
+# Cross-project tracking sheet that happens to sit in this folder. It carries staging/production
+# database passwords for every Accelirate Labs project, not just this one, so committing it would
+# put a dozen unrelated credentials in this repo's history permanently.
+Accelirate Labs-Project list*.csv
