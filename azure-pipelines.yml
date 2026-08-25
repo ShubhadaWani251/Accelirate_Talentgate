@@ -23,7 +23,8 @@ variables:
   # differently across minor versions fails in CI rather than only after deployment.
   pythonVersion: '3.13'
   nodeVersion: '24.x'
-  azureServiceConnection: 'TalentGate-Staging'
+  #azureServiceConnection: 'TalentGate-Staging'
+  azureServiceConnectionId: c32f9465-33d5-414a-af07-21b95fb3c3e9
   resourceGroupName: 'rg-talentgate-staging'
   webAppName: 'app-talentgate-staging'
 
@@ -158,7 +159,7 @@ stages:
                 - task: AzureWebApp@1
                   displayName: Deploy to $(webAppName)
                   inputs:
-                    azureSubscription: '$(azureServiceConnection)'
+                    azureSubscription: '$(azureServiceConnectionId)'
                     appType: webAppLinux
                     appName: '$(webAppName)'
                     resourceGroupName: '$(resourceGroupName)'
