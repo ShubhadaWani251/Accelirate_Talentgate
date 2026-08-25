@@ -14,7 +14,16 @@ derived from the real one. A settings module is read before any connection exist
 ordering to get wrong.
 """
 
-from .settings import *  # noqa: F401,F403
+import os
+
+# settings.py raises ImproperlyConfigured at import time when SECRET_KEY is unset and DEBUG is
+# False, and this suite runs with DEBUG False. That check fires during the star-import below, so
+# assigning SECRET_KEY further down this file is too late - it has to be in the environment first.
+# A fixed value also keeps JWT signing deterministic across machines: load_dotenv() does not
+# override an existing variable, so a developer's .env cannot change what the suite signs with.
+os.environ.setdefault('SECRET_KEY', 'test-only-key-never-used-outside-the-suite')
+
+from .settings import *  # noqa: E402,F401,F403
 
 # In-memory SQLite. Fast, isolated per test process, and nothing to clean up. The schema is built
 # directly from the models (pytest.ini passes --no-migrations) because migration 0013 contains
