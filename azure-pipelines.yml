@@ -70,10 +70,13 @@ stages:
         pool:
           vmImage: ubuntu-latest
         steps:
-          - task: NodeTool@0
+          - task: UseNode@1
             displayName: Use Node $(nodeVersion)
             inputs:
-              versionSpec: '$(nodeVersion)'
+              # 'version', not 'versionSpec' as UsePythonVersion@0 above takes. UseNode@1 renamed
+              # the input and ignores unknown ones silently, so versionSpec here does not fail the
+              # task - it falls back to the default Node 10.x and the build breaks much later.
+              version: '$(nodeVersion)'
 
           - script: npm ci
             workingDirectory: Frontend
