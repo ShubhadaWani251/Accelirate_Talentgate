@@ -284,6 +284,13 @@ az webapp config appsettings set -g rg-talentgate-staging -n app-talentgate-stag
 validated at queue time for *every* run, including feature-branch runs whose deploy stage the
 condition skips, so deleting or renaming it breaks all builds rather than only deployments.
 
+**The deploy stage waits for a human.** The `talentgate-staging` environment carries a required
+approval, so a push to `main` builds and tests without interruption and then pauses before
+deploying. That gate exists because staging runs against the Postgres server holding real candidate
+data, and there should be no unattended path from `git push` to that data. Approvals expire after
+30 days. Validate risky changes on a `feature/*` branch first — the trigger covers them, and the
+deploy stage's branch condition skips them, so the gate is never even reached.
+
 #### Migration state: `main` and the database are in step
 
 Checked on 2026-08-25: `main` contains all 17 `api` migrations, through
