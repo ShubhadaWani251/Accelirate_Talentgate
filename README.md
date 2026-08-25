@@ -261,38 +261,35 @@ Because App Service runs the app from a zip on its own Python image, it never in
 The pipeline needs one thing that is not in source control: an ARM service connection named
 `TalentGate-Staging` (the `azureServiceConnection` variable), scoped to `rg-talentgate-staging`.
 
-### First deployment
+### Deployment status
 
-Nothing has been deployed to this App Service yet, and the database it points at holds real
+Staging is deployed. Build `20260825.3` ran from `main` on 2026-08-25 and completed all three jobs
+— backend tests, frontend build and packaging, and `Deploy App Service` — so the
+`TalentGate-Staging` service connection exists and works, and `app-talentgate-staging` is running
+the packaged app. The pipeline's default branch is `main`. The database behind it holds real
 candidate data.
 
-1. **Create the `TalentGate-Staging` service connection.** The pipeline will not run *at all*
-   without it, not even on a feature branch: Azure DevOps validates every service connection
-   referenced anywhere in the YAML when a build is queued, including the deploy stage that a
-   feature branch's condition skips.
+`DB_PASSWORD`, `SECRET_KEY`, and all four `GRAPH_*` values are already set as App Service
+application settings. Set them the same way if the App Service is ever rebuilt — without
+`DB_PASSWORD`, `startup.sh` fails at `migrate` and the site never starts; without the Graph values
+it starts fine but invitation emails don't send.
 
-2. **Set the secrets that cannot live in source control.** Without `DB_PASSWORD`, `startup.sh`
-   fails at `migrate` and the site never starts. Without the Graph values it starts fine but
-   invitation emails don't send.
+```bash
+az webapp config appsettings set -g rg-talentgate-staging -n app-talentgate-staging \
+  --settings DB_PASSWORD='...' GRAPH_TENANT_ID='...' GRAPH_CLIENT_ID='...' \
+             GRAPH_CLIENT_SECRET='...' GRAPH_SENDER='...'
+```
 
-   ```bash
-   az webapp config appsettings set -g rg-talentgate-staging -n app-talentgate-staging \
-     --settings DB_PASSWORD='...' GRAPH_TENANT_ID='...' GRAPH_CLIENT_ID='...' \
-                GRAPH_CLIENT_SECRET='...' GRAPH_SENDER='...'
-   ```
-
-3. **Deploy from `main`.** Only `main` deploys; feature branches build and test and stop there.
-   `feature/candidate-exam-portal` is already merged, so `main` is deployable as it stands.
-
-4. **Repoint the pipeline's default branch to `main`.** The `TalentGate-CI` pipeline was created
-   against `feature/candidate-exam-portal`, because that is where the YAML existed first.
+**Only `main` deploys**; feature branches build and test and stop there. The service connection is
+validated at queue time for *every* run, including feature-branch runs whose deploy stage the
+condition skips, so deleting or renaming it breaks all builds rather than only deployments.
 
 #### Migration state: `main` and the database are in step
 
 Checked on 2026-08-25: `main` contains all 17 `api` migrations, through
 `0017_batch_college_name_optional`, and `makemigrations --check` reports no uncommitted model
-changes. The server was recorded as having all 17 applied on 2026-08-24, so **the first deploy
-applies none of them**. That includes `0013_candidate_aadhaar_last4`, whose `UPDATE candidates SET
+changes. The server was recorded as having all 17 applied on 2026-08-24, so **a deploy applies none
+of them**. That includes `0013_candidate_aadhaar_last4`, whose `UPDATE candidates SET
 aadhaar_number = RIGHT(...)` is deliberately irreversible — it has already run, so there are no
 full Aadhaar numbers left to lose.
 
