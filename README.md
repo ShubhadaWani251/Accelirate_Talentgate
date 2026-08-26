@@ -118,6 +118,21 @@ python manage.py migrate
 python manage.py runserver
 ```
 
+**No accounts are seeded by the fixtures.** For a local login, load the roles and create the
+development Administrator:
+
+```bash
+python manage.py loaddata fixtures/initial_roles.json
+python manage.py seed_dev_admin      # prints the credential it created
+```
+
+`seed_dev_admin` **refuses to run against any database whose host is not local**, so it cannot be
+aimed at staging even with staging's `DB_*` values in the environment. The fixed password is only
+acceptable because that guard exists - it is in source control, so treat removing the guard as
+publishing an Administrator password for whatever the command is pointed at. For any shared
+environment use `create_admin_user`, which takes the password as an argument and has no default,
+or `reset_user_password`, which prompts instead so the value stays out of shell history.
+
 ### Frontend
 
 ```bash
@@ -151,6 +166,7 @@ and a comment on what each one does. Highlights:
 | Lint | - | `npm run lint` |
 | Django system checks | `python manage.py check` | - |
 | Apply migrations | `python manage.py migrate` | - |
+| Seed a local admin login | `python manage.py seed_dev_admin` | - |
 | Create a migration | `python manage.py makemigrations api` | - |
 | Run tests | `python -m pytest` | - |
 | Check for uncommitted model changes | `python manage.py makemigrations --check --dry-run` | - |
