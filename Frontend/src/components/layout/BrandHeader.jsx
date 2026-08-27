@@ -8,6 +8,7 @@ export default function BrandHeader({ roleCode }) {
   return (
     <header className="brand-header">
       <div className="brand-left">
+        <img src="/favicon-48.png" alt="" className="brand-logo" />
         <div className="brand-name">
           Accelirate TalentGate
           <div className="brand-tagline">Candidate Evaluation Platform</div>
