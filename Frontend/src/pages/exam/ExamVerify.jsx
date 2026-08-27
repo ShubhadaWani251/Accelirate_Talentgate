@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import * as examApi from '../../api/examApi';
 import { useExamSession } from '../../features/exam/examSessionContext';
+import { formatDateTime } from '../../utils/datetime';
 import BrandHeader from '../../components/layout/BrandHeader';
 import BrandFooter from '../../components/layout/BrandFooter';
 
@@ -10,6 +11,8 @@ const DEAD_END_COPY = {
     title: 'Link Not Recognized',
     body: 'This assessment link is invalid. Please use the exact link from your invitation email, or contact the Staffing team.',
   },
+  // body is filled in from link_valid_from/link_valid_until once the landing response arrives -
+  // see the effect below. Falls back to this generic wording if that data didn't come through.
   expired: {
     title: 'Link Expired',
     body: 'This assessment link has expired. Please contact the Staffing team for a new invitation.',
@@ -18,13 +21,21 @@ const DEAD_END_COPY = {
     title: 'Assessment Already Completed',
     body: 'This assessment has already been submitted. The Staffing User will contact you regarding next steps.',
   },
+  // body is filled in from opens_at once the landing response arrives - see the effect below.
+  not_yet_open: {
+    title: 'Assessment Not Open Yet',
+    body: 'This assessment is not open yet. Please come back once the window has started.',
+  },
 };
 
 export default function ExamVerify() {
   const { token } = useParams();
   const navigate = useNavigate();
   const { setLinkToken, setInstructions, applyAttemptToken, setSessionState } = useExamSession();
-  const [status, setStatus] = useState('loading'); // loading | form | invalid | expired | completed
+  // loading | form | invalid | expired | completed | not_yet_open
+  const [status, setStatus] = useState('loading');
+  const [opensAt, setOpensAt] = useState(null);
+  const [linkWindow, setLinkWindow] = useState(null); // { from, until }, for the expired screen
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -33,7 +44,13 @@ export default function ExamVerify() {
     setLinkToken(token);
     examApi
       .getTokenLanding(token)
-      .then((data) => setStatus(data.reason === 'ok' ? 'form' : data.reason))
+      .then((data) => {
+        setStatus(data.reason === 'ok' ? 'form' : data.reason);
+        if (data.reason === 'not_yet_open') setOpensAt(data.opens_at);
+        if (data.reason === 'expired') {
+          setLinkWindow({ from: data.link_valid_from, until: data.link_valid_until });
+        }
+      })
       .catch(() => setStatus('invalid'));
   }, [token, setLinkToken]);
 
@@ -55,13 +72,36 @@ export default function ExamVerify() {
         navigate(`/t/${token}/camera`);
       }
     } catch (err) {
+      // opens_at, when present, means the window closed between landing and this submit (or
+      // this endpoint was reached directly) - reuse the same dead-end screen rather than a
+      // form error, since retrying the form can't succeed until the window actually opens.
+      const opens = err.response?.data?.opens_at;
+      if (opens) {
+        setOpensAt(opens);
+        setStatus('not_yet_open');
+        return;
+      }
       setError(err.response?.data?.detail || 'Something went wrong. Please try again.');
     } finally {
       setSubmitting(false);
     }
   }
 
-  const deadEnd = DEAD_END_COPY[status];
+  let deadEnd = DEAD_END_COPY[status];
+  if (deadEnd && status === 'not_yet_open' && opensAt) {
+    deadEnd = {
+      ...deadEnd,
+      body: `This assessment opens at ${formatDateTime(opensAt)}. Please come back then.`,
+    };
+  }
+  if (deadEnd && status === 'expired' && linkWindow) {
+    deadEnd = {
+      ...deadEnd,
+      body: `This assessment link was valid from ${formatDateTime(linkWindow.from)} to `
+        + `${formatDateTime(linkWindow.until)}, and that window has now closed. Please contact `
+        + 'the Staffing team for a new invitation.',
+    };
+  }
 
   return (
     <div className="app-shell">
