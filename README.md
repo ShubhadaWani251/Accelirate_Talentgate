@@ -182,7 +182,8 @@ There is no Celery/broker-based task queue - `process_email_queue` is a DB-backe
 creating an Invitation (sending an invite, or re-sending one) only sets `email_status=QUEUED` on
 the row; nothing sends it inline from the request that created it. `process_email_queue` is the
 worker that drains that queue, run on whatever scheduler the host already provides (cron,
-Windows Task Scheduler, an Azure WebJob, or the `scheduler` service in `docker-compose.yml`).
+Windows Task Scheduler, the `scheduler` service in `docker-compose.yml`, or - on this App
+Service, which has none of those - background loops in `Backend/startup.sh`).
 See **Deployment** below for ready-made configurations.
 
 | Command | Suggested interval | What it does |
@@ -342,6 +343,19 @@ Wire the three commands in the table above into whatever scheduler the host has.
 | Docker | Already running as the `scheduler` service in `docker-compose.yml`. |
 | Linux/cron | `deploy/crontab.example` |
 | Windows | `deploy/register-scheduled-tasks.ps1 -BackendPath C:\path\to\Backend` (elevated) |
+| App Service (this deployment) | Already running, as background loops in `Backend/startup.sh`. |
+
+App Service is the awkward one: Linux App Service has no cron, and WebJobs are Windows-only, so
+`startup.sh` backgrounds a loop per command before handing off to gunicorn. This is a compromise,
+not the intended shape - the loops live and die with the web container, so a restart silently
+stops them until it comes back up, and scaling to a second instance would run every job twice.
+Move them to a Container Apps job or another external trigger if this outgrows staging.
+
+The reason it is worth doing at all rather than leaving the jobs unscheduled: an unscheduled
+`process_email_queue` means invitation emails are never sent, and **nothing surfaces that**. The
+invite is correctly recorded as issued, the UI says so, and the rows just accumulate at
+`email_status=QUEUED` while candidates wait for links that will never arrive. Check with
+`python manage.py process_email_queue --dry-run`, which reports the queue without sending.
 
 ### Before go-live
 
