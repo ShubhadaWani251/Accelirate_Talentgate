@@ -506,3 +506,46 @@ class TestExistingBadDataIsGrandfathered:
             partial=True,
         )
         assert serializer.is_valid(), serializer.errors
+
+
+class TestMarkBatchCompleted:
+    """Nothing infers a batch is "done" on its own (see services/batch_status_filter.py, which
+    groups Completed alongside In Progress under "Active" precisely because of this) - it's a
+    manual call a TA or admin makes from the batch's own Details page.
+    """
+
+    def test_an_in_progress_batch_can_be_marked_completed(self, ta_user, client_for, make_batch):
+        batch = make_batch(ta_user, status=Batch.Status.IN_PROGRESS)
+
+        response = client_for(ta_user).post('/api/batches/%d/complete/' % batch.batch_id)
+
+        assert response.status_code == 200
+        batch.refresh_from_db()
+        assert batch.status == Batch.Status.COMPLETED
+
+    def test_a_draft_cannot_be_marked_completed(self, ta_user, client_for, make_batch):
+        batch = make_batch(ta_user, status=Batch.Status.DRAFT)
+
+        response = client_for(ta_user).post('/api/batches/%d/complete/' % batch.batch_id)
+
+        assert response.status_code == 400
+        batch.refresh_from_db()
+        assert batch.status == Batch.Status.DRAFT
+
+    def test_a_cancelled_batch_cannot_be_marked_completed(self, ta_user, client_for, make_batch):
+        batch = make_batch(ta_user, status=Batch.Status.CANCELLED)
+
+        response = client_for(ta_user).post('/api/batches/%d/complete/' % batch.batch_id)
+
+        assert response.status_code == 400
+        batch.refresh_from_db()
+        assert batch.status == Batch.Status.CANCELLED
+
+    def test_an_already_completed_batch_cannot_be_re_completed(
+        self, ta_user, client_for, make_batch
+    ):
+        batch = make_batch(ta_user, status=Batch.Status.COMPLETED)
+
+        response = client_for(ta_user).post('/api/batches/%d/complete/' % batch.batch_id)
+
+        assert response.status_code == 400

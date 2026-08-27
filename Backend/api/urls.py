@@ -24,6 +24,8 @@ urlpatterns = [
     path('batches/<int:batch_id>/', views.BatchDetailView.as_view(), name='batch-detail'),
     path('batches/<int:batch_id>/deactivate/', views.BatchDeactivateView.as_view(),
          name='batch-deactivate'),
+    path('batches/<int:batch_id>/complete/', views.BatchCompleteView.as_view(),
+         name='batch-complete'),
     path('batches/<int:batch_id>/upload/', views.BatchUploadView.as_view(), name='batch-upload'),
     path('batches/<int:batch_id>/candidates/', views.BatchCandidatesStagingView.as_view(),
          name='batch-candidates'),

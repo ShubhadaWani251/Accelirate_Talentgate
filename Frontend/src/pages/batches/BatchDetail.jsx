@@ -7,6 +7,7 @@ import * as candidateApi from '../../api/candidateApi';
 import { selectRoleCode } from '../../features/auth/authSlice';
 import ConfigureBatchStep from '../../features/batches/ConfigureBatchStep';
 import DeactivateBatchModal from '../../features/batches/DeactivateBatchModal';
+import CompleteBatchModal from '../../features/batches/CompleteBatchModal';
 import CandidateFilters from '../../features/candidates/CandidateFilters';
 import { EMPTY_CANDIDATE_FILTERS } from '../../features/candidates/candidateFilterDefaults';
 import CandidateTable from '../../features/candidates/CandidateTable';
@@ -33,6 +34,7 @@ export default function BatchDetail() {
   // null | 'notfound' | 'server' - which error page (if any) replaces this page.
   const [loadError, setLoadError] = useState(null);
   const [deactivateOpen, setDeactivateOpen] = useState(false);
+  const [completeOpen, setCompleteOpen] = useState(false);
 
   // Once a batch is finalized, this page gives it the same browse/select/notify/edit
   // capability as All Candidates, just pre-scoped to this one batch_id (wireframe parity -
@@ -152,7 +154,12 @@ export default function BatchDetail() {
           <span className={`pill ${STATUS_PILL[batch.status] || 'gray'}`}>{batch.status_display}</span>
         </h3>
         {!isCancelled && (
-          <button className="btn danger" onClick={() => setDeactivateOpen(true)}>Deactivate Batch</button>
+          <div className="btn-row" style={{ display: 'flex', gap: 10 }}>
+            {batch.status === 'in_progress' && (
+              <button className="btn" onClick={() => setCompleteOpen(true)}>Mark Completed</button>
+            )}
+            <button className="btn danger" onClick={() => setDeactivateOpen(true)}>Deactivate Batch</button>
+          </div>
         )}
       </div>
 
@@ -270,6 +277,18 @@ export default function BatchDetail() {
             setDeactivateOpen(false);
             // The batch row survives deactivation, so stay here and show its new state
             // rather than navigating away.
+            if (res.batch) setBatch(res.batch);
+            else refresh();
+          }}
+        />
+      )}
+
+      {completeOpen && (
+        <CompleteBatchModal
+          batch={batch}
+          onClose={() => setCompleteOpen(false)}
+          onCompleted={(res) => {
+            setCompleteOpen(false);
             if (res.batch) setBatch(res.batch);
             else refresh();
           }}

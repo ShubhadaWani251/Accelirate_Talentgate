@@ -67,6 +67,9 @@ export default function ExamAttemptPage() {
   // countdown are withheld until that call returns, so the timer can never be shown - or run -
   // before the server considers the exam started.
   const [begun, setBegun] = useState(false);
+  // Set only for the one error worth telling the candidate about (the window hasn't opened
+  // yet) - a plain network blip stays silent and just retries, per the existing catch below.
+  const [beginError, setBeginError] = useState(null);
   const beginRequestedRef = useRef(false);
 
   useEffect(() => {
@@ -207,9 +210,18 @@ export default function ExamAttemptPage() {
         setAnswers(flattenAnswers(data.sections));
         setBegun(true);
       })
-      .catch(() => {
-        // Already-closed/expired attempts 401 here; auth-layer handling covers those. Allow a
-        // retry rather than latching, so a transient network blip isn't a dead end.
+      .catch((err) => {
+        // The one error worth telling the candidate about rather than silently retrying: the
+        // batch's window hasn't opened yet. Reachable here only if the earlier gates (landing,
+        // email-verify, identity-capture) were somehow bypassed, since none of them let a
+        // candidate reach this screen before the window opens - kept as the authoritative
+        // last-line check regardless. Every other failure (already-closed/expired attempts 401
+        // here; auth-layer handling covers those, or a transient network blip) keeps retrying
+        // rather than latching into a dead end.
+        if (err.response?.data?.opens_at) {
+          setBeginError(err.response.data.detail);
+          return;
+        }
         beginRequestedRef.current = false;
       });
   }, [view, fullscreenReady, setSessionState]);
@@ -335,8 +347,17 @@ export default function ExamAttemptPage() {
         <BrandHeader roleCode="candidate" />
         <div className="auth-shell">
           <div className="auth-card" style={{ textAlign: 'center' }}>
-            <h3>Starting your assessment…</h3>
-            <div className="auth-sub">Your timer begins now. Please don't close this window.</div>
+            {beginError ? (
+              <>
+                <h3>Assessment Not Open Yet</h3>
+                <div className="auth-sub">{beginError}</div>
+              </>
+            ) : (
+              <>
+                <h3>Starting your assessment…</h3>
+                <div className="auth-sub">Your timer begins now. Please don't close this window.</div>
+              </>
+            )}
           </div>
         </div>
         <BrandFooter roleCode="candidate" />

@@ -43,6 +43,7 @@ _DESCRIPTIONS = {
     ('update', 'batch'): 'Updated batch configuration',
     ('upload', 'batch'): 'Uploaded a candidate spreadsheet to a batch',
     ('finalize', 'batch'): 'Activated a batch (Draft to In Progress)',
+    ('complete', 'batch'): 'Marked a batch completed',
     ('deactivate', 'batch'): 'Deactivated a batch',
     ('delete', 'batch'): 'Deleted a batch',
     ('delete_candidates', 'batch'): 'Removed candidates from a batch',
