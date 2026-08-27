@@ -48,15 +48,14 @@ export default function AppNav() {
 
   const links = NAV_LINKS[user?.role_code] || [];
   const home = ROLE_HOME[user?.role_code] || '/';
+  const atHome = location.pathname === home;
 
   // react-router stamps an incrementing `idx` onto history.state for every entry it pushes.
   // idx === 0 means this is the first entry in the session's history, so navigate(-1) would
-  // leave the app entirely (or dead-end on a blank page) - fall back to Home in that case,
-  // and on the dashboard itself, where "back" has nowhere useful to go.
+  // leave the app entirely (or dead-end on a blank page) - fall back to Home in that case.
   function handleBack() {
-    const atHome = location.pathname === home;
     const hasPrevious = (window.history.state?.idx ?? 0) > 0;
-    if (atHome || !hasPrevious) navigate(home);
+    if (!hasPrevious) navigate(home);
     else navigate(-1);
   }
 
@@ -76,7 +75,11 @@ export default function AppNav() {
   return (
     <nav className="app-nav">
       <div className="nav-left">
-        <button className="btn small nav-back" onClick={handleBack}>← Back</button>
+        {/* Meaningless on the dashboard itself - there's nothing to go back to that isn't
+            already one click away via Home. */}
+        {!atHome && (
+          <button className="btn small nav-back" onClick={handleBack}>← Back</button>
+        )}
         <button className="btn small primary nav-home" onClick={() => navigate(home)}>Home</button>
         <span className="nav-brand">CEP — {user?.role_code === 'admin' ? 'Administrator' : 'Staffing User'}</span>
         {/* Visible only under 768px (CSS-driven), so desktop/tablet behaviour is unchanged. */}

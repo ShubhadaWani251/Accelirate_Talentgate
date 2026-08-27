@@ -226,6 +226,23 @@ class TestEvidenceUrlSigning:
             url = 'http://127.0.0.1:8000/media/exam_evidence/attempts/7/face_photo.jpg'
             assert blob_storage.fresh_read_url(url) == url
 
+    def test_download_filename_forces_an_attachment_disposition(self, azure_configured):
+        """The plain HTML `download` attribute does nothing for a cross-origin blob URL - every
+        major browser ignores it. Content-Disposition baked into the SAS token itself is what
+        actually makes the browser save the file instead of navigating to it.
+        """
+        stored = 'https://teststorage.blob.core.windows.net/evidence/attempts/7/face_photo.jpg'
+        signed = blob_storage.fresh_read_url(stored, download_filename='Asha_Rao_face_photo.jpg')
+
+        query = parse_qs(urlparse(signed).query)
+        assert query['rscd'] == ['attachment; filename="Asha_Rao_face_photo.jpg"']
+
+    def test_no_download_filename_means_no_disposition_override(self, azure_configured):
+        """The "view inline" case - no override, so the browser opens it in place."""
+        stored = 'https://teststorage.blob.core.windows.net/evidence/attempts/7/face_photo.jpg'
+        query = parse_qs(urlparse(blob_storage.fresh_read_url(stored)).query)
+        assert 'rscd' not in query
+
 
 class TestDeploymentChecks:
     """The api.W00x checks in api/checks.py, which surface misconfigurations Django's own

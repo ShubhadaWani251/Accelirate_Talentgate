@@ -330,10 +330,13 @@ def _cta_button(url, label):
 def text_body_to_html(text, cta_url=None, cta_label='Start Your Assessment'):
     """Build the HTML alternative for a plain-text email body.
 
-    Renders inside `white-space: pre-wrap` rather than reflowing into paragraphs and lists:
-    the approved copy already carries its own line breaks, indentation and numbering, so
-    preserving them verbatim means the HTML says exactly what the text says. Reconstructing
-    paragraphs would be a second layout of approved wording that could disagree with it.
+    Paragraphs (text separated by a blank line) become <p> tags, and a single line break within
+    a paragraph becomes <br> - built explicitly rather than left to `white-space: pre-wrap`,
+    which was the previous approach. Outlook renders HTML mail through Word's engine, and Word
+    does not honour `white-space: pre-wrap` at all: every line break collapsed, so a five-
+    paragraph email (greeting, body, signature) arrived as one unbroken run-on sentence. <p>/<br>
+    are Word-safe because Word lays out actual block and line elements rather than interpreting
+    a CSS whitespace rule.
 
     `cta_url`, when given and present in the text, gets a button rendered above the bare URL
     at that spot - so the candidate has something obvious to click, and still has the link
@@ -356,12 +359,27 @@ def text_body_to_html(text, cta_url=None, cta_label='Start Your Assessment'):
                 1,
             )
 
+    # Split on a blank line for paragraphs; a lone '\n' inside one (e.g. the three-line
+    # signature) becomes <br> rather than starting a new <p>. Consecutive blank lines would
+    # otherwise produce empty <p></p> spacers, so those are dropped.
+    paragraphs = [p for p in body.split('\n\n') if p.strip('\n')]
+    body_html = ''.join(
+        f'<p style="margin:0 0 16px 0;">{p.replace(chr(10), "<br>")}</p>'
+        for p in paragraphs
+    )
+
+    # Body and card share the same white background on purpose: a lighter shade behind a
+    # narrower centered card (the previous #f6f7f9/#ffffff split) reads fine in a client that
+    # actually confines it to the card's edges, but Gmail's web reading pane is wider than the
+    # 640px card and renders that outer shade across the full pane - which looks like two grey
+    # boxes flanking the text rather than a subtle frame. One background avoids the seam
+    # regardless of how wide the client renders it.
     return (
-        '<html><body style="margin:0;padding:0;background:#f6f7f9;">'
+        '<html><body style="margin:0;padding:0;background:#ffffff;">'
         '<div style="max-width:640px;margin:0 auto;padding:24px;'
         'font-family:Segoe UI,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.6;'
         'color:#1c1e21;background:#ffffff;">'
-        f'<div style="white-space:pre-wrap;">{body}</div>'
+        f'{body_html}'
         '</div></body></html>'
     )
 
