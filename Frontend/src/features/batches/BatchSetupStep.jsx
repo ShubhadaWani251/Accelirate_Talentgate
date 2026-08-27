@@ -29,6 +29,14 @@ const schema = yup.object({
 export default function BatchSetupStep({ existingBatch, onCreated, onUploaded }) {
   const [createdBatch, setCreatedBatch] = useState(existingBatch || null);
   const [submitting, setSubmitting] = useState(false);
+  // A resumed draft skips straight to the upload phase below (createdBatch is already set from
+  // existingBatch), which used to mean the name form - the only place batch_name was ever
+  // editable - never rendered for it at all. A typo made while creating the batch had no way
+  // back short of abandoning the draft. This is that way back, in place rather than a detour to
+  // another screen.
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  const [savingName, setSavingName] = useState(false);
   const {
     register,
     handleSubmit,
@@ -54,11 +62,61 @@ export default function BatchSetupStep({ existingBatch, onCreated, onUploaded })
     }
   }
 
+  function startEditName() {
+    setNameDraft(createdBatch.batch_name);
+    setEditingName(true);
+  }
+
+  async function saveName() {
+    setSavingName(true);
+    try {
+      const updated = await batchApi.updateBatch(createdBatch.batch_id, {
+        batch_name: nameDraft.trim(),
+      });
+      setCreatedBatch(updated);
+      setEditingName(false);
+      toast.success('Batch name updated.');
+    } catch (err) {
+      toast.error(extractErrorMessage(err, ['batch_name']));
+    } finally {
+      setSavingName(false);
+    }
+  }
+
   // Once a batch exists - just created, or resumed - the name phase is done; hand off to the
   // upload phase. Reusing UploadStep directly rather than reimplementing its drag-drop/template
-  // download/missing-column handling here.
+  // download/missing-column handling here. The name itself stays editable above it (see
+  // editingName above) rather than only at creation time.
   if (createdBatch) {
-    return <UploadStep batch={createdBatch} onUploaded={onUploaded} />;
+    return (
+      <>
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="box-label">Batch Name</div>
+          {editingName ? (
+            <div className="field" style={{ maxWidth: 420 }}>
+              <input value={nameDraft} onChange={(e) => setNameDraft(e.target.value)}
+                autoFocus />
+              <div className="btn-row" style={{ marginTop: 8 }}>
+                <button type="button" className="btn" onClick={() => setEditingName(false)}
+                  disabled={savingName}>
+                  Cancel
+                </button>
+                <button type="button" className="btn primary" onClick={saveName}
+                  disabled={savingName || !nameDraft.trim()}>
+                  <ButtonSpinner loading={savingName}>Save</ButtonSpinner>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span>{createdBatch.batch_name}</span>
+              <button type="button" className="btn small" onClick={startEditName}>Edit</button>
+            </div>
+          )}
+        </div>
+        <UploadStep batch={createdBatch} onUploaded={onUploaded} />
+      </>
+    );
   }
 
   return (

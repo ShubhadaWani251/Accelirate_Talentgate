@@ -213,6 +213,7 @@ export default function QuestionBank() {
             hasNext={Boolean(pageMeta.next)}
             onPrev={() => refresh(page - 1)}
             onNext={() => refresh(page + 1)}
+            onPageChange={(p) => refresh(p)}
           />
         </div>
       </div>

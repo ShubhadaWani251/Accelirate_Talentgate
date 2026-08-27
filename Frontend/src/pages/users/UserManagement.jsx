@@ -142,6 +142,7 @@ export default function UserManagement() {
         hasNext={Boolean(pageMeta.next)}
         onPrev={() => refresh(page - 1)}
         onNext={() => refresh(page + 1)}
+        onPageChange={(p) => refresh(p)}
       />
 
       {deactivateTarget && (

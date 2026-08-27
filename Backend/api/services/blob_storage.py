@@ -83,13 +83,23 @@ def _container():
     return container
 
 
-def fresh_read_url(stored_url):
+def fresh_read_url(stored_url, download_filename=None):
     """Mint a short-lived read URL for a stored evidence pointer. Returns None for no input.
 
     Call this at every point an evidence URL is handed to a browser or fetched server-side.
     Anything already on the URL's query string is discarded and replaced, so a row written under
     the old scheme (which baked a 365-day token into the stored value) is upgraded in passing
     rather than trusted.
+
+    `download_filename`, when given, bakes a `Content-Disposition: attachment` response header
+    override into the SAS token itself (Azure's `rscd` parameter) - the browser then downloads
+    the file as an actual save-to-disk, with this name, instead of navigating to it. This is the
+    ONLY way to make a download reliable here: the HTML `download` attribute on an <a> tag is
+    silently ignored by every major browser for a cross-origin URL (which every blob URL is,
+    from the frontend's own origin), so plain `<a href={blobUrl} download>` links did nothing
+    visible - the browser just opened the resource instead of saving it. Leaving this None (the
+    "view" case) omits the override, so the same blob opens inline instead of forcing a save
+    dialog when the caller wants it displayed, not downloaded.
 
     Returns the input unchanged when there is nothing to sign - the local-disk fallback, or a
     URL that does not belong to the configured storage account. Signing failures degrade to
@@ -100,6 +110,8 @@ def fresh_read_url(stored_url):
     if not stored_url:
         return None
     if _use_local_fallback() or not settings.AZURE_STORAGE_CONNECTION_STRING:
+        # Same-origin in local dev (served off MEDIA_URL on this same host), so the plain
+        # `download` attribute already works here - no header override needed.
         return stored_url
 
     try:
@@ -124,6 +136,9 @@ def fresh_read_url(stored_url):
             account_key=client.credential.account_key,
             permission=BlobSasPermissions(read=True),
             expiry=datetime.now(dt_timezone.utc) + timedelta(minutes=_SAS_VALID_MINUTES),
+            content_disposition=(
+                f'attachment; filename="{download_filename}"' if download_filename else None
+            ),
         )
         # Rebuild from the parsed pieces so any pre-existing query string is dropped rather
         # than appended to, which would otherwise produce two sets of SAS parameters.
@@ -185,3 +200,30 @@ def append_recording_chunk(attempt_id, chunk_bytes):
 
     blob_client = _container().get_blob_client(f'attempts/{attempt_id}/session_recording.webm')
     blob_client.append_block(chunk_bytes)
+
+
+def delete_attempt_evidence(attempt_id):
+    """Deletes every proctoring blob (both ID/face photos and the session recording) stored for
+    one attempt. Used by the 30-day evidence retention sweep (services/evidence_retention.py) -
+    called AFTER the caller has already decided the attempt is old enough, never a decision this
+    function makes itself.
+
+    Missing-file/missing-blob is not an error here: a photo that was never captured (an attempt
+    abandoned before identity verification) has nothing to delete, and a second sweep run after a
+    partial failure must not raise just because the first run already removed some of these.
+    """
+    filenames = ('id_photo.jpg', 'face_photo.jpg', 'session_recording.webm')
+    if _use_local_fallback():
+        for filename in filenames:
+            path = _local_path(attempt_id, filename)
+            path.unlink(missing_ok=True)
+        return
+
+    container = _container()
+    for filename in filenames:
+        blob_client = container.get_blob_client(f'attempts/{attempt_id}/{filename}')
+        try:
+            blob_client.delete_blob()
+        except Exception:
+            # Already gone, or never existed - either way there is nothing left to remove.
+            pass

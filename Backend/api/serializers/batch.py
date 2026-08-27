@@ -86,6 +86,15 @@ class BatchSerializer(serializers.ModelSerializer):
             'verbal_questions', 'programming_questions',
         ]
 
+    def validate_batch_name(self, value):
+        value = value.strip()
+        existing = Batch.objects.filter(batch_name__iexact=value, is_deleted=False)
+        if self.instance:
+            existing = existing.exclude(pk=self.instance.pk)
+        if existing.exists():
+            raise serializers.ValidationError('A batch with this name already exists.')
+        return value
+
     def get_draft_expires_at(self, batch):
         """When an unfinalized draft will be deleted - null for every other status.
 

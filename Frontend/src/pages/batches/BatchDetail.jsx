@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Navigate, useParams } from 'react-router-dom';
+import { useSelector } from 'react-redux';
 import toast from 'react-hot-toast';
 import * as batchApi from '../../api/batchApi';
 import * as candidateApi from '../../api/candidateApi';
+import { selectRoleCode } from '../../features/auth/authSlice';
 import ConfigureBatchStep from '../../features/batches/ConfigureBatchStep';
 import DeactivateBatchModal from '../../features/batches/DeactivateBatchModal';
 import CandidateFilters, { EMPTY_CANDIDATE_FILTERS } from '../../features/candidates/CandidateFilters';
@@ -23,6 +25,8 @@ const STATUS_PILL = { draft: 'gray', in_progress: 'blue', completed: 'green', ca
 
 export default function BatchDetail() {
   const { id } = useParams();
+  const roleCode = useSelector(selectRoleCode);
+  const isAdmin = roleCode === 'admin';
   const [batch, setBatch] = useState(null);
   const [loading, setLoading] = useState(true);
   // null | 'notfound' | 'server' - which error page (if any) replaces this page.
@@ -185,6 +189,7 @@ export default function BatchDetail() {
         onCreated={(updated) => setBatch(updated)}
         readOnly
         locked={isCancelled}
+        canEditCutoffs={isAdmin}
       />
 
       <CandidateTable
@@ -207,6 +212,7 @@ export default function BatchDetail() {
         hasNext={Boolean(pageMeta.next)}
         onPrev={() => refreshCandidates(filters, page - 1)}
         onNext={() => refreshCandidates(filters, page + 1)}
+        onPageChange={(p) => refreshCandidates(filters, p)}
       />
 
       {editingCandidate && (

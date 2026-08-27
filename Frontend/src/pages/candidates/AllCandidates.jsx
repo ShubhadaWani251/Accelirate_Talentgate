@@ -141,6 +141,7 @@ export default function AllCandidates() {
         hasNext={Boolean(pageMeta.next)}
         onPrev={() => refresh(filters, page - 1)}
         onNext={() => refresh(filters, page + 1)}
+        onPageChange={(p) => refresh(filters, p)}
       />
 
       {editingCandidate && (
