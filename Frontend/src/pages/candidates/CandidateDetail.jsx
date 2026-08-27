@@ -22,6 +22,7 @@ export default function CandidateDetail() {
   const [loadError, setLoadError] = useState(null);
   const [sending, setSending] = useState(false);
   const [downloadingZip, setDownloadingZip] = useState(false);
+  const [inviteConfirmOpen, setInviteConfirmOpen] = useState(false);
 
   async function refresh() {
     setLoading(true);
@@ -48,6 +49,7 @@ export default function CandidateDetail() {
     try {
       const res = await candidateApi.resendInvite(id);
       toast.success(res.detail);
+      setInviteConfirmOpen(false);
       refresh();
     } catch (err) {
       toast.error(extractErrorMessage(err));
@@ -188,7 +190,7 @@ export default function CandidateDetail() {
             {candidate.evidence.aadhaar_capture_url ? (
               <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 4 }}>
                 <a className="link-text" href={candidate.evidence.aadhaar_capture_url} target="_blank" rel="noopener noreferrer">View Full Image</a>
-                <a className="link-text" href={candidate.evidence.aadhaar_capture_url} download>⬇ Download</a>
+                <a className="link-text" href={candidate.evidence.aadhaar_capture_download_url} download>⬇ Download</a>
               </div>
             ) : (
               <div style={{ textAlign: 'center', fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Not yet captured</div>
@@ -201,7 +203,7 @@ export default function CandidateDetail() {
             {candidate.evidence.face_photo_url ? (
               <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 4 }}>
                 <a className="link-text" href={candidate.evidence.face_photo_url} target="_blank" rel="noopener noreferrer">View Full Image</a>
-                <a className="link-text" href={candidate.evidence.face_photo_url} download>⬇ Download</a>
+                <a className="link-text" href={candidate.evidence.face_photo_download_url} download>⬇ Download</a>
               </div>
             ) : (
               <div style={{ textAlign: 'center', fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Not yet captured</div>
@@ -214,7 +216,7 @@ export default function CandidateDetail() {
             {candidate.evidence.session_recording_url ? (
               <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 4 }}>
                 <a className="link-text" href={candidate.evidence.session_recording_url} target="_blank" rel="noopener noreferrer">▶ Play Recording</a>
-                <a className="link-text" href={candidate.evidence.session_recording_url} download>⬇ Download</a>
+                <a className="link-text" href={candidate.evidence.session_recording_download_url} download>⬇ Download</a>
               </div>
             ) : (
               <div style={{ textAlign: 'center', fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Not yet recorded</div>
@@ -253,11 +255,33 @@ export default function CandidateDetail() {
       </div>
 
       <div className="btn-row no-print" style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-        <button className="btn primary" onClick={handleSendInvite} disabled={sending}>
+        <button className="btn primary" onClick={() => setInviteConfirmOpen(true)} disabled={sending}>
           <ButtonSpinner loading={sending}>Send Invite Link</ButtonSpinner>
         </button>
         <button className="btn" onClick={() => window.print()}>🖨 Export Candidate Details (PDF)</button>
       </div>
+
+      {inviteConfirmOpen && (
+        <div className="modal-overlay">
+          <div className="modal-box">
+            <h4>Send a new invite link?</h4>
+            <p>
+              {candidate.full_name} will be emailed a <b>new</b> assessment link. Any link they
+              were sent previously will no longer be the one they should use. If they have
+              already submitted or been terminated, they cannot retake the assessment.
+            </p>
+            <div className="btn-row">
+              <button className="btn" type="button" onClick={() => setInviteConfirmOpen(false)}>
+                Cancel
+              </button>
+              <button className="btn primary" type="button" disabled={sending}
+                      onClick={handleSendInvite}>
+                <ButtonSpinner loading={sending}>Send Invite Link</ButtonSpinner>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -39,8 +39,16 @@ const schema = yup.object({
 // kept as separate props rather than collapsed into one, because they answer different
 // questions ("has this batch left Draft" vs "is it deactivated") and BatchDetail computes them
 // separately.
-export default function ConfigureBatchStep({ onCreated, existingBatch, readOnly = false, locked = false }) {
-  const cutoffsOnly = readOnly && !locked;
+//
+// `canEditCutoffs` is a third, independent gate: cutoffs grade results, so revising one is a
+// policy call reserved for admins, not something a TA does from this screen even though they can
+// otherwise reach it. Kept apart from `locked`/`readOnly` because it answers yet another
+// question ("is this viewer allowed to", not "has this batch left Draft") - the backend enforces
+// the same rule (BatchDetailView.patch), so this only spares a TA a submit-then-403 round trip.
+export default function ConfigureBatchStep({
+  onCreated, existingBatch, readOnly = false, locked = false, canEditCutoffs = true,
+}) {
+  const cutoffsOnly = readOnly && !locked && canEditCutoffs;
   const [submitting, setSubmitting] = useState(false);
   const {
     register,
@@ -81,8 +89,11 @@ export default function ConfigureBatchStep({ onCreated, existingBatch, readOnly 
         <div className="alert" style={{ marginBottom: 14 }}>
           {locked
             ? 'This batch is deactivated - its configuration is locked.'
-            : 'This batch has been finalized. Candidates may already have sat the exam, so the '
-              + 'schedule and question counts are locked - only the section cutoffs can still be changed.'}
+            : canEditCutoffs
+              ? 'This batch has been finalized. Candidates may already have sat the exam, so the '
+                + 'schedule and question counts are locked - only the section cutoffs can still be changed.'
+              : 'This batch has been finalized and its configuration is locked. Section cutoffs '
+                + 'can only be changed by an admin.'}
         </div>
       )}
       <form onSubmit={handleSubmit(onSubmit)} noValidate>
@@ -124,8 +135,9 @@ export default function ConfigureBatchStep({ onCreated, existingBatch, readOnly 
           </div>
         </fieldset>
 
-        {/* The one live sub-form: disabled only when the whole batch is locked (deactivated). */}
-        <fieldset disabled={locked} style={{ border: 'none', padding: 0, margin: 0 }}>
+        {/* The one live sub-form: disabled when the whole batch is locked (deactivated), or when
+            this viewer isn't allowed to touch cutoffs at all (a TA, on a finalized batch). */}
+        <fieldset disabled={locked || !canEditCutoffs} style={{ border: 'none', padding: 0, margin: 0 }}>
           <div className="grid-4">
             {SECTIONS.map((s) => (
               <div key={s.key} className="field">
@@ -139,7 +151,7 @@ export default function ConfigureBatchStep({ onCreated, existingBatch, readOnly 
           </div>
         </fieldset>
 
-        {!locked && (
+        {!locked && canEditCutoffs && (
           <div className="btn-row" style={{ display: 'flex', gap: 10, marginTop: 8 }}>
             <button type="submit" className="btn primary" disabled={submitting}>
               <ButtonSpinner loading={submitting}>

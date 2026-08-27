@@ -189,6 +189,7 @@ export default function AuditLogs() {
         hasNext={Boolean(pageMeta.next)}
         onPrev={() => refresh(filters, page - 1)}
         onNext={() => refresh(filters, page + 1)}
+        onPageChange={(p) => refresh(filters, p)}
       />
     </div>
   );

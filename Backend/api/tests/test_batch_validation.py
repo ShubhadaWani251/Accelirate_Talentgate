@@ -145,7 +145,7 @@ class TestCutoffEditIsIsolatedToOneBatch:
     """
 
     def test_patching_one_batchs_cutoff_does_not_change_the_defaults(
-        self, ta_user, client_for, make_batch
+        self, admin_user, ta_user, client_for, make_batch
     ):
         save_batch_defaults({
             'exam_duration_minutes': 45,
@@ -153,10 +153,10 @@ class TestCutoffEditIsIsolatedToOneBatch:
             'verbal_questions': 10, 'programming_questions': 10,
             'logical_cutoff': 70, 'quantitative_cutoff': 70,
             'verbal_cutoff': 70, 'programming_cutoff': 70,
-        }, ta_user)
+        }, admin_user)
         batch = make_batch(ta_user, status=Batch.Status.IN_PROGRESS, logical_cutoff=70)
 
-        response = client_for(ta_user).patch(
+        response = client_for(admin_user).patch(
             '/api/batches/%d/' % batch.batch_id, {'logical_cutoff': 40}, format='json',
         )
 
@@ -165,17 +165,28 @@ class TestCutoffEditIsIsolatedToOneBatch:
         assert get_batch_defaults()['logical_cutoff'] == 70.0
 
     def test_a_second_batch_is_unaffected_by_the_first_batchs_cutoff_edit(
-        self, ta_user, client_for, make_batch
+        self, admin_user, ta_user, client_for, make_batch
     ):
         batch_a = make_batch(ta_user, status=Batch.Status.IN_PROGRESS, logical_cutoff=70)
         batch_b = make_batch(ta_user, status=Batch.Status.IN_PROGRESS, logical_cutoff=70)
 
-        client_for(ta_user).patch(
+        client_for(admin_user).patch(
             '/api/batches/%d/' % batch_a.batch_id, {'logical_cutoff': 40}, format='json',
         )
 
         batch_b.refresh_from_db()
         assert float(batch_b.logical_cutoff) == 70.0
+
+    def test_a_ta_cannot_change_a_cutoff(self, ta_user, client_for, make_batch):
+        batch = make_batch(ta_user, status=Batch.Status.IN_PROGRESS, logical_cutoff=70)
+
+        response = client_for(ta_user).patch(
+            '/api/batches/%d/' % batch.batch_id, {'logical_cutoff': 40}, format='json',
+        )
+
+        assert response.status_code == 403
+        batch.refresh_from_db()
+        assert float(batch.logical_cutoff) == 70.0
 
 
 class TestDefaultsAreAdminOnly:

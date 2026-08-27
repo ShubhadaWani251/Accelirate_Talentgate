@@ -1,3 +1,5 @@
+import re
+
 from rest_framework import serializers
 
 from api.models import AuditLog, Candidate, ExamAttempt
@@ -349,18 +351,41 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
         attempt = _latest_attempt(candidate)
         if not attempt:
             return {
-                'aadhaar_capture_url': None,
-                'face_photo_url': None,
-                'session_recording_url': None,
+                'aadhaar_capture_url': None, 'aadhaar_capture_download_url': None,
+                'face_photo_url': None, 'face_photo_download_url': None,
+                'session_recording_url': None, 'session_recording_download_url': None,
             }
         # Signed here, at the moment they are handed to the browser, rather than read straight
         # off the row. The stored values are unsigned pointers and would 404 on their own; each
         # URL returned below carries a token valid for a couple of hours. See
         # services/blob_storage.fresh_read_url for why the credential is not persisted.
+        #
+        # Two URLs per file, not one: the *_url fields open inline for "View Full Image"/"Play
+        # Recording", while *_download_url carries a Content-Disposition: attachment override so
+        # the browser actually saves the file for "Download" - the plain HTML `download`
+        # attribute a candidate's own <a> tag would otherwise rely on is silently ignored by
+        # every major browser for a cross-origin URL (which a blob storage URL always is), so
+        # those buttons did nothing before this.
+        # Stripped to filename-safe ASCII: a candidate name can carry quotes, commas or
+        # non-ASCII characters, any of which would either break the Content-Disposition header
+        # syntax or need RFC 5987 encoding this doesn't attempt. Falls back to the candidate id
+        # if that strips the name down to nothing.
+        candidate_slug = re.sub(r'[^A-Za-z0-9]+', '_', candidate.full_name).strip('_')
+        candidate_slug = candidate_slug or str(candidate.candidate_id)
         return {
             'aadhaar_capture_url': blob_storage.fresh_read_url(attempt.aadhaar_capture_url),
+            'aadhaar_capture_download_url': blob_storage.fresh_read_url(
+                attempt.aadhaar_capture_url, download_filename=f'{candidate_slug}_aadhaar.jpg',
+            ),
             'face_photo_url': blob_storage.fresh_read_url(attempt.face_photo_url),
+            'face_photo_download_url': blob_storage.fresh_read_url(
+                attempt.face_photo_url, download_filename=f'{candidate_slug}_face_photo.jpg',
+            ),
             'session_recording_url': blob_storage.fresh_read_url(attempt.session_recording_url),
+            'session_recording_download_url': blob_storage.fresh_read_url(
+                attempt.session_recording_url,
+                download_filename=f'{candidate_slug}_session_recording.webm',
+            ),
         }
 
     def get_timeline(self, candidate):

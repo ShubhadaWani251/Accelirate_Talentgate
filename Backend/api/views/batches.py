@@ -138,6 +138,15 @@ class BatchDetailView(APIView):
                                         'longer be changed.'},
                              status=status.HTTP_400_BAD_REQUEST)
 
+        # Cutoffs grade results, so revising one is a policy call, not a data-entry fix - kept
+        # admin-only even though a TA can otherwise PATCH this same endpoint (e.g. the wizard's
+        # own link-window step, which never touches these fields).
+        if self.EDITABLE_AFTER_DRAFT & set(request.data) and request.user.role.role_code != 'admin':
+            return Response(
+                {'detail': 'Only an admin can change section cutoffs.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         if batch.status != Batch.Status.DRAFT:
             locked = set(request.data) - self.EDITABLE_AFTER_DRAFT
             if locked:

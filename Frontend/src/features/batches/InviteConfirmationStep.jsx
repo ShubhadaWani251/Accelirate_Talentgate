@@ -53,6 +53,9 @@ const schema = yup.object({
 export default function InviteConfirmationStep({ summary, onBack, onSent }) {
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState(null);
+  // Set only once the form has passed validation - the confirm popup below sends exactly these
+  // values, so there's no second read of the (possibly since-changed) form state at send time.
+  const [pendingValues, setPendingValues] = useState(null);
   const {
     register,
     handleSubmit,
@@ -69,7 +72,14 @@ export default function InviteConfirmationStep({ summary, onBack, onSent }) {
   const candidateIds = summary.selected_candidate_ids || [];
   const skipped = summary.skipped_count ?? 0;
 
-  async function onConfirm(values) {
+  // Runs after the form already validated (link dates, window-covers-exam) - only opens the
+  // confirm popup. Nothing is sent yet.
+  function onValidated(values) {
+    setPendingValues(values);
+  }
+
+  async function doSend() {
+    const values = pendingValues;
     setSending(true);
     try {
       // The window first: if it's rejected server-side too (belt and braces - the client check
@@ -90,6 +100,7 @@ export default function InviteConfirmationStep({ summary, onBack, onSent }) {
       onSent?.(res);
     } catch (err) {
       toast.error(extractErrorMessage(err, ['link_valid_from', 'link_valid_until']));
+      setPendingValues(null);
     } finally {
       setSending(false);
     }
@@ -148,7 +159,7 @@ export default function InviteConfirmationStep({ summary, onBack, onSent }) {
         escalation contact
       </div>
 
-      <form onSubmit={handleSubmit(onConfirm)} noValidate>
+      <form onSubmit={handleSubmit(onValidated)} noValidate>
         <div className="grid-2">
           <div className="field">
             <label htmlFor="link_valid_from">Link Valid From</label>
@@ -180,10 +191,33 @@ export default function InviteConfirmationStep({ summary, onBack, onSent }) {
         <div className="btn-row" style={{ display: 'flex', gap: 10, marginTop: 14 }}>
           <button type="button" className="btn" onClick={onBack} disabled={sending}>Back / Edit</button>
           <button type="submit" className="btn primary" disabled={sending}>
-            <ButtonSpinner loading={sending}>Confirm & Send Invites</ButtonSpinner>
+            Send Invites
           </button>
         </div>
       </form>
+
+      {pendingValues && (
+        <div className="modal-overlay">
+          <div className="modal-box">
+            <h4>Confirm Send Invite</h4>
+            <p>
+              <b>{summary.selected_count} candidate(s)</b> in <b>{summary.batch_name}</b> will be
+              emailed their assessment link, valid from{' '}
+              <b>{pendingValues.link_valid_from.replace('T', ' ')}</b> to{' '}
+              <b>{pendingValues.link_valid_until.replace('T', ' ')}</b>. This cannot be undone.
+            </p>
+            <div className="btn-row">
+              <button className="btn" type="button" onClick={() => setPendingValues(null)}
+                      disabled={sending}>
+                Cancel
+              </button>
+              <button className="btn primary" type="button" disabled={sending} onClick={doSend}>
+                <ButtonSpinner loading={sending}>Send Invites</ButtonSpinner>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

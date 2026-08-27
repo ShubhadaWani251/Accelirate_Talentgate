@@ -4,17 +4,21 @@ import { useState } from 'react';
 // sequence of fields they see in Excel. `label` doubles as the error_fields key the server
 // reports, so a field at fault is highlighted without a second mapping.
 const EDITABLE = [
-  { key: 'first_name', label: 'Name' },
-  { key: 'last_name', label: 'Last Name' },
-  { key: 'email', label: 'Email' },
-  { key: 'phone', label: 'Mobile' },
+  // label stays 'Name' (not 'First Name') because it doubles as the error_fields key the server
+  // reports - the spreadsheet has one Name column, which the server splits on import and
+  // therefore reports errors against under the original column name, not the split field.
+  // displayLabel is what the user actually sees; falls back to label where there's no split.
+  { key: 'first_name', label: 'Name', displayLabel: 'First Name', placeholder: 'e.g. Asha' },
+  { key: 'last_name', label: 'Last Name', placeholder: 'e.g. Rao' },
+  { key: 'email', label: 'Email', placeholder: 'name@example.com' },
+  { key: 'phone', label: 'Mobile', placeholder: '10-digit mobile number' },
   { key: 'aadhaar_last4', label: 'Aadhaar Last 4 Digits', type: 'aadhaar' },
-  { key: 'college_name', label: 'College Name' },
-  { key: 'degree', label: 'Degree' },
-  { key: 'stream', label: 'Stream' },
-  { key: 'percentage', label: 'Percentage' },
-  { key: 'passing_out_year', label: 'Passing Out Year' },
-  { key: 'location', label: 'Location' },
+  { key: 'college_name', label: 'College Name', placeholder: 'e.g. XYZ Institute of Technology' },
+  { key: 'degree', label: 'Degree', placeholder: 'e.g. B.Tech' },
+  { key: 'stream', label: 'Stream', placeholder: 'e.g. Computer Science' },
+  { key: 'percentage', label: 'Percentage', placeholder: 'e.g. 75' },
+  { key: 'passing_out_year', label: 'Passing Out Year', placeholder: 'e.g. 2025' },
+  { key: 'location', label: 'Location', placeholder: 'e.g. Pune' },
 ];
 
 const DUPLICATE_PILL = {
@@ -70,7 +74,7 @@ export default function CandidateErrorRow({
             {EDITABLE.map((f) => (
               <div key={f.key} className="field">
                 <label>
-                  {f.label}
+                  {f.displayLabel || f.label}
                   {f.type === 'aadhaar' && (
                     <span style={{ color: 'var(--muted)', fontWeight: 400 }}>
                       {' '}— currently {row.aadhaar_last4 || 'not set'}
@@ -80,7 +84,7 @@ export default function CandidateErrorRow({
                 <input
                   value={draft[f.key] ?? ''}
                   className={errorFields.has(f.label) ? 'has-error' : ''}
-                  placeholder={f.type === 'aadhaar' ? 'Leave blank to keep the current value' : '4 digits'}
+                  placeholder={f.type === 'aadhaar' ? 'Leave blank to keep the current value' : f.placeholder}
                   onChange={(e) => setDraft({ ...draft, [f.key]: e.target.value })}
                 />
               </div>

@@ -181,6 +181,7 @@ export default function BatchList() {
         hasNext={Boolean(pageMeta.next)}
         onPrev={() => refresh(search, page - 1)}
         onNext={() => refresh(search, page + 1)}
+        onPageChange={(p) => refresh(search, p)}
       />
     </div>
   );
