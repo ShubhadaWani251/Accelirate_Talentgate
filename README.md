@@ -174,23 +174,28 @@ and a comment on what each one does. Highlights:
 
 ### Scheduled jobs (required in any real deployment)
 
-Three housekeeping commands have to run on a timer. None is optional: without them, abandoned
-exam attempts sit `in_progress` forever, unfinalized draft batches are never cleaned up, and an
-invitation email interrupted by a deploy is never retried.
+Three commands have to run on a timer. None is optional: without them, abandoned exam attempts
+sit `in_progress` forever, unfinalized draft batches are never cleaned up, and **invitation
+emails are never sent at all**.
 
-There is no task queue - these are plain management commands, driven by whatever scheduler the
-host already provides (cron, Windows Task Scheduler, an Azure WebJob, or the `scheduler` service
-in `docker-compose.yml`). See **Deployment** below for ready-made configurations.
+There is no Celery/broker-based task queue - `process_email_queue` is a DB-backed one instead:
+creating an Invitation (sending an invite, or re-sending one) only sets `email_status=QUEUED` on
+the row; nothing sends it inline from the request that created it. `process_email_queue` is the
+worker that drains that queue, run on whatever scheduler the host already provides (cron,
+Windows Task Scheduler, an Azure WebJob, or the `scheduler` service in `docker-compose.yml`).
+See **Deployment** below for ready-made configurations.
 
 | Command | Suggested interval | What it does |
 |---|---|---|
 | `python manage.py finalize_expired_attempts` | every 5-15 min | Finalizes exam attempts still `in_progress` past their deadline, and ones whose candidate never started before the invitation link expired. |
 | `python manage.py delete_expired_draft_batches` | every 15-60 min | **Deletes** Draft batches not finalized within 24 hours of creation, together with their staged candidates. Run `--dry-run` first to see what it would remove. |
-| `python manage.py retry_stalled_invite_emails` | every 15 min | Re-sends invitation emails left `queued` by an interrupted send. Emails go out on a daemon thread inside the web worker, so a deploy's SIGTERM kills any still in flight and they would otherwise sit `queued` forever, reading as "in progress". Skips rows whose link is already opened or expired. |
+| `python manage.py process_email_queue` | every 1 min | Sends every queued invitation email - the only thing that does. Not a backup job like the other two; a candidate is waiting on this for their assessment link. Paced by `INVITE_SEND_DELAY_SECONDS` between sends, and stops auto-retrying a row past `INVITE_MAX_RETRY_ATTEMPTS` failures (`--include-failed` opts a run into retrying failures at all; `--ignore-retry-limit` overrides the cap for a deliberate one-off push). Skips rows whose link is already opened or expired. |
 
 All three are safe to run more often than suggested - each is idempotent and does nothing when
 there is nothing to process. `delete_expired_draft_batches` really deletes rows, so read
-`Backend/api/services/draft_expiry.py` before changing the 24-hour window.
+`Backend/api/services/draft_expiry.py` before changing the 24-hour window. `process_email_queue`
+specifically should not run LESS often than every minute or two - unlike the other two, nothing
+else stands in for it if it lags.
 
 ## Testing
 

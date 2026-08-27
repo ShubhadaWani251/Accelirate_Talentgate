@@ -98,15 +98,9 @@ export default function ConfigureBatchStep({
       )}
       <form onSubmit={handleSubmit(onSubmit)} noValidate>
         <fieldset disabled style={{ border: 'none', padding: 0, margin: 0 }}>
-          <div className="grid-2">
-            <div className="field">
-              <label htmlFor="batch_name">Batch Name</label>
-              <input id="batch_name" {...register('batch_name')} />
-            </div>
-            <div className="field">
-              <label htmlFor="college_name">College Name</label>
-              <input id="college_name" {...register('college_name')} />
-            </div>
+          <div className="field" style={{ maxWidth: 420 }}>
+            <label htmlFor="batch_name">Batch Name</label>
+            <input id="batch_name" {...register('batch_name')} />
           </div>
 
           <div className="grid-2">

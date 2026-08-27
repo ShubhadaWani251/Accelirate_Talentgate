@@ -107,9 +107,25 @@ class ExamTokenLandingView(APIView):
             invitation.save(update_fields=['link_clicked_at'])
 
         if invitation.link_expired_at < timezone.now():
-            return Response({'reason': 'expired'})
+            return Response({
+                'reason': 'expired',
+                'link_valid_from': invitation.batch.link_valid_from.isoformat(),
+                'link_valid_until': invitation.batch.link_valid_until.isoformat(),
+            })
 
         attempt = ExamAttempt.objects.filter(invitation=invitation).first()
+
+        # Checked before the clock has ever run for this attempt - once started_at is set the
+        # window was open at the time it started (begin_exam enforces that), so this can never
+        # block a genuinely in-progress exam, only a candidate arriving before it opens.
+        if (attempt is None or attempt.started_at is None) and exam_session.link_not_yet_open(
+            invitation.batch
+        ):
+            return Response({
+                'reason': 'not_yet_open',
+                'opens_at': invitation.batch.link_valid_from.isoformat(),
+            })
+
         if attempt is None:
             return Response({'reason': 'ok', 'resume': False})
 
@@ -156,6 +172,21 @@ class ExamVerifyEmailView(APIView):
             .filter(invitation=invitation)
             .first()
         )
+
+        # Belt and braces alongside ExamTokenLandingView's identical check - the frontend never
+        # shows this form until landing has already confirmed the window is open, but this
+        # endpoint is reachable directly, and started_at can never be set before the window
+        # opened (begin_exam enforces that), so this never blocks a real in-progress exam.
+        if (attempt is None or attempt.started_at is None) and exam_session.link_not_yet_open(
+            invitation.batch
+        ):
+            return Response(
+                {'detail': f'This assessment is not open yet. It becomes available at '
+                            f'{invitation.batch.link_valid_from.isoformat()}.',
+                 'opens_at': invitation.batch.link_valid_from.isoformat()},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         if attempt and attempt.status == ExamAttempt.Status.IN_PROGRESS:
             if exam_session.is_expired(attempt):
                 exam_session.finalize_attempt(attempt, outcome='submitted')
@@ -193,6 +224,17 @@ class ExamIdentityCaptureView(APIView):
         if invitation is None or invitation.link_expired_at < timezone.now():
             return Response({'detail': 'This assessment link is invalid or has expired.'},
                              status=status.HTTP_400_BAD_REQUEST)
+
+        # Identity capture always happens before the clock starts (begin_exam is the exam
+        # screen's own first move, after this), so - unlike the landing/verify-email checks -
+        # there's no in-progress-with-started_at case to carve out here.
+        if exam_session.link_not_yet_open(invitation.batch):
+            return Response(
+                {'detail': f'This assessment is not open yet. It becomes available at '
+                            f'{invitation.batch.link_valid_from.isoformat()}.',
+                 'opens_at': invitation.batch.link_valid_from.isoformat()},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         id_photo = request.FILES.get('id_photo')
         face_photo = request.FILES.get('face_photo')
@@ -271,7 +313,15 @@ class ExamBeginView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        attempt = exam_session.begin_exam(request.user)
+        try:
+            attempt = exam_session.begin_exam(request.user)
+        except exam_session.ExamNotYetOpenError as exc:
+            return Response(
+                {'detail': f'This assessment is not open yet. It becomes available at '
+                            f'{exc.opens_at.isoformat()}.',
+                 'opens_at': exc.opens_at.isoformat()},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         return Response(exam_session.build_session_state(attempt))
 
 

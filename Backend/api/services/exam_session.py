@@ -17,6 +17,27 @@ from api.services.question_selection import (
 )
 
 
+class ExamNotYetOpenError(Exception):
+    """Raised by begin_exam() when the candidate has reached the exam screen before the batch's
+    own link_valid_from - e.g. invites sent today for a window that opens tomorrow, and a
+    candidate opens the link early out of curiosity. Carries the open time so the caller can
+    tell them exactly when to come back.
+    """
+
+    def __init__(self, opens_at):
+        self.opens_at = opens_at
+        super().__init__(f'Exam opens at {opens_at.isoformat()}')
+
+
+def link_not_yet_open(batch, now=None):
+    """True if the assessment window hasn't started yet. `batch.link_valid_from` is frozen once
+    a batch leaves Draft (BatchDetailView.EDITABLE_AFTER_DRAFT), so this is stable for the whole
+    life of a sent invitation - never a moving target underneath an in-progress attempt.
+    """
+    now = now or timezone.now()
+    return bool(batch.link_valid_from) and now < batch.link_valid_from
+
+
 class TerminationReason:
     """Every way an attempt can be ended early, one per distinct candidate-facing message -
     a single generic "you did something wrong" message was explicitly rejected in favor of
@@ -273,8 +294,18 @@ def begin_exam(attempt):
 
     Idempotent: a reload/resume re-hits this and keeps the original started_at rather than
     granting a fresh full duration (which would otherwise be a trivial way to get unlimited time).
+
+    Raises ExamNotYetOpenError if the batch's window hasn't opened yet - e.g. invites sent today
+    for tomorrow's window, and a candidate opens the link early. This is the authoritative gate:
+    the landing screen and email-verify step both also check this earlier, for a cleaner
+    candidate-facing message before they've gone through camera/identity capture, but every path
+    into an exam ends up here, so this is what actually stops the clock from starting regardless
+    of how those earlier checks are reached or bypassed.
     """
     if attempt.started_at is None:
+        batch = attempt.invitation.batch
+        if link_not_yet_open(batch):
+            raise ExamNotYetOpenError(batch.link_valid_from)
         attempt.started_at = timezone.now()
         attempt.save(update_fields=['started_at'])
         # The link is consumed at exactly this moment - the candidate is now in the exam

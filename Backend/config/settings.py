@@ -275,11 +275,32 @@ EMAIL_BACKEND = os.environ.get('EMAIL_BACKEND', 'api.services.graph_email.GraphE
 GRAPH_TENANT_ID = os.environ.get('GRAPH_TENANT_ID', '')
 GRAPH_CLIENT_ID = os.environ.get('GRAPH_CLIENT_ID', '')
 GRAPH_CLIENT_SECRET = os.environ.get('GRAPH_CLIENT_SECRET', '')
+# Certificate-based app auth (private_key_jwt), an alternative to the client secret above -
+# Microsoft's recommended stronger option for app-only Graph access. Both GRAPH_CERT_PATH (a PEM
+# file holding the private key) and GRAPH_CERT_THUMBPRINT (the SHA-1 thumbprint Azure shows once
+# the matching public certificate is uploaded to the app registration) must be set to activate
+# it; graph_email.py falls back to GRAPH_CLIENT_SECRET whenever either is blank, so leaving these
+# unset is always safe. See Backend/api/management/commands/generate_graph_cert.py to produce
+# the key pair and get the exact values to paste here and into the Azure Portal.
+GRAPH_CERT_PATH = os.environ.get('GRAPH_CERT_PATH', '')
+GRAPH_CERT_THUMBPRINT = os.environ.get('GRAPH_CERT_THUMBPRINT', '')
 # Mailbox the app sends as. Must be a real mailbox in the tenant that the app registration is
 # permitted to send on behalf of.
 GRAPH_SENDER = os.environ.get('GRAPH_SENDER', '')
 # Keeping a copy of every candidate invite in the service mailbox is rarely wanted.
 GRAPH_SAVE_TO_SENT_ITEMS = os.environ.get('GRAPH_SAVE_TO_SENT_ITEMS', 'false').lower() == 'true'
+
+# Deliberate pacing between invitation emails, applied by management/commands/
+# process_email_queue.py - the queue worker that sends every one of them - not Graph's own rate
+# limit, it's the RECEIVING mail systems reading a burst of 100+ near-identical emails as
+# bulk/spam activity. A small gap between sends is cheap insurance against that, without
+# meaningfully slowing a real batch (100 candidates at the default adds under 3 minutes total).
+INVITE_SEND_DELAY_SECONDS = float(os.environ.get('INVITE_SEND_DELAY_SECONDS', '1.5'))
+
+# How many automatic retry-sweep attempts a stalled/failed invitation gets before the sweep
+# stops touching it and it needs a deliberate manual resend. Without a ceiling, a permanently
+# bad address (typo, mailbox doesn't exist) would be re-attempted by every scheduled run forever.
+INVITE_MAX_RETRY_ATTEMPTS = int(os.environ.get('INVITE_MAX_RETRY_ATTEMPTS', '5'))
 
 # Retained so EMAIL_BACKEND can be pointed back at SendGrid if Graph is unavailable.
 ANYMAIL = {
