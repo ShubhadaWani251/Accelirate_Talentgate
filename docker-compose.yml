@@ -76,14 +76,22 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     # A plain sleep loop rather than cron: one less moving part, logs straight to stdout where
     # the platform already collects them, and no crond-in-container signal handling to get
-    # wrong. Each command is idempotent and cheap when there is nothing to do, so the fixed
-    # 10-minute interval covers all three comfortably.
+    # wrong. Two loops, not one, because process_email_queue is not a backup job like the other
+    # two - it is the entire invitation-sending pipeline (creating an Invitation only queues it;
+    # nothing else ever sends one - see that command's module docstring), so it runs every
+    # minute. finalize_expired_attempts/delete_expired_draft_batches are genuine housekeeping
+    # with no user waiting on them, so the original 10-minute interval still fits.
     command:
       - |
-        echo "scheduler: starting (10 minute interval)"
+        echo "scheduler: starting (email queue every 1 min, housekeeping every 10 min)"
+        (
+          while true; do
+            python manage.py process_email_queue || echo "scheduler: process_email_queue FAILED"
+            sleep 60
+          done
+        ) &
         while true; do
           python manage.py finalize_expired_attempts || echo "scheduler: finalize_expired_attempts FAILED"
           python manage.py delete_expired_draft_batches || echo "scheduler: delete_expired_draft_batches FAILED"
-          python manage.py retry_stalled_invite_emails || echo "scheduler: retry_stalled_invite_emails FAILED"
           sleep 600
         done

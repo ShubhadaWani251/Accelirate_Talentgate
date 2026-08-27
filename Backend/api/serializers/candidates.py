@@ -1,8 +1,9 @@
 import re
 
+from django.conf import settings
 from rest_framework import serializers
 
-from api.models import AuditLog, Candidate, ExamAttempt
+from api.models import AuditLog, Candidate, ExamAttempt, Invitation
 from api.serializers.common import format_aadhaar_last4
 from api.services import blob_storage
 from api.services.exam_session import termination_label
@@ -116,6 +117,23 @@ def _latest_invitation(candidate):
     return candidate._cached_latest_invitation
 
 
+def _email_status_display(invitation):
+    """A richer label than the bare EmailStatus choice for the two states where retry_count
+    actually changes what the row means: a FAILED row the sweep will keep trying looks very
+    different from one it has given up on, and a SENT row that only went out after several
+    automatic retries is worth knowing about even though it ended up in the same place as one
+    that sent cleanly on the first try.
+    """
+    base = invitation.get_email_status_display()
+    if invitation.email_status == Invitation.EmailStatus.FAILED:
+        if invitation.retry_count >= settings.INVITE_MAX_RETRY_ATTEMPTS:
+            return f'{base} (retries exhausted)'
+        return f'{base} (retry pending)'
+    if invitation.email_status == Invitation.EmailStatus.SENT and invitation.retry_count > 0:
+        return f'{base} (after {invitation.retry_count} retr{"y" if invitation.retry_count == 1 else "ies"})'
+    return base
+
+
 def _email_delivery(candidate):
     """Email send state for the candidate's latest invitation.
 
@@ -133,14 +151,16 @@ def _email_delivery(candidate):
             'email_error': None,
             'email_sent_at': None,
             'email_last_attempt_at': None,
+            'retry_count': 0,
         }
         return candidate._cached_email_delivery
     candidate._cached_email_delivery = {
         'email_status': invitation.email_status,
-        'email_status_display': invitation.get_email_status_display(),
+        'email_status_display': _email_status_display(invitation),
         'email_error': invitation.email_error,
         'email_sent_at': invitation.email_sent_at,
         'email_last_attempt_at': invitation.email_last_attempt_at,
+        'retry_count': invitation.retry_count,
     }
     return candidate._cached_email_delivery
 
@@ -168,6 +188,7 @@ class CandidateListSerializer(serializers.ModelSerializer):
     email_status_display = serializers.SerializerMethodField()
     email_error = serializers.SerializerMethodField()
     email_sent_at = serializers.SerializerMethodField()
+    email_retry_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Candidate
@@ -178,6 +199,7 @@ class CandidateListSerializer(serializers.ModelSerializer):
             'logical_score', 'quantitative_score', 'verbal_score', 'programming_score',
             'overall_score', 'total_correct', 'overall_total', 'has_attempt',
             'email_status', 'email_status_display', 'email_error', 'email_sent_at',
+            'email_retry_count',
         ]
 
     def get_aadhaar_last4(self, candidate):
@@ -185,6 +207,9 @@ class CandidateListSerializer(serializers.ModelSerializer):
 
     def get_email_status(self, candidate):
         return _email_delivery(candidate)['email_status']
+
+    def get_email_retry_count(self, candidate):
+        return _email_delivery(candidate)['retry_count']
 
     def get_email_status_display(self, candidate):
         return _email_delivery(candidate)['email_status_display']
@@ -268,6 +293,7 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
     email_error = serializers.SerializerMethodField()
     email_sent_at = serializers.SerializerMethodField()
     email_last_attempt_at = serializers.SerializerMethodField()
+    email_retry_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Candidate
@@ -279,7 +305,7 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
             'section_results',
             'evidence', 'timeline',
             'email_status', 'email_status_display', 'email_error', 'email_sent_at',
-            'email_last_attempt_at',
+            'email_last_attempt_at', 'email_retry_count',
         ]
 
     def get_aadhaar_last4(self, candidate):
@@ -299,6 +325,9 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
 
     def get_email_last_attempt_at(self, candidate):
         return _email_delivery(candidate)['email_last_attempt_at']
+
+    def get_email_retry_count(self, candidate):
+        return _email_delivery(candidate)['retry_count']
 
     def get_status(self, candidate):
         return _effective_status(candidate)[0]

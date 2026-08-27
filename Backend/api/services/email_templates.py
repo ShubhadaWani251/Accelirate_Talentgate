@@ -243,14 +243,20 @@ def format_datetime(value):
     return f'{local.strftime(DATETIME_FORMAT)} {label}'
 
 
-def render_invitation_email(candidate, batch, link):
-    """Resolve the approved invitation copy into (subject, body) for one candidate."""
+def render_invitation_email(candidate, batch, link, sender=None):
+    """Resolve the approved invitation copy into (subject, body) for one candidate.
+
+    `sender` is the staff user actually sending this invite (Invitation.sent_by) - candidates
+    contact THEM, not a shared inbox, since that's who actually knows this candidate's batch and
+    can act on a problem. Falls back to the generic support_email() only when there's no sender
+    to name (Invitation.sent_by is SET_NULL, so a deleted user account leaves this null).
+    """
     return INVITATION_TEMPLATE['subject'], INVITATION_TEMPLATE['body'].format(
         name=candidate.full_name,
         link=link,
         start=format_datetime(batch.link_valid_from),
         end=format_datetime(batch.link_valid_until),
-        support_email=support_email(),
+        support_email=(sender.email if sender else None) or support_email(),
     )
 
 

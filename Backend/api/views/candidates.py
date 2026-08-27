@@ -4,7 +4,6 @@ import urllib.error
 import urllib.request
 import zipfile
 
-from django.conf import settings
 from django.db.models import Prefetch, Q
 from django.http import Http404, HttpResponse
 from django.utils.decorators import method_decorator
@@ -36,7 +35,7 @@ from api.services.excel_upload import generate_candidates_workbook
 from api.services.invites import (
     BatchNotInvitableError,
     create_single_reinvite, partition_by_deliverable,
-    send_invites_async, send_notification_emails,
+    send_notification_emails,
 )
 from api.utils.net import ratelimit_user_key
 
@@ -212,13 +211,14 @@ class CandidateResendInviteView(APIView):
         # Draft and Cancelled both block sending; the service is the authority on which
         # statuses may invite and on the wording, so it isn't restated here.
         try:
-            invitation = create_single_reinvite(candidate, request.user)
+            # Only queues it - management/commands/process_email_queue.py is what actually
+            # sends, on its own schedule.
+            create_single_reinvite(candidate, request.user)
         except BatchNotInvitableError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        send_invites_async([invitation], settings.FRONTEND_ORIGIN)
         log_action(request, request.user, 'invite_sent', 'candidate', candidate.candidate_id,
                    details={'re_invite': True})
-        return Response({'detail': f'Invite re-sent to {candidate.email}.'})
+        return Response({'detail': f'A new invite has been queued for {candidate.email}.'})
 
 
 class CandidateBulkResendInviteView(APIView):
@@ -275,12 +275,13 @@ class CandidateBulkResendInviteView(APIView):
             return Response({'detail': blocked or 'No invitations could be sent.'},
                              status=status.HTTP_400_BAD_REQUEST)
 
-        send_invites_async(invitations, settings.FRONTEND_ORIGIN)
+        # Only queues them - management/commands/process_email_queue.py is what actually sends,
+        # on its own schedule.
         for invitation in invitations:
             log_action(request, request.user, 'invite_sent', 'candidate', invitation.candidate_id,
                        details={'re_invite': True, 'bulk': True})
 
-        detail = f'A new assessment link has been sent to {len(invitations)} candidate(s).'
+        detail = f'A new assessment link has been queued for {len(invitations)} candidate(s).'
         if skipped_no_email:
             detail += f' {len(skipped_no_email)} skipped - no email address on record.'
         if blocked:

@@ -2,7 +2,6 @@ import io
 import logging
 import zipfile
 
-from django.conf import settings
 from django.db import DataError, transaction
 from django.db.models import Q
 from django.http import Http404, HttpResponse
@@ -35,7 +34,6 @@ from api.services.excel_upload import (
 )
 from api.services.invites import (
     BatchNotInvitableError, assert_batch_can_invite, create_invitations,
-    send_invites_async,
 )
 
 logger = logging.getLogger(__name__)
@@ -705,9 +703,11 @@ class BatchSendInvitesView(APIView):
             return Response({'detail': 'Select the candidates to invite first.'},
                              status=status.HTTP_400_BAD_REQUEST)
 
+        # Only queues them (email_status=QUEUED) - management/commands/process_email_queue.py is
+        # what actually sends, on its own schedule. See that command's module docstring for why
+        # nothing sends inline from this request any more.
         invitations = create_invitations(batch, request.user, candidate_ids=candidate_ids)
         if invitations:
-            send_invites_async(invitations, settings.FRONTEND_ORIGIN)
             for invitation in invitations:
                 log_action(request, request.user, 'invite_sent', 'candidate', invitation.candidate_id,
                            details={'batch_id': batch.batch_id})
