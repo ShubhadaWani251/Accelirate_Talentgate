@@ -49,6 +49,7 @@ SUPPORT_EMAIL = 'support@accelirate.com'
 
 # Fixed, so tests asserting on generated assessment links do not depend on a developer's .env.
 FRONTEND_ORIGIN = 'https://exam.example.test'
+STAFF_APP_URL = 'https://staff.example.test'
 
 # No real cloud storage. Tests that exercise evidence URL signing set this themselves.
 AZURE_STORAGE_CONNECTION_STRING = ''
