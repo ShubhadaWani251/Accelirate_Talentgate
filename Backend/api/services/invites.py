@@ -52,9 +52,9 @@ def _generate_token():
 
 def create_invitations(batch, user, candidate_ids=None):
     """Create one Invitation per eligible (OK-validated, still pending) candidate on this
-    batch and flip their status to INVITED. Email sending itself is a separate, async step
-    (see send_invites_async) - status reflects "invite issued", not "email delivered"
-    (see Invitation.email_status for the latter).
+    batch and flip their status to INVITED. This only QUEUES the email - actually sending it is
+    management/commands/process_email_queue.py's job, on its own schedule - so status reflects
+    "invite issued", not "email delivered" (see Invitation.email_status for the latter).
 
     `candidate_ids` narrows this to an explicit subset - the reviewer's checkbox selection on
     the upload screen. Omit it to invite every still-pending candidate on the batch.
@@ -164,7 +164,7 @@ def send_invite_email(invitation, base_url):
     """
     candidate = invitation.candidate
     link = f"{base_url.rstrip('/')}/t/{invitation.unique_link_token}"
-    subject, body = render_invitation_email(candidate, invitation.batch, link)
+    subject, body = render_invitation_email(candidate, invitation.batch, link, invitation.sent_by)
     # cta_url turns the assessment link into a real button in the HTML part; the bare URL
     # is still printed beneath it and in the plain-text part.
     send_candidate_email(subject, body, candidate.email, cta_url=link,
@@ -174,11 +174,10 @@ def send_invite_email(invitation, base_url):
 def send_invite_and_record(invitation, base_url):
     """Send one invitation email and record the outcome on the row. Returns True if it sent.
 
-    The single place an invitation's email_status is written, so every caller behaves
-    identically: the background thread used by send_invites_async, and the retry sweep in
-    management/commands/retry_stalled_invite_emails.py. When this logic lived inline inside the
-    thread, the retry path could not reuse it and would have had to restate the status handling -
-    which is exactly how two copies drift apart.
+    The single place an invitation's email_status is written. Its only caller is
+    management/commands/process_email_queue.py - creating an Invitation (create_invitations /
+    create_single_reinvite) only queues it (email_status=QUEUED); nothing sends inline from the
+    request that created it. See that command's module docstring for why.
 
     Never raises: the outcome is the return value plus the row's own state. A caller looping
     over many invitations must not have the remainder abandoned because one address was bad.
@@ -229,28 +228,6 @@ def send_invite_and_record(invitation, base_url):
     return True
 
 
-def send_invites_async(invitations, base_url):
-    """Fire off all invite emails on a single background thread (sequential, not one
-    thread per candidate) - keeps the finalize/send-invites request fast regardless of
-    batch size. Delivery outcome is tracked per-invitation via email_status.
-
-    The thread is a daemon, so a process shutdown - a deploy sending SIGTERM to the worker -
-    kills it mid-run and any invitation it had not reached yet stays QUEUED. That cannot be
-    recovered here, because the request that started it is long gone; it is covered by the
-    retry_stalled_invite_emails command, which re-sends anything still QUEUED past a grace
-    period. Making the thread non-daemon instead would delay every deploy by however long the
-    remaining sends take and still lose them on a hard kill.
-    """
-    def _worker():
-        try:
-            for invitation in invitations:
-                send_invite_and_record(invitation, base_url)
-        finally:
-            connections.close_all()
-
-    threading.Thread(target=_worker, daemon=True).start()
-
-
 def partition_by_deliverable(candidates):
     """Split into (sendable, skipped) on whether there's an address to send to.
 
@@ -267,8 +244,11 @@ def partition_by_deliverable(candidates):
 
 def send_notification_emails(candidates, subject, body_for):
     """Send a notification (e.g. 'On Hold', 'Shortlisted', 'Not Selected') to a shortlist of
-    candidates, on a single background thread - same fire-and-forget pattern as
-    send_invites_async, since these emails don't have a per-row status to track back.
+    candidates, on a single background thread - fire-and-forget, since these emails don't have a
+    per-row status to track back the way an Invitation does. Unlike invitation emails (see
+    management/commands/process_email_queue.py), these stay on the inline thread: a TA-triggered
+    notification is typically a small, deliberate shortlist, not the 100+-candidate blast that
+    made a durable queue worth the complexity for invitations specifically.
 
     `body_for` is a callable taking a candidate and returning that candidate's message body,
     so approved templates can personalise per recipient while a custom message stays constant.

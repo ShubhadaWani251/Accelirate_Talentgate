@@ -35,6 +35,11 @@ whitenoise==6.12.0
 # implemented in api/services/graph_email.py directly on top of requests.
 django-anymail==15.1
 requests==2.34.2
+# Signs the private_key_jwt client assertion for certificate-based Graph auth
+# (graph_email._build_client_assertion) - an alternative to GRAPH_CLIENT_SECRET. RS256 needs the
+# cryptography extra to load the PEM private key; declared directly rather than relying on it
+# staying a transitive dependency of djangorestframework-simplejwt.
+PyJWT[crypto]==2.13.0
 
 # --- Spreadsheet upload/export ---
 # Candidate and question bulk upload, and the xlsx exports. openpyxl only - the pandas/numpy/xlrd

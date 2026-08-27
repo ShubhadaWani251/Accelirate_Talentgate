@@ -53,6 +53,11 @@ FRONTEND_ORIGIN = 'https://exam.example.test'
 # No real cloud storage. Tests that exercise evidence URL signing set this themselves.
 AZURE_STORAGE_CONNECTION_STRING = ''
 
+# Real invitation-sending code paced by this (management/commands/process_email_queue.py) is
+# exercised directly in tests - without zeroing this, every one of those tests would actually
+# sleep between simulated sends.
+INVITE_SEND_DELAY_SECONDS = 0
+
 # Rate-limit and login-lockout counters live in the cache. Per-process locmem is right for tests;
 # the clear_cache fixture in conftest empties it around each one so counts cannot leak between
 # tests and make them order-dependent.

@@ -11,17 +11,31 @@ Auth is the OAuth2 client-credentials (app-only) flow, so the app sends as a fix
 no user signed in. That requires an Azure AD app registration with the **application** permission
 `Mail.Send` (not delegated), admin-consented, and a mailbox it is allowed to send as.
 
-Required settings (all from environment):
-    GRAPH_TENANT_ID       directory (tenant) ID of the Azure AD app registration
-    GRAPH_CLIENT_ID       application (client) ID
-    GRAPH_CLIENT_SECRET   client secret value
-    GRAPH_SENDER          mailbox to send as, e.g. talentgate@accelirate.com
+Two ways to authenticate as the app - both use the same client-credentials grant, they just
+prove the app's identity differently:
+
+    GRAPH_TENANT_ID           directory (tenant) ID of the Azure AD app registration
+    GRAPH_CLIENT_ID           application (client) ID
+    GRAPH_SENDER               mailbox to send as, e.g. talentgate@accelirate.com
+
+    GRAPH_CLIENT_SECRET       a shared secret value - simplest to set up, the default
+    -- or --
+    GRAPH_CERT_PATH +          a certificate's private key, presented as a signed JWT
+    GRAPH_CERT_THUMBPRINT      (private_key_jwt) - stronger, no shared secret to leak or expire
+                                unnoticed. Preferred when both are set; falls back to
+                                GRAPH_CLIENT_SECRET otherwise. See
+                                api/management/commands/generate_graph_cert.py to produce the
+                                key pair and the exact values these two settings need.
 """
 
+import base64
 import logging
 import threading
 import time
+import uuid
+from datetime import datetime, timedelta, timezone as dt_timezone
 
+import jwt
 import requests
 from django.conf import settings
 from django.core.mail.backends.base import BaseEmailBackend
@@ -42,6 +56,49 @@ class GraphEmailError(Exception):
     The invite/OTP/notification services catch this to mark delivery failed, exactly as they
     previously caught AnymailError.
     """
+
+
+def _build_client_assertion(token_url, client_id, cert_path, thumbprint_hex):
+    """A JWT the app signs with its own certificate's private key, presented to Azure AD in
+    place of a client secret (RFC 7523 private_key_jwt - Azure AD's supported form of
+    certificate-based app authentication). Short-lived on purpose (5 minutes): unlike a client
+    secret, a leaked assertion is useless almost immediately, since it is minted fresh here on
+    every token fetch rather than being a long-lived credential in its own right.
+
+    x5t is the certificate's SHA-1 thumbprint, base64url-encoded - it is how Azure AD knows
+    which of the app registration's uploaded certificates to verify the signature against, so it
+    has to be exactly the thumbprint Azure shows for that certificate (GRAPH_CERT_THUMBPRINT),
+    not anything derived from the private key file itself.
+    """
+    try:
+        with open(cert_path, 'rb') as f:
+            private_key = f.read()
+    except OSError as exc:
+        raise GraphEmailError(f'Could not read GRAPH_CERT_PATH ({cert_path}): {exc}') from exc
+
+    try:
+        thumbprint_bytes = bytes.fromhex(thumbprint_hex.strip())
+    except ValueError as exc:
+        raise GraphEmailError(
+            f'GRAPH_CERT_THUMBPRINT is not valid hex: {thumbprint_hex!r}'
+        ) from exc
+    x5t = base64.urlsafe_b64encode(thumbprint_bytes).decode().rstrip('=')
+
+    now = datetime.now(dt_timezone.utc)
+    claims = {
+        'iss': client_id,
+        'sub': client_id,
+        'aud': token_url,
+        'jti': str(uuid.uuid4()),
+        'nbf': now,
+        'exp': now + timedelta(minutes=5),
+    }
+    try:
+        return jwt.encode(claims, private_key, algorithm='RS256', headers={'x5t': x5t})
+    except Exception as exc:
+        raise GraphEmailError(
+            f'Could not sign the certificate-based client assertion: {exc}'
+        ) from exc
 
 
 class _TokenCache:
@@ -68,26 +125,41 @@ class _TokenCache:
     def _fetch(self):
         tenant = getattr(settings, 'GRAPH_TENANT_ID', '')
         client_id = getattr(settings, 'GRAPH_CLIENT_ID', '')
-        client_secret = getattr(settings, 'GRAPH_CLIENT_SECRET', '')
-        missing = [name for name, value in (
-            ('GRAPH_TENANT_ID', tenant),
-            ('GRAPH_CLIENT_ID', client_id),
-            ('GRAPH_CLIENT_SECRET', client_secret),
-        ) if not value]
-        if missing:
-            raise GraphEmailError(f'Microsoft Graph is not configured - missing {", ".join(missing)}.')
+        if not tenant or not client_id:
+            raise GraphEmailError(
+                'Microsoft Graph is not configured - missing GRAPH_TENANT_ID/GRAPH_CLIENT_ID.'
+            )
+        token_url = _TOKEN_URL.format(tenant=tenant)
+
+        cert_path = getattr(settings, 'GRAPH_CERT_PATH', '')
+        cert_thumbprint = getattr(settings, 'GRAPH_CERT_THUMBPRINT', '')
+        if cert_path and cert_thumbprint:
+            # Preferred over the secret whenever both are configured - see the module docstring.
+            request_data = {
+                'client_id': client_id,
+                'client_assertion_type': 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer',
+                'client_assertion': _build_client_assertion(
+                    token_url, client_id, cert_path, cert_thumbprint,
+                ),
+                'scope': _SCOPE,
+                'grant_type': 'client_credentials',
+            }
+        else:
+            client_secret = getattr(settings, 'GRAPH_CLIENT_SECRET', '')
+            if not client_secret:
+                raise GraphEmailError(
+                    'Microsoft Graph is not configured - set either GRAPH_CLIENT_SECRET, or '
+                    'both GRAPH_CERT_PATH and GRAPH_CERT_THUMBPRINT.'
+                )
+            request_data = {
+                'client_id': client_id,
+                'client_secret': client_secret,
+                'scope': _SCOPE,
+                'grant_type': 'client_credentials',
+            }
 
         try:
-            response = requests.post(
-                _TOKEN_URL.format(tenant=tenant),
-                data={
-                    'client_id': client_id,
-                    'client_secret': client_secret,
-                    'scope': _SCOPE,
-                    'grant_type': 'client_credentials',
-                },
-                timeout=15,
-            )
+            response = requests.post(token_url, data=request_data, timeout=15)
         except requests.RequestException as exc:
             raise GraphEmailError(f'Could not reach Microsoft login endpoint: {exc}') from exc
 

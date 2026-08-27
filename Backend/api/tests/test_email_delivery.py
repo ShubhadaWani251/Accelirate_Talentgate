@@ -190,42 +190,84 @@ class TestStatusShownByTheApi:
         assert data['email_status'] == 'failed'
 
 
-class TestRetrySweep:
-    """The command that covers a send interrupted by a deploy killing the worker thread."""
+class TestRetryCountInTheDisplayLabel:
+    """retry_count changes what a FAILED or SENT row actually means (still eligible for another
+    automatic attempt, given up on, or only sent because the sweep stepped in) - the raw
+    EmailStatus choice alone ('Failed', 'Sent') does not say any of that.
+    """
 
-    def _stalled(self, make_invitation, candidate, user):
-        return make_invitation(candidate, user, created_at=timezone.now() - timedelta(hours=2))
+    def test_a_fresh_failure_reads_as_retry_pending(
+        self, ta_user, client_for, make_batch, make_candidate, make_invitation
+    ):
+        candidate = make_candidate(make_batch(ta_user), ta_user)
+        make_invitation(candidate, ta_user, email_status=Invitation.EmailStatus.FAILED,
+                        email_error='RuntimeError: transient')
 
-    def test_a_stalled_queued_invitation_is_resent(
+        data = client_for(ta_user).get('/api/candidates/%d/' % candidate.candidate_id).data
+        assert data['email_retry_count'] == 0
+        assert 'retry pending' in data['email_status_display'].lower()
+
+    def test_a_failure_at_the_retry_limit_reads_as_exhausted(
+        self, ta_user, client_for, make_batch, make_candidate, make_invitation, settings
+    ):
+        settings.INVITE_MAX_RETRY_ATTEMPTS = 3
+        candidate = make_candidate(make_batch(ta_user), ta_user)
+        invitation = make_invitation(candidate, ta_user,
+                                     email_status=Invitation.EmailStatus.FAILED,
+                                     email_error='RuntimeError: permanent')
+        Invitation.objects.filter(pk=invitation.pk).update(retry_count=3)
+
+        data = client_for(ta_user).get('/api/candidates/%d/' % candidate.candidate_id).data
+        assert data['email_retry_count'] == 3
+        assert 'exhausted' in data['email_status_display'].lower()
+
+    def test_a_first_try_success_has_no_retry_wording(
+        self, ta_user, client_for, make_batch, make_candidate, make_invitation
+    ):
+        candidate = make_candidate(make_batch(ta_user), ta_user)
+        make_invitation(candidate, ta_user, email_status=Invitation.EmailStatus.SENT,
+                        email_sent_at=timezone.now())
+
+        data = client_for(ta_user).get('/api/candidates/%d/' % candidate.candidate_id).data
+        assert data['email_status_display'] == 'Sent'
+
+    def test_a_success_after_retries_says_so(
+        self, ta_user, client_for, make_batch, make_candidate, make_invitation
+    ):
+        candidate = make_candidate(make_batch(ta_user), ta_user)
+        invitation = make_invitation(candidate, ta_user,
+                                     email_status=Invitation.EmailStatus.SENT,
+                                     email_sent_at=timezone.now())
+        Invitation.objects.filter(pk=invitation.pk).update(retry_count=2)
+
+        data = client_for(ta_user).get('/api/candidates/%d/' % candidate.candidate_id).data
+        assert data['email_retry_count'] == 2
+        assert '2 retries' in data['email_status_display']
+
+
+class TestProcessEmailQueue:
+    """The ONLY thing that actually sends an invitation email - creating an Invitation just
+    queues it. See the command's own module docstring for why this replaced the old
+    background-thread-plus-safety-net-sweep shape.
+    """
+
+    def test_a_queued_invitation_is_sent(
         self, ta_user, make_batch, make_candidate, make_invitation
     ):
         candidate = make_candidate(make_batch(ta_user), ta_user)
-        invitation = self._stalled(make_invitation, candidate, ta_user)
+        invitation = make_invitation(candidate, ta_user)
 
-        call_command('retry_stalled_invite_emails')
+        call_command('process_email_queue')
 
         invitation.refresh_from_db()
         assert invitation.email_status == Invitation.EmailStatus.SENT
         assert len(mail.outbox) == 1
 
-    def test_a_freshly_queued_invitation_is_left_alone(
-        self, ta_user, make_batch, make_candidate, make_invitation
-    ):
-        """It is probably still in flight on a live thread; re-sending would double-deliver."""
+    def test_dry_run_sends_nothing(self, ta_user, make_batch, make_candidate, make_invitation):
         candidate = make_candidate(make_batch(ta_user), ta_user)
         invitation = make_invitation(candidate, ta_user)
 
-        call_command('retry_stalled_invite_emails')
-
-        invitation.refresh_from_db()
-        assert invitation.email_status == Invitation.EmailStatus.QUEUED
-        assert mail.outbox == []
-
-    def test_dry_run_sends_nothing(self, ta_user, make_batch, make_candidate, make_invitation):
-        candidate = make_candidate(make_batch(ta_user), ta_user)
-        invitation = self._stalled(make_invitation, candidate, ta_user)
-
-        call_command('retry_stalled_invite_emails', '--dry-run')
+        call_command('process_email_queue', '--dry-run')
 
         invitation.refresh_from_db()
         assert invitation.email_status == Invitation.EmailStatus.QUEUED
@@ -236,21 +278,18 @@ class TestRetrySweep:
     ):
         """Most failure reasons are permanent; retrying them on a timer never fixes anything."""
         candidate = make_candidate(make_batch(ta_user), ta_user)
-        self._stalled(make_invitation, candidate, ta_user).__class__.objects.filter(
-            candidate=candidate).update(email_status=Invitation.EmailStatus.FAILED)
+        make_invitation(candidate, ta_user, email_status=Invitation.EmailStatus.FAILED)
 
-        call_command('retry_stalled_invite_emails')
+        call_command('process_email_queue')
         assert mail.outbox == []
 
     def test_failed_rows_are_retried_when_asked(
         self, ta_user, make_batch, make_candidate, make_invitation
     ):
         candidate = make_candidate(make_batch(ta_user), ta_user)
-        self._stalled(make_invitation, candidate, ta_user)
-        Invitation.objects.filter(candidate=candidate).update(
-            email_status=Invitation.EmailStatus.FAILED)
+        make_invitation(candidate, ta_user, email_status=Invitation.EmailStatus.FAILED)
 
-        call_command('retry_stalled_invite_emails', '--include-failed')
+        call_command('process_email_queue', '--include-failed')
         assert len(mail.outbox) == 1
 
     def test_an_already_opened_link_is_not_resent(
@@ -259,22 +298,21 @@ class TestRetrySweep:
         """It plainly arrived; the status is just stale."""
         candidate = make_candidate(make_batch(ta_user), ta_user)
         make_invitation(candidate, ta_user,
-                        created_at=timezone.now() - timedelta(hours=2),
+                        email_status=Invitation.EmailStatus.FAILED,
                         link_clicked_at=timezone.now())
 
-        call_command('retry_stalled_invite_emails')
+        call_command('process_email_queue', '--include-failed')
         assert mail.outbox == []
 
-    def test_an_expired_link_is_not_resent(
+    def test_an_expired_link_is_not_sent(
         self, ta_user, make_batch, make_candidate, make_invitation
     ):
-        """Re-sending would email the candidate something that cannot be opened."""
+        """Sending it would email the candidate something that cannot be opened."""
         candidate = make_candidate(make_batch(ta_user), ta_user)
         make_invitation(candidate, ta_user,
-                        created_at=timezone.now() - timedelta(hours=2),
                         link_expired_at=timezone.now() - timedelta(minutes=1))
 
-        call_command('retry_stalled_invite_emails')
+        call_command('process_email_queue')
         assert mail.outbox == []
 
     @pytest.mark.parametrize('status', [Batch.Status.DRAFT, Batch.Status.CANCELLED])
@@ -282,31 +320,108 @@ class TestRetrySweep:
         self, ta_user, make_batch, make_candidate, make_invitation, status
     ):
         """A cancelled batch must not email a fresh assessment link, and a Draft has not been
-        activated yet. The sweep must not become a way around that rule.
+        activated yet. The worker must not become a way around that rule.
         """
         candidate = make_candidate(make_batch(ta_user, status=status), ta_user)
-        make_invitation(candidate, ta_user, created_at=timezone.now() - timedelta(hours=2))
+        make_invitation(candidate, ta_user)
 
-        call_command('retry_stalled_invite_emails')
+        call_command('process_email_queue')
         assert mail.outbox == []
 
     def test_a_candidate_with_no_address_is_skipped(
         self, ta_user, make_batch, make_candidate, make_invitation
     ):
         candidate = make_candidate(make_batch(ta_user), ta_user, email='')
-        make_invitation(candidate, ta_user, created_at=timezone.now() - timedelta(hours=2))
+        make_invitation(candidate, ta_user)
 
-        call_command('retry_stalled_invite_emails')
+        call_command('process_email_queue')
         assert mail.outbox == []
 
     def test_the_run_is_bounded(self, ta_user, make_batch, make_candidate, make_invitation):
         batch = make_batch(ta_user)
         for _ in range(5):
-            make_invitation(make_candidate(batch, ta_user), ta_user,
-                            created_at=timezone.now() - timedelta(hours=2))
+            make_invitation(make_candidate(batch, ta_user), ta_user)
 
-        call_command('retry_stalled_invite_emails', '--max', '2')
+        call_command('process_email_queue', '--max', '2')
         assert len(mail.outbox) == 2
+
+    def test_a_fresh_queued_send_does_not_touch_retry_count(
+        self, ta_user, make_batch, make_candidate, make_invitation
+    ):
+        """retry_count means "has this failed and been retried" - a row's first attempt is not
+        a retry of anything, however long it happened to sit in the queue first.
+        """
+        candidate = make_candidate(make_batch(ta_user), ta_user)
+        invitation = make_invitation(candidate, ta_user)
+
+        call_command('process_email_queue')
+
+        invitation.refresh_from_db()
+        assert invitation.retry_count == 0
+        assert invitation.email_status == Invitation.EmailStatus.SENT
+
+    def test_a_retried_failure_has_its_retry_count_incremented(
+        self, ta_user, make_batch, make_candidate, make_invitation
+    ):
+        candidate = make_candidate(make_batch(ta_user), ta_user)
+        invitation = make_invitation(candidate, ta_user,
+                                     email_status=Invitation.EmailStatus.FAILED)
+        assert invitation.retry_count == 0
+
+        call_command('process_email_queue', '--include-failed')
+
+        invitation.refresh_from_db()
+        assert invitation.retry_count == 1
+
+    def test_a_row_at_the_retry_limit_is_left_alone(
+        self, ta_user, make_batch, make_candidate, make_invitation, settings
+    ):
+        """Without this ceiling a permanently bad address would be re-attempted by every
+        scheduled run forever, for a cause the worker itself can never fix.
+        """
+        settings.INVITE_MAX_RETRY_ATTEMPTS = 3
+        candidate = make_candidate(make_batch(ta_user), ta_user)
+        invitation = make_invitation(candidate, ta_user,
+                                     email_status=Invitation.EmailStatus.FAILED)
+        Invitation.objects.filter(pk=invitation.pk).update(retry_count=3)
+
+        call_command('process_email_queue', '--include-failed')
+
+        invitation.refresh_from_db()
+        assert invitation.retry_count == 3
+        assert mail.outbox == []
+
+    def test_ignore_retry_limit_overrides_the_cap(
+        self, ta_user, make_batch, make_candidate, make_invitation, settings
+    ):
+        settings.INVITE_MAX_RETRY_ATTEMPTS = 3
+        candidate = make_candidate(make_batch(ta_user), ta_user)
+        invitation = make_invitation(candidate, ta_user,
+                                     email_status=Invitation.EmailStatus.FAILED)
+        Invitation.objects.filter(pk=invitation.pk).update(retry_count=3)
+
+        call_command('process_email_queue', '--include-failed', '--ignore-retry-limit')
+
+        invitation.refresh_from_db()
+        assert invitation.retry_count == 4
+        assert len(mail.outbox) == 1
+
+    def test_sends_within_one_run_are_paced(
+        self, ta_user, make_batch, make_candidate, make_invitation, settings, monkeypatch
+    ):
+        settings.INVITE_SEND_DELAY_SECONDS = 2.5
+        batch = make_batch(ta_user)
+        for _ in range(3):
+            make_invitation(make_candidate(batch, ta_user), ta_user)
+        sleeps = []
+        monkeypatch.setattr(
+            'api.management.commands.process_email_queue.time.sleep', sleeps.append,
+        )
+
+        call_command('process_email_queue')
+
+        # Between sends, not before the first or after the last: 3 invitations -> 2 gaps.
+        assert sleeps == [2.5, 2.5]
 
 
 class TestInvitationEmailBody:
@@ -344,6 +459,38 @@ class TestInvitationEmailBody:
         invites.send_invite_and_record(invitation, 'https://exam.example.test')
 
         assert invitation.unique_link_token in mail.outbox[0].body
+
+    def test_the_contact_email_is_whoever_actually_sent_the_invite(
+        self, ta_user, admin_user, make_batch, make_candidate, make_invitation, settings
+    ):
+        """A candidate with a problem should be able to reach the actual person who invited
+        them, not a shared inbox nobody reads - whether that person is a TA or an admin.
+        """
+        settings.SUPPORT_EMAIL = 'shared-inbox@accelirate.com'
+        invitation = make_invitation(
+            make_candidate(make_batch(ta_user), ta_user), sent_by=admin_user,
+        )
+
+        invites.send_invite_and_record(invitation, 'https://exam.example.test')
+
+        body = mail.outbox[0].body
+        assert admin_user.email in body
+        assert 'shared-inbox@accelirate.com' not in body
+
+    def test_falls_back_to_the_shared_inbox_if_the_sender_account_is_gone(
+        self, ta_user, make_batch, make_candidate, make_invitation, settings
+    ):
+        """Invitation.sent_by is SET_NULL, so a deleted staff account must not leave the
+        candidate with no way to ask for help at all.
+        """
+        settings.SUPPORT_EMAIL = 'shared-inbox@accelirate.com'
+        invitation = make_invitation(
+            make_candidate(make_batch(ta_user), ta_user), sent_by=None,
+        )
+
+        invites.send_invite_and_record(invitation, 'https://exam.example.test')
+
+        assert 'shared-inbox@accelirate.com' in mail.outbox[0].body
 
 
 class TestCtaButtonRendersInOutlook:

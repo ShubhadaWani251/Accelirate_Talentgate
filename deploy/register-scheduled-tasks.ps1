@@ -12,8 +12,13 @@
                                      never deleted. The app hides them and deletes lazily when
                                      someone opens one, but a draft nobody looks at again is
                                      only removed here.
-      retry_stalled_invite_emails  - without it, an invitation email interrupted by a restart
-                                     stays queued with nobody retrying it.
+      process_email_queue          - without it, invitation emails are never sent AT ALL.
+                                     Creating an Invitation only queues it; this command is the
+                                     only thing that actually sends one - not a backup job, the
+                                     entire pipeline. Registered every 1 minute for exactly that
+                                     reason. -MultipleInstances IgnoreNew below is what stops a
+                                     run still working through a large batch from overlapping
+                                     the next minute's tick.
 
     Run from an elevated PowerShell prompt. Re-running replaces the existing tasks.
 
@@ -52,7 +57,7 @@ if (-not (Test-Path $python)) {
 $tasks = @(
     @{ Name = 'TalentGate-FinalizeExpiredAttempts'; Command = 'finalize_expired_attempts'; Minutes = 10 },
     @{ Name = 'TalentGate-DeleteExpiredDraftBatches'; Command = 'delete_expired_draft_batches'; Minutes = 30 },
-    @{ Name = 'TalentGate-RetryStalledInviteEmails'; Command = 'retry_stalled_invite_emails'; Minutes = 15 }
+    @{ Name = 'TalentGate-ProcessEmailQueue'; Command = 'process_email_queue'; Minutes = 1 }
 )
 
 foreach ($task in $tasks) {

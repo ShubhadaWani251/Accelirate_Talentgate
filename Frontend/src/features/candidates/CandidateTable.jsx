@@ -11,7 +11,7 @@ const RESULT_PILL = { pending: 'gray', pass: 'green', fail: 'red' };
 // flips to "Invited" when the invitation row is created, which happens BEFORE the send is
 // attempted. So Status alone reads as success even when the email never left.
 const EMAIL_PILL = {
-  sent: 'green', delivered: 'green', queued: 'blue', failed: 'red',
+  sent: 'green', queued: 'blue', failed: 'red',
 };
 
 // Select-all/notify/export toolbar + the results table together, since every screen that lists
