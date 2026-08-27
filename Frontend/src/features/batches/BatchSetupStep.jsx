@@ -12,6 +12,17 @@ const schema = yup.object({
   batch_name: yup.string().required('Batch name is required'),
 });
 
+// APT-YYYY-MM-DD- using local date parts, not toISOString().slice(0, 10) - that reads the UTC
+// date, which is still "yesterday" for anyone east of UTC (all of India) until well past
+// midnight local time.
+function defaultBatchNamePrefix() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `APT-${year}-${month}-${day}-`;
+}
+
 // Step 1 of the wizard, in two sequential phases: name the batch, then - once it exists -
 // upload a candidate file against it. Two screens, not one, and not a single combined submit:
 // the batch has to exist before UploadStep has anywhere to attach a file, so this shows exactly
@@ -41,7 +52,11 @@ export default function BatchSetupStep({ existingBatch, onCreated, onUploaded })
     register,
     handleSubmit,
     formState: { errors },
-  } = useForm({ resolver: yupResolver(schema) });
+  } = useForm({
+    resolver: yupResolver(schema),
+    defaultValues: { batch_name: defaultBatchNamePrefix() },
+  });
+  const { ref: batchNameRef, ...batchNameField } = register('batch_name');
 
   // Tells BatchWizard about the batch as soon as one exists, whichever way that happened - just
   // created here, or already existing because this is a resumed draft. FixErrorsStep/ReviewStep/
@@ -126,7 +141,16 @@ export default function BatchSetupStep({ existingBatch, onCreated, onUploaded })
         <div className="field" style={{ maxWidth: 420 }}>
           <label htmlFor="batch_name">Batch Name</label>
           <input id="batch_name" className={errors.batch_name ? 'has-error' : ''}
-            {...register('batch_name')} />
+            {...batchNameField}
+            ref={(el) => {
+              batchNameRef(el);
+              // Cursor lands after the pre-filled "APT-YYYY-MM-DD-" so typing continues from
+              // there, rather than at position 0 where it would insert before the date prefix.
+              if (el && document.activeElement !== el) {
+                el.focus();
+                el.setSelectionRange(el.value.length, el.value.length);
+              }
+            }} />
           {errors.batch_name && <div className="field-error">{errors.batch_name.message}</div>}
         </div>
 

@@ -5,7 +5,23 @@ export const login = (email, password) =>
 
 export const logout = () => axiosClient.post('/auth/logout/').then((r) => r.data);
 
-export const refresh = () => axiosClient.post('/auth/refresh/').then((r) => r.data);
+// Deduped so that React 18 StrictMode's double-invoke of the boot effect (mount -> unmount ->
+// mount, firing this twice almost synchronously) doesn't send two concurrent refresh requests.
+// The refresh token rotates on every successful call, so a second call still carrying the
+// now-stale cookie would otherwise 401 and wrongly look like an invalid session.
+let refreshInFlight = null;
+
+export const refresh = () => {
+  if (!refreshInFlight) {
+    refreshInFlight = axiosClient
+      .post('/auth/refresh/')
+      .then((r) => r.data)
+      .finally(() => {
+        refreshInFlight = null;
+      });
+  }
+  return refreshInFlight;
+};
 
 export const me = () => axiosClient.get('/auth/me/').then((r) => r.data);
 

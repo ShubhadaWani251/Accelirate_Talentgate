@@ -205,7 +205,18 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # CORS
 # The refresh token rides in an httpOnly cookie, so the frontend origin must be
 # explicitly allowed (not wildcarded) and credentials must be permitted.
+#
+# This also builds every candidate invite link, so it's deliberately whatever a developer's own
+# .env says (localhost while running locally) rather than a hardcoded remote default - an invite
+# link has to point at wherever this particular backend's frontend actually is.
 FRONTEND_ORIGIN = os.environ.get('FRONTEND_ORIGIN', 'http://localhost:5173')
+
+# The link put in the new-user credentials email specifically. Deliberately a separate setting
+# from FRONTEND_ORIGIN above, not reused: FRONTEND_ORIGIN tracks wherever *this* backend's own
+# frontend is (localhost in dev), but staff only ever log in against the one real deployment -
+# a developer running the app locally should still send new teammates the real staging link, not
+# a localhost URL nobody but their own machine can reach. Update when staging moves off this URL.
+STAFF_APP_URL = os.environ.get('STAFF_APP_URL', 'https://app-talentgate-staging.azurewebsites.net')
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOWED_ORIGINS = [FRONTEND_ORIGIN]
 CORS_ALLOW_CREDENTIALS = True

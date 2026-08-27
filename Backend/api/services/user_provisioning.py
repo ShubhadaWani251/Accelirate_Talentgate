@@ -60,11 +60,13 @@ def create_user_with_credentials(data, created_by):
 
 
 def send_new_user_credentials_email(user, temp_password):
+    login_url = f"{settings.STAFF_APP_URL.rstrip('/')}/login"
     send_mail(
         subject='Accelirate TalentGate - Your Account Has Been Created',
         message=(
             f"Hello {user.first_name},\n\n"
             f"An Administrator has created a TalentGate account for you.\n\n"
+            f"Application Link: {login_url}\n"
             f"Email: {user.email}\n"
             f"Temporary Password: {temp_password}\n\n"
             "Please log in and change your password from your Profile page as soon as "
