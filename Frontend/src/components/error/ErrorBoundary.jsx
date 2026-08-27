@@ -25,7 +25,6 @@ export default class ErrorBoundary extends Component {
     // Logged for developers via the browser console only - never rendered to the user, so no
     // stack trace or internal detail can leak into the UI.
     if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
       console.error('Unhandled render error:', error, info);
     }
   }

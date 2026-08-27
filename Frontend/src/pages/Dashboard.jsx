@@ -47,7 +47,6 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadSummary('active', { initial: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function handleStatusChange(status) {

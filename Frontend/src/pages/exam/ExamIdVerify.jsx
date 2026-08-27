@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import * as examApi from '../../api/examApi';
-import { useExamSession } from '../../features/exam/ExamSessionProvider';
+import { useExamSession } from '../../features/exam/examSessionContext';
 import RequireFullscreen from '../../features/exam/proctoring/RequireFullscreen';
 import PhotoCapture from '../../features/exam/webcam/PhotoCapture';
 import useDisplayGuard from '../../features/exam/proctoring/useDisplayGuard';

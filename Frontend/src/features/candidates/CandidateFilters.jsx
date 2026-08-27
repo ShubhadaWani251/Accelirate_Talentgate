@@ -10,15 +10,6 @@ const SECTIONS = [
   { key: 'programming', label: 'Programming' },
 ];
 
-export const EMPTY_CANDIDATE_FILTERS = {
-  name: '', email: '', aadhaar: '', batch_id: '', result: '',
-  score_min: '', score_max: '',
-  logical_min: '', logical_max: '',
-  quantitative_min: '', quantitative_max: '',
-  verbal_min: '', verbal_max: '',
-  programming_min: '', programming_max: '',
-};
-
 export default function CandidateFilters({ filters, onChange, batches, onApply, onClear, showBatchFilter = true }) {
   function set(field, value) {
     onChange({ ...filters, [field]: value });

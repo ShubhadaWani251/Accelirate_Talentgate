@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useExamSession } from '../../features/exam/ExamSessionProvider';
+import { useExamSession } from '../../features/exam/examSessionContext';
 import RequireFullscreen from '../../features/exam/proctoring/RequireFullscreen';
 import BrandHeader from '../../components/layout/BrandHeader';
 import BrandFooter from '../../components/layout/BrandFooter';

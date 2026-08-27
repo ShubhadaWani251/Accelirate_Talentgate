@@ -9,6 +9,8 @@ Backend/.gmail_test_admin_credentials.txt
 Backend/media/
 Backend/logs/
 Backend/staticfiles/
+# Frontend build copied in at deploy time (see FRONTEND_DIST) - a build artifact, not source.
+Backend/frontend/
 *.log
 
 # --- OS ---

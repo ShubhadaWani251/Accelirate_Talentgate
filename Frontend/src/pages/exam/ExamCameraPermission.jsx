@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useExamSession } from '../../features/exam/ExamSessionProvider';
+import { useExamSession } from '../../features/exam/examSessionContext';
 import useCameraStream from '../../features/exam/webcam/useCameraStream';
 import { checkCameraNotBlocked } from '../../features/exam/webcam/frameCheck';
 import BrandHeader from '../../components/layout/BrandHeader';

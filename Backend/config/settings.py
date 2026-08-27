@@ -170,6 +170,23 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 # Extra directory of app-owned static files, if present (templates/ has a sibling static/).
 STATICFILES_DIRS = [BASE_DIR / 'static'] if (BASE_DIR / 'static').is_dir() else []
 
+# Built React SPA, served from this same origin - see config/spa.py for why the frontend and
+# API must not be split across hostnames. The deployment pipeline copies Frontend/dist/ here.
+# Absent in a local checkout, where Vite's dev server serves the frontend on :5173 instead.
+FRONTEND_DIST = BASE_DIR / 'frontend'
+if FRONTEND_DIST.is_dir():
+    # Lets WhiteNoise's middleware serve the SPA's own files (/assets/*, favicon.svg) before the
+    # URL resolver runs, so the catch-all in urls.py only ever sees real client-side routes.
+    # WHITENOISE_INDEX_FILE is deliberately left off: index.html must go through the
+    # never_cache view instead of WhiteNoise's own caching headers.
+    WHITENOISE_ROOT = FRONTEND_DIST
+    # Vite fingerprints everything it emits into /assets/, so those can be cached forever - a
+    # changed file gets a new name, so a stale entry is never served for new content. Needed
+    # explicitly because WhiteNoise only recognises hashed filenames under STATIC_URL, and would
+    # otherwise fall back to a 60-second max-age and revalidate the whole bundle on every load.
+    # nginx.conf applies the same rule to /assets/ for the Docker stack.
+    WHITENOISE_IMMUTABLE_FILE_TEST = r'^/assets/'
+
 STORAGES = {
     'default': {
         'BACKEND': 'django.core.files.storage.FileSystemStorage',

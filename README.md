@@ -9,9 +9,12 @@ manage a shared question bank, and review results.
 
 The TA/Admin portal (auth, batches, candidate upload & validation, question bank, user
 management, dashboards, email notifications) is built and in active use against a shared Azure
-Postgres instance. **The candidate-facing assessment flow does not exist yet** — invitation
-emails currently link to a `/t/<token>` route that has no frontend page and no backend exam
-endpoints behind it. That's the next major piece of work, not a bug in what's described below.
+Postgres instance.
+
+The candidate-facing assessment flow behind the `/t/<token>` invitation link is now built too:
+email verification, identity capture, webcam proctoring with violation handling, the timed
+attempt itself, scoring, and the result and termination screens. The endpoints are in
+`Backend/api/views/exam.py` and the screens in `Frontend/src/pages/exam/`.
 
 ## Architecture
 
@@ -179,7 +182,7 @@ there is nothing to process. `delete_expired_draft_batches` really deletes rows,
 cd Backend && python -m pytest
 ```
 
-159 tests, a few seconds. `pytest.ini` and `Backend/api/tests/` hold the suite; it covers
+212 tests, a few seconds. `pytest.ini` and `Backend/api/tests/` hold the suite; it covers
 the invariants that are silent when they break rather than trying for line coverage:
 
 | File | What it pins down |
@@ -191,6 +194,7 @@ the invariants that are silent when they break rather than trying for line cover
 | `test_hardening.py` | Unhandled errors return JSON without leaking the exception, rate limits actually return 429, readiness fails when the database is down, and stored evidence URLs carry no credential. |
 | `test_proctoring_warnings.py` | Which causes get one warning and which end the attempt outright, that the camera going off is warnable, and that the warning budget is shared across all causes. |
 | `test_batch_validation.py` | That a link window shorter than the exam duration is refused, in both directions, while the one pre-existing batch that violates it stays editable. |
+| `test_spa_fallback.py` | That a cold load of a client-side route returns the SPA shell rather than a 404 - the `/t/<token>` link in every invitation email is always entered this way - while an unmatched `/api/` path still 404s instead of quietly returning HTML. |
 | `test_smoke.py` | That the suite cannot reach a real database. |
 
 **The suite runs against in-memory SQLite and never touches PostgreSQL.** That is enforced by
@@ -230,6 +234,75 @@ migrations against the wrong target. Point `DB_*` in `Backend/.env` at the real 
 For a host without Docker, `Backend/Dockerfile` and `Backend/docker-entrypoint.sh` document the
 same sequence: `migrate`, `collectstatic`, then `gunicorn --config gunicorn.conf.py
 config.wsgi:application`.
+
+### Azure App Service (staging)
+
+`azure-pipelines.yml` builds and deploys to a single App Service in `rg-talentgate-staging`:
+
+| Resource | Name |
+|---|---|
+| App Service (Django + SPA) | `app-talentgate-staging` |
+| App Service plan | `asp-talentgate-staging` (Linux B1) |
+| PostgreSQL flexible server | `recruitmentapptitudeteststaging` (database `QA_TalentDB`) |
+| Storage (proctoring evidence) | `sttalentgatestaging`, container `proctoring-evidence` |
+
+**One App Service serves both the API and the frontend**, for the same-origin reason above.
+There is no Static Web App: routing the API through one would have meant the Standard plan and,
+worse, a hard 45-second ceiling on every `/api` request — which `gunicorn.conf.py` deliberately
+sets to 120s because a few thousand candidate rows arrive in a single upload. Instead the pipeline
+copies the Vite build into `Backend/frontend/` (`FRONTEND_DIST`), where WhiteNoise serves the
+hashed bundles and the catch-all in `config/urls.py` returns `index.html` for client-side routes.
+`config/spa.py` has the details.
+
+Because App Service runs the app from a zip on its own Python image, it never invokes
+`docker-entrypoint.sh`. `Backend/startup.sh` is the equivalent and is set as the startup command;
+**it is the only thing that applies migrations on this host**, so keep the two files in step.
+
+The pipeline needs one thing that is not in source control: an ARM service connection named
+`TalentGate-Staging` (the `azureServiceConnection` variable), scoped to `rg-talentgate-staging`.
+
+### First deployment
+
+Nothing has been deployed to this App Service yet, and the database it points at holds real
+candidate data.
+
+1. **Create the `TalentGate-Staging` service connection.** The pipeline will not run *at all*
+   without it, not even on a feature branch: Azure DevOps validates every service connection
+   referenced anywhere in the YAML when a build is queued, including the deploy stage that a
+   feature branch's condition skips.
+
+2. **Set the secrets that cannot live in source control.** Without `DB_PASSWORD`, `startup.sh`
+   fails at `migrate` and the site never starts. Without the Graph values it starts fine but
+   invitation emails don't send.
+
+   ```bash
+   az webapp config appsettings set -g rg-talentgate-staging -n app-talentgate-staging \
+     --settings DB_PASSWORD='...' GRAPH_TENANT_ID='...' GRAPH_CLIENT_ID='...' \
+                GRAPH_CLIENT_SECRET='...' GRAPH_SENDER='...'
+   ```
+
+3. **Merge to `main`.** Only `main` deploys; feature branches build and test and stop there.
+
+4. **Repoint the pipeline's default branch to `main`.** The `TalentGate-CI` pipeline was created
+   against `feature/candidate-exam-portal`, because that is where the YAML existed first.
+
+#### Migration state: the database is ahead of `main`, not behind it
+
+Checked against the server on 2026-08-24: all 17 `api` migrations are recorded as applied, so
+**the first deploy applies none of them**. That includes `0013_candidate_aadhaar_last4`, whose
+`UPDATE candidates SET aadhaar_number = RIGHT(...)` is deliberately irreversible — it has already
+run, so there are no full Aadhaar numbers left to lose.
+
+The live risk is the inverse one, and it is easy to walk into. `main` currently contains migrations
+only through `0005`, while the database is at `0017`: the schema has `aadhaar_last4` where `main`'s
+code still expects `aadhaar_number`. **Deploying `main` as it stands today would therefore fail at
+runtime against this database, and no migration step would warn you** — `migrate` is a no-op and
+ignores history rows whose files it cannot see. Merge this branch before deploying anything, and
+don't deploy `main` from before the merge.
+
+Verify with `python manage.py showmigrations api` against the real server if time has passed. The
+server keeps 7 days of automatic backups with point-in-time restore; note that restoring produces
+a *new* server rather than rewinding this one, so recovery also means repointing `DB_HOST`.
 
 ### Scheduled jobs
 
