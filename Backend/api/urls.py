@@ -90,4 +90,10 @@ urlpatterns = [
     path('exam/recording/chunk/', views.ExamRecordingChunkView.as_view(), name='exam-recording-chunk'),
     path('exam/violation/', views.ExamViolationView.as_view(), name='exam-violation'),
     path('exam/submit/', views.ExamSubmitView.as_view(), name='exam-submit'),
+
+    # Service-to-service integrations - authenticated by API key (see .env.example), not staff
+    # JWT. Documented, audited (AuditLog, requires_review=True), and visible right here rather
+    # than a route deliberately kept off this list.
+    path('integrations/questions/active/', views.ActiveQuestionExportView.as_view(),
+         name='integration-active-questions'),
 ]

@@ -41,13 +41,18 @@ ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
 # Application definition
 
-# django.contrib.admin is deliberately NOT installed and /admin/ is not routed. Every model
-# was registered there with no write protection, which made it a full bypass of this app's own
-# RBAC (api/permissions.py): editable AuditLog rows, readable Question.correct_option, and a
-# login path with none of the rate limiting or lockout the real login has. Admin also
-# authenticates against django.contrib.auth.User - a different user table from the one this app
-# uses - so a single createsuperuser would have created an account outside the RBAC entirely.
-# django.contrib.auth stays: it supplies the password hashers and validators the app relies on.
+# django.contrib.admin is NOT installed when DEBUG=False - i.e. never in a real deployment.
+# The original reasoning still applies there: every model registered with no write protection
+# is a full bypass of this app's own RBAC (api/permissions.py) - editable AuditLog rows,
+# readable Question.correct_option, and a login path with none of the rate limiting or lockout
+# the real login has, authenticating against django.contrib.auth.User rather than this app's own
+# User table. What changed is scope, not the risk tolerance: api/admin.py now registers models
+# for local dev convenience ONLY, gated on this same DEBUG check (also see config/urls.py) so it
+# structurally cannot exist wherever DEBUG=False - which is every real deployment, per the
+# ImproperlyConfigured check above. AuditLog and every password-hash field stay off-limits even
+# there; see api/admin.py's module docstring.
+# django.contrib.auth stays regardless of DEBUG: it supplies the password hashers and validators
+# the app relies on.
 INSTALLED_APPS = [
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -59,6 +64,8 @@ INSTALLED_APPS = [
     'anymail',
     'api',
 ]
+if DEBUG:
+    INSTALLED_APPS.append('django.contrib.admin')
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
@@ -210,6 +217,12 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # .env says (localhost while running locally) rather than a hardcoded remote default - an invite
 # link has to point at wherever this particular backend's frontend actually is.
 FRONTEND_ORIGIN = os.environ.get('FRONTEND_ORIGIN', 'http://localhost:5173')
+
+# Service-to-service integration key for api.views.integrations.ActiveQuestionExportView - a
+# static shared secret, not a JWT, because the caller is another system with no api.User at
+# all. Blank by default so the endpoint refuses every request (fails closed) until an admin
+# deliberately provisions it; see .env.example.
+QUESTION_EXPORT_API_KEY = os.environ.get('QUESTION_EXPORT_API_KEY', '')
 
 # The link put in the new-user credentials email specifically. Deliberately a separate setting
 # from FRONTEND_ORIGIN above, not reused: FRONTEND_ORIGIN tracks wherever *this* backend's own

@@ -141,6 +141,13 @@ and a comment on what each one does. Highlights:
   any environment where `DEBUG=False`; the app will refuse to start without one in that case.
 - **`SUPPORT_EMAIL`**: printed in the candidate assessment-invitation email as the contact
   address for technical issues. Must be a real monitored mailbox, not the noreply address.
+- **`QUESTION_EXPORT_API_KEY`**: enables `GET /api/integrations/questions/active/`, a
+  service-to-service export of the active question bank (correct answers included) for another
+  system to consume, authenticated via the `X-API-Key` header instead of staff login. Blank
+  disables the route entirely (every request gets 401). Every successful call is written to
+  `AuditLog` with `requires_review=True`. Generate a value with
+  `python -c "import secrets; print(secrets.token_urlsafe(32))"` and rotate by changing this and
+  updating whatever system holds the old value.
 
 ## Development commands
 

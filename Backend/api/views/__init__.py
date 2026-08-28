@@ -48,6 +48,7 @@ from .questions import (
     QuestionRowValidationView,
 )
 from .users import UserListCreateView, UserDetailView
+from .integrations import ActiveQuestionExportView
 from .exam import (
     ExamTokenLandingView,
     ExamVerifyEmailView,
@@ -81,6 +82,7 @@ __all__ = [
     'QuestionSectionListView', 'QuestionListCreateView', 'QuestionDetailView',
     'QuestionTemplateDownloadView', 'QuestionBulkUploadView', 'QuestionRowValidationView',
     'UserListCreateView', 'UserDetailView',
+    'ActiveQuestionExportView',
     'ExamTokenLandingView', 'ExamVerifyEmailView', 'ExamIdentityCaptureView',
     'ExamBeginView', 'ExamSessionView', 'ExamAnswerView', 'ExamRecordingChunkView',
     'ExamViolationView', 'ExamSubmitView',
