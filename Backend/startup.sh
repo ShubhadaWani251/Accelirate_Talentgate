@@ -29,6 +29,41 @@ echo "==> Running deployment checks (warnings are not fatal)"
 # puts them in the App Service log stream where they get seen.
 python manage.py check --deploy || true
 
+echo "==> Starting scheduled jobs"
+# The three commands from README's "Scheduled jobs" section have to run on a timer, and this
+# platform provides nothing to run them with: App Service on Linux has no cron, and WebJobs are
+# Windows-only. Without process_email_queue in particular, invitation emails are never sent at
+# all - creating an Invitation only queues it - and the failure is silent, because the UI
+# correctly reports the invite as issued. That is the specific reason these live here.
+#
+# Deliberately NOT mirrored into docker-entrypoint.sh: the Docker stack runs the same commands
+# in its own `scheduler` service (docker-compose.yml), which is the better shape wherever a
+# second process is possible. Prefer a real scheduler over this loop if the hosting ever allows
+# one - a Container Apps job or an external trigger survives the web container restarting.
+#
+# Each job runs its command and only THEN sleeps, so a run lasting longer than its interval
+# delays the next tick rather than overlapping it. That matters for process_email_queue, which
+# paces sends by INVITE_SEND_DELAY_SECONDS and can outlast a minute on a large batch; two
+# concurrent runs could send the same invitation twice.
+schedule() {
+    interval=$1
+    shift
+    while true; do
+        # stdout is dropped because process_email_queue reports on every quiet tick and would
+        # bury the application log. Real sends are recorded through Django logging, and stderr
+        # stays attached so a traceback still reaches the App Service log stream.
+        python manage.py "$@" >/dev/null || echo "scheduler: '$*' exited $?" >&2
+        sleep "$interval"
+    done
+}
+
+# Backgrounded before the exec below, so gunicorn still replaces this shell as PID 1 and keeps
+# receiving SIGTERM directly. These loops are killed with the container; an interrupted send
+# leaves its row QUEUED, which the next run picks up - the queue exists for exactly that.
+schedule 60 process_email_queue &
+schedule 600 finalize_expired_attempts &
+schedule 1800 delete_expired_draft_batches &
+
 echo "==> Starting gunicorn"
 # --config picks up gunicorn.conf.py, which binds to $PORT. App Service sets PORT and expects the
 # app to listen on it; hardcoding 8000 here would make the container fail its health probe.
