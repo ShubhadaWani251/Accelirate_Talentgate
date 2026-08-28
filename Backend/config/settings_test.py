@@ -25,6 +25,14 @@ os.environ.setdefault('SECRET_KEY', 'test-only-key-never-used-outside-the-suite'
 
 from .settings import *  # noqa: E402,F401,F403
 
+# settings.py's own `if DEBUG: INSTALLED_APPS.append('django.contrib.admin')` already ran
+# during the star-import above, using DEBUG as read from a developer's real .env (this module's
+# own `DEBUG = False` below is set too late to affect that - INSTALLED_APPS is already built).
+# Strip it back out explicitly so the suite's admin-must-not-exist invariant
+# (test_hardening.TestAdminIsNotReachable) holds regardless of what a developer's local .env
+# says, matching every other "fixed so tests don't depend on a developer's .env" override here.
+INSTALLED_APPS = [app for app in INSTALLED_APPS if app != 'django.contrib.admin']
+
 # In-memory SQLite. Fast, isolated per test process, and nothing to clean up. The schema is built
 # directly from the models (pytest.ini passes --no-migrations) because migration 0013 contains
 # PostgreSQL-only SQL.
@@ -49,9 +57,16 @@ SUPPORT_EMAIL = 'support@accelirate.com'
 
 # Fixed, so tests asserting on generated assessment links do not depend on a developer's .env.
 FRONTEND_ORIGIN = 'https://exam.example.test'
+STAFF_APP_URL = 'https://staff.example.test'
+QUESTION_EXPORT_API_KEY = 'test-only-export-key-never-used-outside-the-suite'
 
 # No real cloud storage. Tests that exercise evidence URL signing set this themselves.
 AZURE_STORAGE_CONNECTION_STRING = ''
+
+# Real invitation-sending code paced by this (management/commands/process_email_queue.py) is
+# exercised directly in tests - without zeroing this, every one of those tests would actually
+# sleep between simulated sends.
+INVITE_SEND_DELAY_SECONDS = 0
 
 # Rate-limit and login-lockout counters live in the cache. Per-process locmem is right for tests;
 # the clear_cache fixture in conftest empties it around each one so counts cannot leak between

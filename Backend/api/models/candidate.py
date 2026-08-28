@@ -167,8 +167,11 @@ class Invitation(models.Model):
     class EmailStatus(models.TextChoices):
         QUEUED = 'queued', 'Queued'
         SENT = 'sent', 'Sent'
-        DELIVERED = 'delivered', 'Delivered'
         FAILED = 'failed', 'Failed'
+        # No DELIVERED: Graph's sendMail only confirms the message was accepted for sending, not
+        # that it reached the recipient's mailbox - there is no real delivery receipt this app
+        # can observe, so a status implying one would be a claim nothing actually verifies. A
+        # previous DELIVERED value existed here but nothing ever set it - dead code, removed.
 
     invitation_id = models.BigAutoField(primary_key=True)
     candidate = models.ForeignKey(Candidate, on_delete=models.CASCADE,
@@ -191,13 +194,19 @@ class Invitation(models.Model):
     # When the last send was ATTEMPTED, successful or not. email_sent_at only moves on success,
     # so without this a repeatedly-failing invitation looks like nothing was ever tried.
     email_last_attempt_at = models.DateTimeField(null=True, blank=True)
-    # When the invitation row was created, which is when its email was queued. Needed to tell a
-    # send that is genuinely stalled from one that was queued a moment ago and is still in
-    # flight on the background thread - without an age, the retry sweep
-    # (management/commands/retry_stalled_invite_emails.py) could not distinguish the two and
-    # would double-send. Nullable so adding it needed no data migration; rows that predated it
-    # were stamped with the migration's own timestamp, which makes them eligible for retry a few
-    # minutes after deploy rather than immediately.
+    # Incremented only when management/commands/process_email_queue.py re-attempts a row that
+    # had already FAILED at least once, never on a row's first attempt - so 0 always means "this
+    # has never failed before" and a nonzero value on a SENT row tells you it only went out after
+    # an earlier failure, while on a FAILED row it's how many automatic attempts it has already
+    # had. Also what settings.INVITE_MAX_RETRY_ATTEMPTS is compared against, so a permanently bad
+    # address stops being retried forever instead of being re-attempted on every scheduled run.
+    retry_count = models.PositiveSmallIntegerField(default=0)
+    # When the invitation row was created, which is when its email was queued. Originally needed
+    # to tell a genuinely stalled send apart from one still in flight on a background thread -
+    # that distinction stopped mattering once management/commands/process_email_queue.py became
+    # the only thing that ever sends (nothing else is concurrently working through the queue for
+    # a QUEUED row to be "still in flight" on). Kept as a plain creation timestamp; nullable
+    # because adding it needed no data migration at the time.
     created_at = models.DateTimeField(auto_now_add=True, null=True)
     link_clicked_at = models.DateTimeField(null=True, blank=True)
     is_link_used = models.BooleanField(default=False)

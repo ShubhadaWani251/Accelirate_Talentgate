@@ -1,10 +1,13 @@
 # Scheduled jobs for a non-container deployment (cron). Install with: crontab deploy/crontab.example
 #
-# These are not optional. Without the first, exam attempts abandoned mid-way stay in_progress
+# None of these are optional. Without the first, exam attempts abandoned mid-way stay in_progress
 # forever and are never scored. Without the second, Draft batches past their 24-hour window are
 # never actually deleted - the app hides them and deletes lazily when someone happens to open
-# one, but a draft nobody ever looks at again is only removed here. Without the third, an
-# invitation email interrupted by a deploy stays queued with nobody retrying it.
+# one, but a draft nobody ever looks at again is only removed here. Without the third,
+# invitation emails are never sent AT ALL - creating an Invitation only queues it
+# (email_status=QUEUED); process_email_queue is the only thing that actually sends one. This is
+# not a backup job the way it used to be (see the command's own module docstring) - it is the
+# entire invitation-sending pipeline, which is why it runs every minute rather than every 15.
 
 SHELL=/bin/sh
 # Adjust to the deployment's paths.
@@ -18,5 +21,11 @@ PY=/srv/talentgate/Backend/venv/bin/python
 # Run once with --dry-run first on any new deployment to see what it would remove.
 */30 * * * * cd $APP && $PY manage.py delete_expired_draft_batches >> /var/log/talentgate/scheduler.log 2>&1
 
-# Re-send invitation emails left stranded by a worker restart.
-*/15 * * * * cd $APP && $PY manage.py retry_stalled_invite_emails >> /var/log/talentgate/scheduler.log 2>&1
+# Send every queued invitation email. Every minute, not less often - a candidate is waiting on
+# this for their assessment link, not just cleanup. flock guards against a run that is still
+# working through a large batch (up to --max 200 rows, paced by INVITE_SEND_DELAY_SECONDS -
+# minutes, not seconds, for a big batch) still being alive when the next minute's tick fires;
+# without it, cron would overlap two runs and risk sending the same invitation twice. -n makes a
+# tick that finds the lock held simply skip rather than queue up behind it - the next tick a
+# minute later is a better use of that time than a growing backlog of waiting cron processes.
+* * * * * flock -n /tmp/talentgate-process-email-queue.lock $PY $APP/manage.py process_email_queue >> /var/log/talentgate/scheduler.log 2>&1

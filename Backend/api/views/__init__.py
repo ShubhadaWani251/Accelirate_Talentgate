@@ -13,6 +13,7 @@ from .batches import (
     BatchListCreateView,
     BatchDetailView,
     BatchDeactivateView,
+    BatchCompleteView,
     BatchDefaultsView,
     BatchTemplateDownloadView,
     BatchUploadView,
@@ -47,6 +48,7 @@ from .questions import (
     QuestionRowValidationView,
 )
 from .users import UserListCreateView, UserDetailView
+from .integrations import ActiveQuestionExportView
 from .exam import (
     ExamTokenLandingView,
     ExamVerifyEmailView,
@@ -67,7 +69,8 @@ __all__ = [
     'LoginView', 'LogoutView', 'RefreshView',
     'ForgotPasswordView', 'ResendOtpView', 'VerifyOtpResetView',
     'ChangePasswordView', 'MeView',
-    'BatchListCreateView', 'BatchDetailView', 'BatchDeactivateView', 'BatchDefaultsView',
+    'BatchListCreateView', 'BatchDetailView', 'BatchDeactivateView', 'BatchCompleteView',
+    'BatchDefaultsView',
     'BatchTemplateDownloadView',
     'BatchUploadView', 'BatchCandidatesStagingView', 'BatchCandidateRowView',
     'BatchCandidateDeleteView', 'BatchCandidateClearDuplicateView',
@@ -79,6 +82,7 @@ __all__ = [
     'QuestionSectionListView', 'QuestionListCreateView', 'QuestionDetailView',
     'QuestionTemplateDownloadView', 'QuestionBulkUploadView', 'QuestionRowValidationView',
     'UserListCreateView', 'UserDetailView',
+    'ActiveQuestionExportView',
     'ExamTokenLandingView', 'ExamVerifyEmailView', 'ExamIdentityCaptureView',
     'ExamBeginView', 'ExamSessionView', 'ExamAnswerView', 'ExamRecordingChunkView',
     'ExamViolationView', 'ExamSubmitView',

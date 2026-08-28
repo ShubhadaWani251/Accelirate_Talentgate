@@ -20,17 +20,26 @@ from django.urls import path, include, re_path
 
 from . import spa
 
-# The Django admin is deliberately not routed here, and django.contrib.admin is not installed
-# (see INSTALLED_APPS in settings.py for the full reasoning). Short version: it registered every
-# model with no write protection, against a different user table than the one this app
-# authenticates with, so it was a complete bypass of the app's own role checks - including an
-# editable AuditLog and readable Question.correct_option. Staff administration lives in the app's
-# own User Management screen, which enforces the real permissions.
+# /admin/ is only ever routed when DEBUG=True - see the INSTALLED_APPS comment in settings.py
+# and api/admin.py's module docstring for the full reasoning (short version: it's a full RBAC
+# bypass against a different user table, so it must never exist in a real deployment). Staff
+# administration for anything user-facing still lives in the app's own User Management screen,
+# which enforces the real permissions; this is a local-dev-only convenience on top of that, not
+# a replacement for it.
 urlpatterns = [
     path('api/', include('api.urls')),
 ]
 
 if settings.DEBUG:
+    from django.contrib import admin
+    # NOT /admin/ - the React app already owns that whole prefix for its own admin screens
+    # (User Management, Question Bank, Audit Logs - see AppRouter.jsx), routed client-side via
+    # the SPA catch-all below. path('admin/', admin.site.urls) here would shadow every one of
+    # those (Django admin's own urlconf 404s on /admin/users etc. rather than falling through
+    # to the SPA), breaking real app navigation any time DEBUG=True. django-admin/ avoids the
+    # collision entirely.
+    urlpatterns += [path('django-admin/', admin.site.urls)]
+
     # Serves the local-disk evidence fallback (api/services/blob_storage.py) when no Azure
     # connection string is configured - never active in production.
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

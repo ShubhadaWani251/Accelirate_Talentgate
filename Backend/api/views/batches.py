@@ -2,7 +2,6 @@ import io
 import logging
 import zipfile
 
-from django.conf import settings
 from django.db import DataError, transaction
 from django.db.models import Q
 from django.http import Http404, HttpResponse
@@ -35,7 +34,6 @@ from api.services.excel_upload import (
 )
 from api.services.invites import (
     BatchNotInvitableError, assert_batch_can_invite, create_invitations,
-    send_invites_async,
 )
 
 logger = logging.getLogger(__name__)
@@ -198,6 +196,33 @@ class BatchDeactivateView(APIView):
         return Response({
             'detail': f'"{batch.batch_name}" has been deactivated. Its candidates and results '
                       f'are still available, but no further invites can be sent.',
+            'batch': BatchSerializer(batch).data,
+        })
+
+
+class BatchCompleteView(APIView):
+    """Manually marks a batch Completed. Nothing in the app infers this automatically - see
+    services/batch_status_filter.py, which already groups Completed alongside In Progress under
+    "Active" precisely because nothing ever produced a Completed batch until this. A TA/admin
+    decides when a drive is actually done: "every candidate finished" doesn't account for
+    stragglers written off, and "the link window closed" doesn't account for a TA who
+    deliberately keeps inviting past it.
+    """
+    permission_classes = [IsAdminOrTA]
+
+    def post(self, request, batch_id):
+        batch = _get_batch_or_404(request.user, batch_id)
+        if batch.status != Batch.Status.IN_PROGRESS:
+            return Response(
+                {'detail': 'Only an in-progress batch can be marked completed.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        batch.status = Batch.Status.COMPLETED
+        batch.save(update_fields=['status'])
+        log_action(request, request.user, 'complete', 'batch', batch.batch_id)
+        return Response({
+            'detail': f'"{batch.batch_name}" has been marked completed.',
             'batch': BatchSerializer(batch).data,
         })
 
@@ -678,9 +703,11 @@ class BatchSendInvitesView(APIView):
             return Response({'detail': 'Select the candidates to invite first.'},
                              status=status.HTTP_400_BAD_REQUEST)
 
+        # Only queues them (email_status=QUEUED) - management/commands/process_email_queue.py is
+        # what actually sends, on its own schedule. See that command's module docstring for why
+        # nothing sends inline from this request any more.
         invitations = create_invitations(batch, request.user, candidate_ids=candidate_ids)
         if invitations:
-            send_invites_async(invitations, settings.FRONTEND_ORIGIN)
             for invitation in invitations:
                 log_action(request, request.user, 'invite_sent', 'candidate', invitation.candidate_id,
                            details={'batch_id': batch.batch_id})

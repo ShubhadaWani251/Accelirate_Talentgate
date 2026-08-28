@@ -27,6 +27,10 @@ export const updateBatch = (id, payload) =>
 export const deactivateBatch = (id) =>
   axiosClient.post(`/batches/${id}/deactivate/`).then((r) => r.data);
 
+// Manual only - nothing infers a batch is "done" on its own (see batch_status_filter.py).
+export const completeBatch = (id) =>
+  axiosClient.post(`/batches/${id}/complete/`).then((r) => r.data);
+
 export const getBatchDefaults = () => axiosClient.get('/batches/defaults/').then((r) => r.data);
 
 export const saveBatchDefaults = (payload) =>

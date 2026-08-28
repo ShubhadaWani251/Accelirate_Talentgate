@@ -179,6 +179,14 @@ INVITATION_TEMPLATE = {
         'Please Note: The assessment link will be active only during the above-mentioned '
         'assessment window.\n\n'
         'Important Instructions\n\n'
+        '- Before clicking the assessment link, please clear your browser cache to avoid any '
+        'loading issues.\n\n'
+        '- Please make sure your camera and microphone are working properly before you begin '
+        'the assessment.\n\n'
+        '- Before starting the assessment, please close all other applications and turn off '
+        'notifications (email, chat, calls, etc.) on your device. Any interruption from '
+        'another application during the assessment may be treated as a violation and could '
+        'result in your assessment being terminated.\n\n'
         '- Access the assessment only through the unique link provided above. This link is '
         'exclusively assigned to you and must not be shared with anyone.\n\n'
         '- Use your registered email address to access the assessment. Only the invited '
@@ -243,14 +251,20 @@ def format_datetime(value):
     return f'{local.strftime(DATETIME_FORMAT)} {label}'
 
 
-def render_invitation_email(candidate, batch, link):
-    """Resolve the approved invitation copy into (subject, body) for one candidate."""
+def render_invitation_email(candidate, batch, link, sender=None):
+    """Resolve the approved invitation copy into (subject, body) for one candidate.
+
+    `sender` is the staff user actually sending this invite (Invitation.sent_by) - candidates
+    contact THEM, not a shared inbox, since that's who actually knows this candidate's batch and
+    can act on a problem. Falls back to the generic support_email() only when there's no sender
+    to name (Invitation.sent_by is SET_NULL, so a deleted user account leaves this null).
+    """
     return INVITATION_TEMPLATE['subject'], INVITATION_TEMPLATE['body'].format(
         name=candidate.full_name,
         link=link,
         start=format_datetime(batch.link_valid_from),
         end=format_datetime(batch.link_valid_until),
-        support_email=support_email(),
+        support_email=(sender.email if sender else None) or support_email(),
     )
 
 

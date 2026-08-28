@@ -76,8 +76,8 @@ export default function UserManagement() {
         <div className="box-label">Add User</div>
         <div className="grid-2">
           <div className="field">
-            <label>Name</label>
-            <input placeholder="Full name" value={form.first_name}
+            <label>First Name</label>
+            <input placeholder="First name" value={form.first_name}
                    onChange={(e) => set('first_name', e.target.value)} />
           </div>
           <div className="field">
@@ -89,7 +89,8 @@ export default function UserManagement() {
         <div className="grid-2">
           <div className="field">
             <label>Last Name</label>
-            <input value={form.last_name} onChange={(e) => set('last_name', e.target.value)} />
+            <input placeholder="Last name" value={form.last_name}
+                   onChange={(e) => set('last_name', e.target.value)} />
           </div>
           <div className="field">
             <label>Role</label>

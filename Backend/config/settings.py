@@ -41,13 +41,18 @@ ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
 # Application definition
 
-# django.contrib.admin is deliberately NOT installed and /admin/ is not routed. Every model
-# was registered there with no write protection, which made it a full bypass of this app's own
-# RBAC (api/permissions.py): editable AuditLog rows, readable Question.correct_option, and a
-# login path with none of the rate limiting or lockout the real login has. Admin also
-# authenticates against django.contrib.auth.User - a different user table from the one this app
-# uses - so a single createsuperuser would have created an account outside the RBAC entirely.
-# django.contrib.auth stays: it supplies the password hashers and validators the app relies on.
+# django.contrib.admin is NOT installed when DEBUG=False - i.e. never in a real deployment.
+# The original reasoning still applies there: every model registered with no write protection
+# is a full bypass of this app's own RBAC (api/permissions.py) - editable AuditLog rows,
+# readable Question.correct_option, and a login path with none of the rate limiting or lockout
+# the real login has, authenticating against django.contrib.auth.User rather than this app's own
+# User table. What changed is scope, not the risk tolerance: api/admin.py now registers models
+# for local dev convenience ONLY, gated on this same DEBUG check (also see config/urls.py) so it
+# structurally cannot exist wherever DEBUG=False - which is every real deployment, per the
+# ImproperlyConfigured check above. AuditLog and every password-hash field stay off-limits even
+# there; see api/admin.py's module docstring.
+# django.contrib.auth stays regardless of DEBUG: it supplies the password hashers and validators
+# the app relies on.
 INSTALLED_APPS = [
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -59,6 +64,8 @@ INSTALLED_APPS = [
     'anymail',
     'api',
 ]
+if DEBUG:
+    INSTALLED_APPS.append('django.contrib.admin')
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
@@ -205,7 +212,24 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # CORS
 # The refresh token rides in an httpOnly cookie, so the frontend origin must be
 # explicitly allowed (not wildcarded) and credentials must be permitted.
+#
+# This also builds every candidate invite link, so it's deliberately whatever a developer's own
+# .env says (localhost while running locally) rather than a hardcoded remote default - an invite
+# link has to point at wherever this particular backend's frontend actually is.
 FRONTEND_ORIGIN = os.environ.get('FRONTEND_ORIGIN', 'http://localhost:5173')
+
+# Service-to-service integration key for api.views.integrations.ActiveQuestionExportView - a
+# static shared secret, not a JWT, because the caller is another system with no api.User at
+# all. Blank by default so the endpoint refuses every request (fails closed) until an admin
+# deliberately provisions it; see .env.example.
+QUESTION_EXPORT_API_KEY = os.environ.get('QUESTION_EXPORT_API_KEY', '')
+
+# The link put in the new-user credentials email specifically. Deliberately a separate setting
+# from FRONTEND_ORIGIN above, not reused: FRONTEND_ORIGIN tracks wherever *this* backend's own
+# frontend is (localhost in dev), but staff only ever log in against the one real deployment -
+# a developer running the app locally should still send new teammates the real staging link, not
+# a localhost URL nobody but their own machine can reach. Update when staging moves off this URL.
+STAFF_APP_URL = os.environ.get('STAFF_APP_URL', 'https://app-talentgate-staging.azurewebsites.net')
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOWED_ORIGINS = [FRONTEND_ORIGIN]
 CORS_ALLOW_CREDENTIALS = True
@@ -275,11 +299,32 @@ EMAIL_BACKEND = os.environ.get('EMAIL_BACKEND', 'api.services.graph_email.GraphE
 GRAPH_TENANT_ID = os.environ.get('GRAPH_TENANT_ID', '')
 GRAPH_CLIENT_ID = os.environ.get('GRAPH_CLIENT_ID', '')
 GRAPH_CLIENT_SECRET = os.environ.get('GRAPH_CLIENT_SECRET', '')
+# Certificate-based app auth (private_key_jwt), an alternative to the client secret above -
+# Microsoft's recommended stronger option for app-only Graph access. Both GRAPH_CERT_PATH (a PEM
+# file holding the private key) and GRAPH_CERT_THUMBPRINT (the SHA-1 thumbprint Azure shows once
+# the matching public certificate is uploaded to the app registration) must be set to activate
+# it; graph_email.py falls back to GRAPH_CLIENT_SECRET whenever either is blank, so leaving these
+# unset is always safe. See Backend/api/management/commands/generate_graph_cert.py to produce
+# the key pair and get the exact values to paste here and into the Azure Portal.
+GRAPH_CERT_PATH = os.environ.get('GRAPH_CERT_PATH', '')
+GRAPH_CERT_THUMBPRINT = os.environ.get('GRAPH_CERT_THUMBPRINT', '')
 # Mailbox the app sends as. Must be a real mailbox in the tenant that the app registration is
 # permitted to send on behalf of.
 GRAPH_SENDER = os.environ.get('GRAPH_SENDER', '')
 # Keeping a copy of every candidate invite in the service mailbox is rarely wanted.
 GRAPH_SAVE_TO_SENT_ITEMS = os.environ.get('GRAPH_SAVE_TO_SENT_ITEMS', 'false').lower() == 'true'
+
+# Deliberate pacing between invitation emails, applied by management/commands/
+# process_email_queue.py - the queue worker that sends every one of them - not Graph's own rate
+# limit, it's the RECEIVING mail systems reading a burst of 100+ near-identical emails as
+# bulk/spam activity. A small gap between sends is cheap insurance against that, without
+# meaningfully slowing a real batch (100 candidates at the default adds under 3 minutes total).
+INVITE_SEND_DELAY_SECONDS = float(os.environ.get('INVITE_SEND_DELAY_SECONDS', '1.5'))
+
+# How many automatic retry-sweep attempts a stalled/failed invitation gets before the sweep
+# stops touching it and it needs a deliberate manual resend. Without a ceiling, a permanently
+# bad address (typo, mailbox doesn't exist) would be re-attempted by every scheduled run forever.
+INVITE_MAX_RETRY_ATTEMPTS = int(os.environ.get('INVITE_MAX_RETRY_ATTEMPTS', '5'))
 
 # Retained so EMAIL_BACKEND can be pointed back at SendGrid if Graph is unavailable.
 ANYMAIL = {

@@ -137,7 +137,6 @@ export default function Dashboard() {
             <thead>
               <tr>
                 <th>Batch Name</th>
-                <th>College</th>
                 {isAdmin && <th>TA Owner</th>}
                 <th>Candidates</th>
                 <th>Status</th>
@@ -153,14 +152,13 @@ export default function Dashboard() {
                   previous rows belong to a different filter, so showing them faded reads as if
                   they were the (wrong) result. */}
               {tableLoading ? (
-                <SkeletonTableRows rows={5} columns={isAdmin ? 10 : 9} />
+                <SkeletonTableRows rows={5} columns={isAdmin ? 9 : 8} />
               ) : batches.length === 0 ? (
-                <tr><td colSpan={isAdmin ? 9 : 8}>{EMPTY_MESSAGE[batchStatus] || 'No batches yet.'}</td></tr>
+                <tr><td colSpan={isAdmin ? 8 : 7}>{EMPTY_MESSAGE[batchStatus] || 'No batches yet.'}</td></tr>
               ) : (
                 batches.map((b) => (
                   <tr key={b.batch_id}>
                     <td>{b.batch_name}</td>
-                    <td>{b.college_name}</td>
                     {isAdmin && <td>{b.primary_ta_user_name}</td>}
                     <td>{b.total_candidates}</td>
                     <td><span className={`pill ${STATUS_PILL[b.status] || 'gray'}`}>{b.status_display}</span></td>
@@ -202,20 +200,20 @@ export default function Dashboard() {
               // own intrinsic width and pushes the whole page sideways on a phone.
               <div className="table-scroll">
               <table className="data-table">
-                <thead><tr><th>Section</th><th>Total Questions</th><th>Duplicates</th><th>Status</th></tr></thead>
+                <thead><tr><th>Section</th><th>Total Active Questions</th><th>Duplicates</th></tr></thead>
                 <tbody>
                   {qbankHealth.map((s) => (
                     <tr key={s.section_name}>
                       <td>{s.section_name}</td>
                       {/* Distinct questions, not row count - a section can hold 84 rows of 6
                           questions, which won't fill a 10-question section. Just the count per
-                          request; the /min_required_active context still rides along as a
-                          tooltip since the Status pill alone doesn't say how far short it is. */}
+                          request; min_required_active rides along as a tooltip so the "min. 50
+                          active each" in the box label still means something without a separate
+                          Status column spelling out OK/Low for every row. */}
                       <td title={`Minimum required: ${s.min_required_active}`}>{s.active_count}</td>
                       <td>{s.duplicate_count > 0
                         ? <span className="pill amber">{s.duplicate_count}</span>
                         : '—'}</td>
-                      <td><span className={`pill ${s.is_ok ? 'green' : 'red'}`}>{s.is_ok ? 'OK' : 'Low'}</span></td>
                     </tr>
                   ))}
                 </tbody>
