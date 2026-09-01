@@ -2,9 +2,9 @@
 window (30 days by default - see services/evidence_retention.py).
 
 No Celery broker is configured in this project, so this follows the same pattern as the other
-scheduled-cleanup commands (finalize_expired_attempts, delete_expired_draft_batches): a plain
-management command driven by whatever scheduler the deployment already has (cron, Windows Task
-Scheduler, an Azure WebJob). Once a day is ample for a 30-day window.
+scheduled-cleanup command (finalize_expired_attempts): a plain management command driven by
+whatever scheduler the deployment already has (cron, Windows Task Scheduler, an Azure WebJob).
+Once a day is ample for a 30-day window.
 
     python manage.py purge_expired_evidence
     python manage.py purge_expired_evidence --dry-run

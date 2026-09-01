@@ -46,7 +46,14 @@ axiosClient.interceptors.response.use(
         return axiosClient(config);
       } catch (refreshError) {
         onAuthExpired(refreshError);
-        return Promise.reject(error);
+        // Reject with refreshError, not the original error: /auth/refresh/ already returns the
+        // right message for this ("Session expired. Please log in again." - see RefreshView).
+        // Rejecting with the original request's error instead surfaced whatever raw message
+        // THAT endpoint happened to produce for an expired access token (SimpleJWT's own
+        // "Given token not valid for any token type"), which is what a caller's
+        // extractErrorMessage(err) would show as a toast - accurate for the access token, but
+        // not what a user needs to hear.
+        return Promise.reject(refreshError);
       }
     }
     return Promise.reject(error);

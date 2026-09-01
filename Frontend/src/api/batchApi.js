@@ -27,6 +27,11 @@ export const updateBatch = (id, payload) =>
 export const deactivateBatch = (id) =>
   axiosClient.post(`/batches/${id}/deactivate/`).then((r) => r.data);
 
+// The one exception: a Draft has no history to lose, so it can be deleted outright. Nothing
+// deletes a Draft automatically - the backend refuses this call for anything past Draft.
+export const deleteBatch = (id) =>
+  axiosClient.delete(`/batches/${id}/`).then((r) => r.data);
+
 // Manual only - nothing infers a batch is "done" on its own (see batch_status_filter.py).
 export const completeBatch = (id) =>
   axiosClient.post(`/batches/${id}/complete/`).then((r) => r.data);

@@ -5,10 +5,8 @@ import * as batchApi from '../../api/batchApi';
 import PaginationControls from '../../components/common/PaginationControls';
 import BatchStatusFilter from '../../components/common/BatchStatusFilter';
 import { ListPageSkeleton, SkeletonTableRows } from '../../components/loading/Skeleton';
-import {
-  formatExpiryDate, formatTimeLeft, isExpiringSoon, parseExpiry,
-} from '../../utils/draftExpiry';
 import { extractErrorMessage } from '../../utils/passwordSchema';
+import DeleteDraftBatchModal from '../../features/batches/DeleteDraftBatchModal';
 
 const STATUS_PILL = { draft: 'gray', in_progress: 'blue', completed: 'green', cancelled: 'red' };
 const EMPTY_MESSAGE = {
@@ -17,24 +15,6 @@ const EMPTY_MESSAGE = {
   cancelled: 'No Cancelled batches found.',
   all: 'No batches yet.',
 };
-
-// A quiet second line under the batch name, not a badge or a live ticking clock: this is
-// information a TA needs when they glance at the Draft list, not something to draw the eye on
-// every row. Deletion is the backend's job (Backend/api/services/draft_expiry.py) - this only
-// reports the deadline it will act on.
-function DraftExpiryNote({ batch }) {
-  const expiresAt = parseExpiry(batch);
-  if (!expiresAt) return null;
-  const soon = isExpiringSoon(expiresAt);
-  return (
-    <div
-      style={{ fontSize: 11.5, marginTop: 3, color: soon ? 'var(--brand-red)' : 'var(--muted)' }}
-      title={`This draft is deleted automatically at ${formatExpiryDate(expiresAt)} if it isn't finalized.`}
-    >
-      {formatTimeLeft(expiresAt)}
-    </div>
-  );
-}
 
 export default function BatchList() {
   const [batches, setBatches] = useState([]);
@@ -50,6 +30,9 @@ export default function BatchList() {
   // candidates or results yet, and a Cancelled one isn't live work, so neither belongs in the
   // default working view.
   const [batchStatus, setBatchStatus] = useState('active');
+  // The batch a delete is pending confirmation for - only ever a Draft row (see the button
+  // below), so DeleteDraftBatchModal never has to guard against a non-draft target itself.
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   async function refresh(q = search, p = page, status = batchStatus) {
     setLoading(true);
@@ -108,10 +91,9 @@ export default function BatchList() {
       {batchStatus === 'draft' && (
         <div className="alert" style={{ marginBottom: 12 }}>
           These uploads were started but never completed — no batch has been created and no
-          invites have been sent. Opening one resumes it at the step it was left on.
-          {' '}A draft is kept for <b>24 hours from when it was created</b>; if it isn&apos;t
-          finalized by then, it and its uploaded candidates are deleted automatically. Editing
-          a draft or uploading more candidates doesn&apos;t extend that window.
+          invites have been sent. Opening one resumes it at the step it was left on. A draft is
+          kept until you either finish it or delete it yourself — nothing removes it
+          automatically.
         </div>
       )}
       {batchStatus === 'cancelled' && (
@@ -143,12 +125,7 @@ export default function BatchList() {
             ) : (
               batches.map((b) => (
                 <tr key={b.batch_id}>
-                  <td>
-                    {b.batch_name}
-                    {/* Only drafts carry draft_expires_at - it's null for every other status,
-                        so nothing is shown on a finalized batch. */}
-                    <DraftExpiryNote batch={b} />
-                  </td>
+                  <td>{b.batch_name}</td>
                   {/* Optional at the batch level now - a mixed-college drive is normal, since
                       each candidate already carries their own college_name from the upload. */}
                   <td>{b.college_name || '—'}</td>
@@ -159,13 +136,23 @@ export default function BatchList() {
                   <td>{b.fail_count}</td>
                   {/* A draft reopens the upload wizard at its outstanding step; anything
                       finalized goes to its Batch Details page. */}
-                  <td>
+                  <td style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
                     <Link
                       to={b.status === 'draft' ? `/batches/${b.batch_id}/continue` : `/batches/${b.batch_id}`}
                       className="link-text"
                     >
                       {b.status === 'draft' ? 'Continue' : 'View'}
                     </Link>
+                    {b.status === 'draft' && (
+                      <button
+                        type="button"
+                        className="link-text"
+                        style={{ color: 'var(--brand-red)' }}
+                        onClick={() => setDeleteTarget(b)}
+                      >
+                        Delete
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))
@@ -183,6 +170,19 @@ export default function BatchList() {
         onNext={() => refresh(search, page + 1)}
         onPageChange={(p) => refresh(search, p)}
       />
+
+      {deleteTarget && (
+        <DeleteDraftBatchModal
+          batch={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={() => {
+            setDeleteTarget(null);
+            // A page that's now short one row (possibly its only row) - re-fetch this same
+            // page rather than trusting the count in local state to still be right.
+            refresh(search, page);
+          }}
+        />
+      )}
     </div>
   );
 }

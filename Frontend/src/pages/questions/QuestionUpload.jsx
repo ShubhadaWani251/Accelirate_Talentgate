@@ -27,6 +27,12 @@ export default function QuestionUpload() {
   const [validation, setValidation] = useState(null);  // { summary, rows, by_section }
   const [result, setResult] = useState(null);
   const [edited, setEdited] = useState(false);
+  // Client-side only - every row from the validated set is already in memory, so filtering the
+  // (possibly large) table down to what's worth looking at doesn't need a server round-trip.
+  // Reset whenever a fresh validation replaces the row set, so a filter from a previous upload
+  // can't silently hide rows in a new one.
+  const [sectionFilter, setSectionFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
   const importingRef = useRef(false);
   const inputRef = useRef(null);
 
@@ -85,6 +91,8 @@ export default function QuestionUpload() {
     setValidating(true);
     setValidation(null);
     setResult(null);
+    setSectionFilter('');
+    setStatusFilter('');
     try {
       setValidation(await questionApi.validateQuestionsExcel(file));
     } catch (err) {
@@ -118,6 +126,8 @@ export default function QuestionUpload() {
     setValidation(null);
     setResult(null);
     setEdited(false);
+    setSectionFilter('');
+    setStatusFilter('');
   }
 
   function handleDrop(e) {
@@ -127,6 +137,20 @@ export default function QuestionUpload() {
   }
 
   const summary = validation?.summary;
+
+  // Distinct section names actually present in this upload's rows, not the full org-wide
+  // sections list - a row with a typo'd/unrecognized section still needs to be findable by
+  // whatever value it actually carries, and a section nobody uploaded to shouldn't clutter the
+  // dropdown with an option that can never match anything.
+  const sectionOptions = validation
+    ? [...new Set(validation.rows.map((r) => r.section_name || r.section).filter(Boolean))].sort()
+    : [];
+
+  const filteredRows = validation
+    ? validation.rows.filter((r) =>
+        (!sectionFilter || (r.section_name || r.section) === sectionFilter)
+        && (!statusFilter || r.status === statusFilter))
+    : [];
 
   return (
     <div className="page-wide">
@@ -265,6 +289,29 @@ export default function QuestionUpload() {
             </div>
           )}
 
+          {/* Filters only what's shown below - bulk actions (Remove all problem rows, Import)
+              and the summary cards above still act on the full row set regardless of what's
+              currently filtered into view. */}
+          <div className="btn-row" style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+            <select value={sectionFilter} onChange={(e) => setSectionFilter(e.target.value)}
+                    style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid var(--line-soft)' }}>
+              <option value="">Section: All</option>
+              {sectionOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
+                    style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid var(--line-soft)' }}>
+              <option value="">Status: All</option>
+              <option value="valid">Valid</option>
+              <option value="invalid">Invalid</option>
+              <option value="duplicate">Duplicate</option>
+            </select>
+            {(sectionFilter || statusFilter) && (
+              <button className="btn small" onClick={() => { setSectionFilter(''); setStatusFilter(''); }}>
+                Clear filters
+              </button>
+            )}
+          </div>
+
           <div className="table-scroll">
             <table className="data-table">
               <thead>
@@ -278,7 +325,11 @@ export default function QuestionUpload() {
                   <tr><td colSpan={9}>
                     Every row has been removed. Go back and upload a file to start again.
                   </td></tr>
-                ) : validation.rows.map((r) => (
+                ) : filteredRows.length === 0 ? (
+                  <tr><td colSpan={9}>
+                    No rows match the current filter.
+                  </td></tr>
+                ) : filteredRows.map((r) => (
                   <QuestionValidationRow
                     key={r.row_number}
                     row={r}

@@ -33,6 +33,11 @@ Sends within one run are paced by settings.INVITE_SEND_DELAY_SECONDS - a burst o
 emails reads as bulk/spam activity to the RECEIVING mail system, independent of whatever rate
 Graph itself would allow.
 
+Safe to run concurrently from more than one process - see _send_one_locked. That matters
+specifically because startup.sh's scheduler loop runs on every App Service instance
+independently with no coordination between them: without per-row locking, scaling the web tier
+out to a second instance would send every invitation twice.
+
     python manage.py process_email_queue
     python manage.py process_email_queue --dry-run
     python manage.py process_email_queue --include-failed
@@ -45,6 +50,7 @@ import time
 
 from django.conf import settings
 from django.core.management.base import BaseCommand
+from django.db import transaction
 from django.utils import timezone
 
 from api.models import Batch, Invitation
@@ -140,32 +146,67 @@ class Command(BaseCommand):
             return
 
         base_url = settings.FRONTEND_ORIGIN
-        sent = failed = 0
+        sent = failed = skipped = 0
         for i, invitation in enumerate(pending):
             if i > 0 and settings.INVITE_SEND_DELAY_SECONDS > 0:
                 time.sleep(settings.INVITE_SEND_DELAY_SECONDS)
-            if invitation.email_status == Invitation.EmailStatus.FAILED:
-                invitation.retry_count += 1
-                invitation.save(update_fields=['retry_count'])
-            if send_invite_and_record(invitation, base_url):
+            outcome = self._send_one_locked(invitation, base_url)
+            if outcome == 'sent':
                 sent += 1
-            else:
-                # The reason is already recorded on the row and logged with a traceback by
-                # send_invite_and_record; nothing to add here.
+            elif outcome == 'failed':
                 failed += 1
+            else:
+                skipped += 1
 
         # Logged as well as printed: this runs unattended on a scheduler, where stdout may or
         # may not be collected, and "we sent 40 invitations just now" is worth having a record of.
         logger.info(
-            'process_email_queue: sent %s, failed %s, %s still pending',
-            sent, failed, max(total - len(pending), 0),
+            'process_email_queue: sent %s, failed %s, skipped %s (claimed by a concurrent run), '
+            '%s still pending',
+            sent, failed, skipped, max(total - len(pending), 0),
         )
 
         message = f'Sent {sent} invitation email(s).'
         if failed:
             message += f' {failed} failed - see each row\'s error for the reason.'
+        if skipped:
+            message += f' {skipped} were already claimed by a concurrent run and skipped.'
         if total > len(pending):
             message += (f' {total - len(pending)} more remain and will be picked up on the '
                         f'next run (--max was {options["max_per_run"]}).')
         style = self.style.WARNING if failed else self.style.SUCCESS
         self.stdout.write(style(message))
+
+    def _send_one_locked(self, invitation, base_url):
+        """Sends exactly one invitation, re-fetched and locked with SELECT ... FOR UPDATE SKIP
+        LOCKED for the duration of the send.
+
+        This is what makes running this command from more than one App Service instance at once
+        safe - a prerequisite for horizontal autoscale, since the scheduler loop in startup.sh
+        runs on every instance independently with no coordination between them. SKIP LOCKED
+        means a second instance racing the same row doesn't block waiting for the first to
+        finish (which would hold up its own, different rows too) - it just finds the row
+        already locked, skips it, and moves on to the next one. The eligibility check is
+        repeated under the lock because `pending` (built by the caller from a plain read,
+        outside any lock) may already be stale by the time this runs - another instance's tick
+        could have sent, failed, or otherwise finalized this exact row moments ago.
+
+        Returns 'sent', 'failed', or 'skipped' (already claimed/finalized elsewhere).
+        """
+        with transaction.atomic():
+            try:
+                locked = Invitation.objects.select_for_update(skip_locked=True).get(
+                    pk=invitation.pk
+                )
+            except Invitation.DoesNotExist:
+                return 'skipped'
+            if locked.email_status not in (
+                Invitation.EmailStatus.QUEUED, Invitation.EmailStatus.FAILED,
+            ):
+                return 'skipped'
+
+            if locked.email_status == Invitation.EmailStatus.FAILED:
+                locked.retry_count += 1
+                locked.save(update_fields=['retry_count'])
+
+            return 'sent' if send_invite_and_record(locked, base_url) else 'failed'

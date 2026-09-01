@@ -12,6 +12,7 @@ import {
   Skeleton, SkeletonPage, SkeletonStatCard, SkeletonTable, SkeletonTableRows,
 } from '../components/loading/Skeleton';
 import { extractErrorMessage } from '../utils/passwordSchema';
+import DeleteDraftBatchModal from '../features/batches/DeleteDraftBatchModal';
 
 const STATUS_PILL = { draft: 'gray', in_progress: 'blue', completed: 'green', cancelled: 'red' };
 const EMPTY_MESSAGE = {
@@ -29,6 +30,9 @@ export default function Dashboard() {
   const [tableLoading, setTableLoading] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  // The batch a delete is pending confirmation for - only ever a Draft row (see the button
+  // below), so DeleteDraftBatchModal never has to guard against a non-draft target itself.
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   async function loadSummary(status, { initial = false } = {}) {
     if (initial) setLoading(true); else setTableLoading(true);
@@ -165,7 +169,7 @@ export default function Dashboard() {
                     <td>{b.pass_count}</td>
                     <td>{b.fail_count}</td>
                     <td>{b.borderline_count}</td>
-                    <td>
+                    <td style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
                       {/* Opens that batch's own page, not a filtered All Candidates view -
                           Batch Details is where the batch's config, actions and candidates live.
                           Drafts are filtered out server-side; the fallback is here so that if one
@@ -177,6 +181,16 @@ export default function Dashboard() {
                       >
                         {b.status === 'draft' ? 'Continue' : 'View'}
                       </Link>
+                      {b.status === 'draft' && (
+                        <button
+                          type="button"
+                          className="link-text"
+                          style={{ color: 'var(--brand-red)' }}
+                          onClick={() => setDeleteTarget(b)}
+                        >
+                          Delete
+                        </button>
+                      )}
                     </td>
                     <td>
                       <span className="link-text" onClick={() => handleExportBatch(b.batch_id)}>Export</span>
@@ -244,6 +258,17 @@ export default function Dashboard() {
             </Link>
           </div>
         </div>
+      )}
+
+      {deleteTarget && (
+        <DeleteDraftBatchModal
+          batch={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={() => {
+            setDeleteTarget(null);
+            loadSummary(batchStatus);
+          }}
+        />
       )}
     </div>
   );

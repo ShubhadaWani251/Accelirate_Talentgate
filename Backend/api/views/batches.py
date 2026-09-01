@@ -52,15 +52,6 @@ def _get_batch_or_404(user, batch_id):
         raise Http404
     if not can_access_batch(user, batch):
         raise Http404  # don't reveal existence of batches the caller can't access
-
-    # A Draft has 24 hours to be finalized (services/draft_expiry.py). Every batch-scoped
-    # endpoint routes through this function, so one check here is what stops a stale
-    # frontend - or a hand-rolled request - from reading, editing, uploading to, adding
-    # candidates to, finalizing or inviting from an expired draft. It's deleted on contact
-    # rather than just refused, so an expired draft that the scheduler hasn't reached yet
-    # doesn't survive being touched.
-    if draft_expiry.delete_if_expired(batch):
-        raise Http404
     return batch
 
 
@@ -72,12 +63,7 @@ class BatchListCreateView(APIView):
         # admin (services/access.visible_batches_qs). Routed through the same helper
         # can_access_batch uses, so the list and the detail page can never disagree about
         # which batches exist.
-        #
-        # Expired drafts are dropped so the list is right the instant one expires rather than
-        # at the next scheduler tick; the deletion itself happens in draft_expiry, not here.
-        qs = draft_expiry.exclude_expired(
-            visible_batches_qs(request.user).select_related('primary_ta_user')
-        )
+        qs = visible_batches_qs(request.user).select_related('primary_ta_user')
 
         # Unified Batch Status filter - 'active' (In Progress + Completed) by default, or
         # 'draft' / 'cancelled' / 'all' on request. Same grouping the dashboard uses, via the
@@ -174,6 +160,31 @@ class BatchDetailView(APIView):
             data = {**data, 'regraded_candidates': regraded}
 
         return Response(data)
+
+    # Draft-only, and a real row delete - see services/draft_expiry.delete_draft_batch. This is
+    # not the same operation as BatchDeactivateView below: a batch that has ever left Draft
+    # (invites sent, results recorded) is never deleted, only deactivated. A Draft has neither,
+    # by definition, so there's no history to lose.
+    def delete(self, request, batch_id):
+        batch = _get_batch_or_404(request.user, batch_id)
+        if batch.status != Batch.Status.DRAFT:
+            return Response(
+                {'detail': 'Only a Draft batch can be deleted. A finalized batch can be '
+                           'deactivated instead, which keeps its candidates and results.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            result = draft_expiry.delete_draft_batch(batch)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        log_action(request, request.user, 'delete', 'batch', batch_id,
+                   details={'candidates_removed': result['candidates_removed']})
+        return Response({
+            'detail': f'"{result["batch_name"]}" and its {result["candidates_removed"]} '
+                      f'uploaded candidate(s) were deleted.',
+        })
 
 
 class BatchDeactivateView(APIView):
@@ -619,13 +630,8 @@ class BatchFinalizeView(APIView):
         if window_error:
             return Response({'detail': window_error}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Activation and the draft-expiry sweep can reach the same row at the same moment, and
-        # the two must not both win. Taking the row lock and re-reading status/created_at
-        # inside it makes this the single atomic decision point: if the cleanup committed its
-        # delete first this finds the row gone (or, having crossed 24 hours mid-request, still
-        # a Draft that is now expired) and refuses; if this commits first, the cleanup's own
-        # locked re-check sees IN_PROGRESS and skips the batch. The checks above stay for their
-        # clearer messages - this is the one that's authoritative.
+        # Two concurrent finalize requests for the same batch must not both win. Taking the row
+        # lock and re-reading status inside it makes this the single atomic decision point.
         outcome = 'ok'
         with transaction.atomic():
             locked = Batch.objects.select_for_update().filter(batch_id=batch.batch_id).first()
@@ -633,18 +639,11 @@ class BatchFinalizeView(APIView):
                 outcome = 'gone'
             elif locked.status != Batch.Status.DRAFT:
                 outcome = 'finalized'
-            elif draft_expiry.is_draft_expired(locked):
-                outcome = 'expired'
             else:
                 locked.status = Batch.Status.IN_PROGRESS
                 locked.total_candidates = total
                 locked.save(update_fields=['status', 'total_candidates'])
 
-        if outcome == 'expired':
-            # Deleted after the lock is released, not inside the block above - raising Http404
-            # from inside an atomic block rolls that block back, which would undo the delete.
-            draft_expiry.delete_if_expired(locked)
-            raise Http404
         if outcome == 'gone':
             raise Http404
         if outcome == 'finalized':

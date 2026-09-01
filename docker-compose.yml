@@ -59,9 +59,10 @@ services:
     restart: unless-stopped
 
   scheduler:
-    # Reuses the backend image - same code, same dependencies, different command. Runs the two
-    # housekeeping jobs the app cannot function correctly without: without them, abandoned exam
-    # attempts stay in_progress forever and expired draft batches are never removed.
+    # Reuses the backend image - same code, same dependencies, different command. Runs the
+    # housekeeping job the app cannot function correctly without: without it, abandoned exam
+    # attempts stay in_progress forever. (Draft batches are no longer auto-deleted - see
+    # BatchList.jsx's manual Delete action.)
     build:
       context: ./Backend
     env_file: ./Backend/.env
@@ -76,11 +77,11 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     # A plain sleep loop rather than cron: one less moving part, logs straight to stdout where
     # the platform already collects them, and no crond-in-container signal handling to get
-    # wrong. Two loops, not one, because process_email_queue is not a backup job like the other
-    # two - it is the entire invitation-sending pipeline (creating an Invitation only queues it;
-    # nothing else ever sends one - see that command's module docstring), so it runs every
-    # minute. finalize_expired_attempts/delete_expired_draft_batches are genuine housekeeping
-    # with no user waiting on them, so the original 10-minute interval still fits.
+    # wrong. Two loops, not one, because process_email_queue is not a backup job like
+    # finalize_expired_attempts - it is the entire invitation-sending pipeline (creating an
+    # Invitation only queues it; nothing else ever sends one - see that command's module
+    # docstring), so it runs every minute. finalize_expired_attempts is genuine housekeeping
+    # with no user waiting on it, so the original 10-minute interval still fits.
     command:
       - |
         echo "scheduler: starting (email queue every 1 min, housekeeping every 10 min)"
@@ -92,6 +93,5 @@ services:
         ) &
         while true; do
           python manage.py finalize_expired_attempts || echo "scheduler: finalize_expired_attempts FAILED"
-          python manage.py delete_expired_draft_batches || echo "scheduler: delete_expired_draft_batches FAILED"
           sleep 600
         done

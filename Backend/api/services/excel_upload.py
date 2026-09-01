@@ -148,7 +148,8 @@ def generate_validation_report_workbook(candidates):
 
 EXPORT_COLUMNS = [
     'Name', 'Email', 'Mobile', 'Batch Name', 'College', 'Degree', 'Stream', 'Percentage',
-    'Passing Out Year', 'Location', 'Status', 'Result', 'Overall Score',
+    'Passing Out Year', 'Location', 'Status', 'Result',
+    'Logical Score', 'Quantitative Score', 'Verbal Score', 'Programming Score', 'Overall Score',
 ]
 
 
@@ -181,6 +182,13 @@ def generate_candidates_workbook(candidates, latest_attempt_fn, status_display_f
             candidate.location,
             status_display_fn(candidate),
             candidate.get_result_display(),
+            # Raw correct-answer counts per section, same fields the Result screen scores
+            # against - blank (not 0) when there's no attempt yet, so "never took it" stays
+            # visibly different from "scored zero".
+            attempt.logical_score if attempt else None,
+            attempt.quantitative_score if attempt else None,
+            attempt.verbal_score if attempt else None,
+            attempt.programming_score if attempt else None,
             float(overall_score) if overall_score is not None else None,
         ])
     return harden_workbook(wb)

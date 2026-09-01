@@ -423,6 +423,29 @@ class TestProcessEmailQueue:
         # Between sends, not before the first or after the last: 3 invitations -> 2 gaps.
         assert sleeps == [2.5, 2.5]
 
+    def test_a_row_already_claimed_by_a_concurrent_run_is_skipped_not_resent(
+        self, ta_user, make_batch, make_candidate, make_invitation
+    ):
+        """The concurrency-safety property that makes this command safe to run from more than
+        one App Service instance at once (see the command's own module docstring): the
+        eligibility check is repeated under the row lock, so a row another process already
+        finished between this run reading its `pending` list and reaching this row is skipped
+        rather than sent a second time.
+        """
+        from api.management.commands.process_email_queue import Command
+
+        candidate = make_candidate(make_batch(ta_user), ta_user)
+        invitation = make_invitation(candidate, ta_user)
+        # Simulates a concurrent run having already sent it in the gap between this command
+        # building its `pending` list and reaching this specific row.
+        invitation.email_status = Invitation.EmailStatus.SENT
+        invitation.save(update_fields=['email_status'])
+
+        outcome = Command()._send_one_locked(invitation, 'https://exam.example.test')
+
+        assert outcome == 'skipped'
+        assert mail.outbox == []
+
 
 class TestInvitationEmailBody:
     def test_the_email_is_multipart_with_html_last(

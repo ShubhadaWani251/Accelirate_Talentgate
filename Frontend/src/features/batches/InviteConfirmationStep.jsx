@@ -49,7 +49,9 @@ const schema = yup.object({
 //
 // Nothing is committed until confirmed here: the window is saved, then (if still Draft) the
 // batch is finalized, then invites are sent, in that order - a validation failure on any step
-// stops the ones after it, so "Back / Edit" always returns to an unmodified Draft.
+// stops the ones after it, so "Back / Edit" always returns to an unmodified Draft. A TA who
+// isn't ready to set a window/send yet uses ReviewStep's own "Save as Draft" instead, which
+// never reaches this screen at all - see that component.
 export default function InviteConfirmationStep({ summary, onBack, onSent }) {
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState(null);

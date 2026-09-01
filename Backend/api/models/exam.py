@@ -90,6 +90,10 @@ class ExamAnswer(models.Model):
     time_spent_seconds = models.SmallIntegerField(null=True, blank=True)
     is_auto_saved = models.BooleanField(default=True)
     answered_at = models.DateTimeField(null=True, blank=True)
+    # Independent of selected_option - a candidate can flag a question for a second pass whether
+    # or not they've answered it yet, and answering it doesn't clear the flag (only an explicit
+    # unmark does). See services/exam_session.save_answer / set_marked_for_review.
+    marked_for_review = models.BooleanField(default=False)
 
     class Meta:
         db_table = 'exam_answers'

@@ -8,9 +8,6 @@ import FixErrorsStep from './FixErrorsStep';
 import ReviewStep from './ReviewStep';
 import InviteConfirmationStep from './InviteConfirmationStep';
 import { isResourceMissing } from '../../utils/apiError';
-import {
-  formatExpiryDate, formatTimeLeft, isExpiringSoon, parseExpiry,
-} from '../../utils/draftExpiry';
 import { extractErrorMessage } from '../../utils/passwordSchema';
 
 // Validation and review are separate steps on purpose: step 2 lists only the rows that failed
@@ -60,13 +57,11 @@ export default function BatchWizard() {
         setStepKey(existing.total_candidates > 0 ? 'validate' : 'setup');
       } catch (err) {
         if (!cancelled) {
-          // A draft that has passed its 24 hours is deleted by the backend and then 404s, so
-          // that's the likely reason a resume link stops working - a bookmarked or stale link
-          // to a draft someone left overnight. Say so, rather than "Not found".
+          // A resume link 404s if the draft was deleted (by this user or another admin/TA) or
+          // never existed - say so specifically, rather than a generic error.
           toast.error(
             isResourceMissing(err)
-              ? 'That draft is no longer available — an unfinished draft is deleted 24 hours '
-                + 'after it was created, along with any candidates uploaded to it.'
+              ? 'That draft is no longer available — it may have been deleted.'
               : extractErrorMessage(err)
           );
           navigate('/batches', { replace: true });
@@ -77,9 +72,6 @@ export default function BatchWizard() {
   }, [id, navigate]);
 
   const stepIndex = STEPS.findIndex((s) => s.key === stepKey);
-  // Null unless this is a draft, so it's absent for a brand-new wizard run too (no batch yet).
-  const draftExpiresAt = parseExpiry(batch);
-  const expiringSoon = isExpiringSoon(draftExpiresAt);
 
   // Waiting on getBatch to decide which step to resume at.
   if (!stepKey) {
@@ -105,18 +97,8 @@ export default function BatchWizard() {
       {id && (
         <div className="alert" style={{ marginBottom: 12 }}>
           This batch is still a <b>Draft</b> — it hasn&apos;t been created yet and no invites have
-          gone out. Finish the remaining steps below, or leave it and come back to it later.
-          {/* The deadline matters most right here, where someone is mid-upload and deciding
-              whether to finish now or come back tomorrow - "come back later" has a limit. */}
-          {draftExpiresAt && (
-            <div style={{ marginTop: 8, fontSize: 12.5,
-                         color: expiringSoon ? 'var(--brand-red)' : undefined }}>
-              <b>{formatTimeLeft(draftExpiresAt)}</b> — an unfinished draft is deleted, along
-              with any candidates uploaded to it, 24 hours after it was created
-              ({formatExpiryDate(draftExpiresAt)}). Finalizing the batch stops that; editing it
-              or uploading more candidates does not extend it.
-            </div>
-          )}
+          gone out. Finish the remaining steps below, or leave it and come back to it later — a
+          draft is kept until you finish it or delete it yourself from the Drafts list.
         </div>
       )}
       <div className="wizard-steps">
@@ -188,6 +170,10 @@ export default function BatchWizard() {
               setFinalizeSummary(summary);
               setStepKey('invite');
             }}
+            // Leaves the batch as a Draft - not `/batches/${id}`, which is Batch Details and
+            // assumes a finalized batch (invites/results); a Draft belongs back on the list,
+            // findable and resumable ("Continue") from there.
+            onSavedAsDraft={() => navigate('/batches')}
           />
           <div className="btn-row" style={{ marginTop: 12 }}>
             <button className="btn" onClick={() => setStepKey('validate')}>

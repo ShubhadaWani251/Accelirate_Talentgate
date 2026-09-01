@@ -9,6 +9,8 @@ import useExamLockdown from '../../features/exam/proctoring/useExamLockdown';
 import useDisplayGuard from '../../features/exam/proctoring/useDisplayGuard';
 import useCameraGuard from '../../features/exam/proctoring/useCameraGuard';
 import useSessionRecorder from '../../features/exam/webcam/useSessionRecorder';
+import useCameraStream from '../../features/exam/webcam/useCameraStream';
+import { checkCameraNotBlocked } from '../../features/exam/webcam/frameCheck';
 import {
   FULLSCREEN_SUPPORTED, enterFullscreen, exitFullscreen, isFullscreen,
 } from '../../features/exam/proctoring/fullscreen';
@@ -34,6 +36,16 @@ function flattenAnswers(sections) {
   return answers;
 }
 
+function flattenMarks(sections) {
+  const marks = {};
+  sections.forEach((section) => {
+    section.questions.forEach((q) => {
+      marks[q.question_id] = Boolean(q.marked_for_review);
+    });
+  });
+  return marks;
+}
+
 export default function ExamAttemptPage() {
   const { token } = useParams();
   const navigate = useNavigate();
@@ -41,6 +53,11 @@ export default function ExamAttemptPage() {
 
   const [view, setView] = useState('loading'); // loading | exam | result | terminated
   const [answers, setAnswers] = useState({});
+  const [markedForReview, setMarkedForReview] = useState({});
+  // Which section page is showing. Sections stay freely revisitable - this is plain navigation
+  // state, not a progress lock, and not tied to any per-section timer (there isn't one - only
+  // the overall exam countdown below governs timing).
+  const [activeSectionIndex, setActiveSectionIndex] = useState(0);
   const [showConfirm, setShowConfirm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
@@ -62,6 +79,21 @@ export default function ExamAttemptPage() {
   const [fullscreenReady, setFullscreenReady] = useState(
     !FULLSCREEN_SUPPORTED || isFullscreen()
   );
+  // A page reload always drops both full-screen AND the getUserMedia stream (a MediaStream
+  // can't survive a reload) - fullscreenReady above already re-gates on the former, this
+  // re-gates on the latter. Without it, a candidate who reloaded mid-exam kept answering with
+  // no camera stream at all: useCameraGuard/useSessionRecorder silently do nothing when there's
+  // no stream to check, so proctoring went dark for the rest of the attempt with no error and
+  // nothing for the candidate to even notice. Starts true on the normal first-time path (camera
+  // was just granted on ExamCameraPermission and handed off via mediaStreamRef), so this only
+  // ever gates a resume.
+  const [cameraAcquired, setCameraAcquired] = useState(Boolean(mediaStreamRef.current));
+  const [cameraRequesting, setCameraRequesting] = useState(false);
+  const [cameraBlocked, setCameraBlocked] = useState(false);
+  const { requestStream, error: cameraError } = useCameraStream();
+  // Seconds left to enter full-screen before the attempt is ended for it - ticks only while
+  // this specific gate (camera already reacquired, full-screen not yet) is showing.
+  const [fullscreenSecondsLeft, setFullscreenSecondsLeft] = useState(30);
   // The clock is started by the server on POST /exam/begin/, which only happens once the
   // candidate is genuinely in the exam window (full-screen satisfied). Questions and the
   // countdown are withheld until that call returns, so the timer can never be shown - or run -
@@ -75,6 +107,7 @@ export default function ExamAttemptPage() {
   useEffect(() => {
     if (sessionState) {
       setAnswers(flattenAnswers(sessionState.sections));
+      setMarkedForReview(flattenMarks(sessionState.sections));
       setView('exam');
       return;
     }
@@ -90,6 +123,7 @@ export default function ExamAttemptPage() {
       .then((data) => {
         setSessionState(data);
         setAnswers(flattenAnswers(data.sections));
+        setMarkedForReview(flattenMarks(data.sections));
         setView('exam');
       })
       .catch(() => navigate(`/t/${token}`, { replace: true }));
@@ -229,7 +263,11 @@ export default function ExamAttemptPage() {
   // Only counts down once the server has actually started the exam - the `begun` gate also stops
   // it from ticking 0 -> onExpire and auto-submitting a blank paper before the exam starts.
   const timer = useExamTimer(sessionState?.remaining_seconds ?? 0, finishExam, begun);
-  useTabSwitchGuard(view === 'exam', onViolation, windowGuardGen);
+  // Gated on fullscreenReady, not just view === 'exam': without this, a candidate sitting on
+  // the camera-recheck or "Enter Full-Screen" gate (reached on a resume, see below) could be
+  // terminated for a tab switch/window blur before the exam has functionally resumed at all -
+  // nothing should end the attempt on those gates except the 30-second fullscreen timer itself.
+  useTabSwitchGuard(view === 'exam' && fullscreenReady, onViolation, windowGuardGen);
   useFullscreenGuard(examActive, onViolation, fullscreenGuardGen);
   useExamLockdown(examActive, onViolation, windowGuardGen);
   useSessionRecorder(mediaStreamRef.current, examActive);
@@ -298,14 +336,85 @@ export default function ExamAttemptPage() {
     setFullscreenReady(true);
   }
 
+  async function onAllowCamera() {
+    setCameraRequesting(true);
+    setCameraBlocked(false);
+    try {
+      const { stream, noVideo } = await requestStream();
+      if (!noVideo) {
+        const { blocked } = await checkCameraNotBlocked(stream);
+        if (blocked) {
+          stream.getTracks().forEach((t) => t.stop());
+          setCameraBlocked(true);
+          return;
+        }
+      }
+      mediaStreamRef.current = stream;
+      setCameraAcquired(true);
+    } catch {
+      // cameraError below renders the failure state.
+    } finally {
+      setCameraRequesting(false);
+    }
+  }
+
+  // 30-second grace period to re-enter full-screen, counted only once the candidate has a
+  // camera stream again (so the two gates never race) and only while genuinely on this specific
+  // step - a candidate who has already begun the exam and reloaded, camera reacquired, sitting
+  // on the "Enter Full-Screen" button. Not entering it in time ends the attempt: zero-tolerance,
+  // same as a deliberate devtools/screenshot attempt, since there is no legitimate reason to sit
+  // on this screen at length once everything else is in place. Nothing terminates before this -
+  // useTabSwitchGuard below is deliberately gated on fullscreenReady too, so it cannot fire
+  // while still on this gate.
+  useEffect(() => {
+    if (view !== 'exam' || !cameraAcquired || fullscreenReady) return undefined;
+    setFullscreenSecondsLeft(30);
+    const interval = setInterval(() => {
+      setFullscreenSecondsLeft((s) => Math.max(0, s - 1));
+    }, 1000);
+    const timeout = setTimeout(() => {
+      examApi
+        .reportViolation('fullscreen_not_entered')
+        .then((data) => {
+          setTerminationMessage(data.detail);
+          setView('terminated');
+        })
+        .catch(() => {
+          setTerminationMessage(
+            'Your assessment was ended and could not be reported to the server. '
+            + 'Please contact the Staffing team.'
+          );
+          setView('terminated');
+        });
+    }, 30000);
+    return () => {
+      clearInterval(interval);
+      clearTimeout(timeout);
+    };
+  }, [view, cameraAcquired, fullscreenReady]);
+
   function onSelectOption(questionId, option) {
     setAnswers((prev) => ({ ...prev, [questionId]: option }));
     examApi.saveAnswer(questionId, option).catch(() => {});
   }
 
+  function onToggleReview(questionId) {
+    const next = !markedForReview[questionId];
+    setMarkedForReview((prev) => ({ ...prev, [questionId]: next }));
+    // Resends the current selection alongside the flag - selected_option has no "leave as-is"
+    // sentinel server-side, so omitting it here would clear whatever the candidate had picked.
+    examApi.setMarkedForReview(questionId, answers[questionId], next).catch(() => {});
+  }
+
+  const totalCount = Object.keys(answers).length;
   const unansweredCount = useMemo(
     () => Object.values(answers).filter((v) => !v).length,
     [answers]
+  );
+  const answeredCount = totalCount - unansweredCount;
+  const markedCount = useMemo(
+    () => Object.values(markedForReview).filter(Boolean).length,
+    [markedForReview]
   );
 
   async function onConfirmSubmit() {
@@ -316,6 +425,49 @@ export default function ExamAttemptPage() {
   if (view === 'loading') return null;
   if (view === 'terminated') return <ExamTerminated message={terminationMessage} />;
   if (view === 'result') return <ExamResult result={result} />;
+
+  // Only ever reached on a resume (see cameraAcquired's own comment) - the normal first-time
+  // path already has a stream handed off from ExamCameraPermission before it ever reaches here.
+  if (!cameraAcquired) {
+    return (
+      <div className="app-shell">
+        <BrandHeader roleCode="candidate" />
+        <div className="auth-shell">
+          <div className="auth-card" style={{ textAlign: 'center' }}>
+            <h3>Camera &amp; Microphone Access Required</h3>
+            <div className="auth-sub">
+              Your camera and microphone need to be re-enabled to continue this assessment -
+              continuous video and audio is mandatory for the whole exam, including after a
+              reload.
+            </div>
+
+            {cameraBlocked && (
+              <div className="alert error" style={{ textAlign: 'left' }}>
+                <b>Your camera appears to be covered.</b>
+                <div style={{ marginTop: 6 }}>
+                  Access was granted, but no image is coming through. Please open your camera's
+                  privacy shutter (or remove any cover/tape over the lens) and try again.
+                </div>
+              </div>
+            )}
+
+            {cameraError && (
+              <div className="alert error" style={{ fontFamily: 'monospace', fontSize: 11.5 }}>
+                {cameraError.name}: {cameraError.message}
+              </div>
+            )}
+
+            <button className="btn primary block" type="button" disabled={cameraRequesting}
+                    onClick={onAllowCamera}>
+              {cameraRequesting ? 'Checking camera…'
+                : cameraBlocked ? 'Check Camera Again' : 'Allow Camera & Microphone Access'}
+            </button>
+          </div>
+        </div>
+        <BrandFooter roleCode="candidate" />
+      </div>
+    );
+  }
 
   if (!fullscreenReady) {
     return (
@@ -328,6 +480,11 @@ export default function ExamAttemptPage() {
               The assessment runs in full-screen mode. Exiting full-screen, switching tabs or
               leaving this window gives you one warning; the second time, your attempt ends
               automatically. Every such event is logged — per the integrity rules shown earlier.
+            </div>
+            <div className="auth-sub" style={{ fontWeight: 600,
+                         color: fullscreenSecondsLeft <= 10 ? 'var(--brand-red)' : undefined }}>
+              Enter full-screen within {fullscreenSecondsLeft} second
+              {fullscreenSecondsLeft === 1 ? '' : 's'}, or your assessment will be ended.
             </div>
             <button className="btn primary block" type="button" onClick={onEnterFullscreen}>
               Enter Full-Screen &amp; Begin
@@ -366,6 +523,8 @@ export default function ExamAttemptPage() {
   }
 
   const lowTime = timer.remaining <= 300; // last 5 minutes
+  const sections = sessionState.sections;
+  const activeSection = sections[activeSectionIndex] || sections[0];
 
   return (
     <div className="app-shell">
@@ -389,32 +548,73 @@ export default function ExamAttemptPage() {
             goes off again your assessment will be ended.
           </div>
         )}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-          <h3 style={{ margin: 0 }}>Assessment — All Questions</h3>
-          <div className={`timer-badge${lowTime ? ' low-time' : ''}`}>⏱ {timer.formatted} remaining</div>
+
+        {/* Fixed-feeling summary header: the overall countdown is what actually governs the
+            exam (see remaining_seconds - a tampered client clock changes nothing), Answered/
+            Remaining count every question across every section regardless of which page is
+            showing. */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                     flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+          <h3 style={{ margin: 0 }}>Assessment</h3>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+              Answered <b>{answeredCount}</b> / {totalCount} &middot; Remaining <b>{unansweredCount}</b>
+              {markedCount > 0 && <> &middot; Marked for Review <b>{markedCount}</b></>}
+            </span>
+            <div className={`timer-badge${lowTime ? ' low-time' : ''}`}>⏱ {timer.formatted} remaining</div>
+          </div>
         </div>
 
-        {sessionState.sections.map((section) => (
-          <div key={section.key}>
-            <div className="section-marker">
-              {section.label} ({section.questions.length} question{section.questions.length === 1 ? '' : 's'})
+        {/* One page per section, switched via the same stat-card picker as admin's Question
+            Bank screen (QuestionBank.jsx) - each card doubles as both the section's identity
+            and its own progress readout, and is clickable any time (sections stay freely
+            revisitable - no lock on leaving one, no per-section timer). */}
+        <div className="grid-4" style={{ marginBottom: 14 }}>
+          {sections.map((section, idx) => {
+            const attempted = section.questions.filter((q) => answers[q.question_id]).length;
+            return (
+              <button
+                key={section.key}
+                type="button"
+                className={`stat-card qb-stat-card ${idx === activeSectionIndex ? 'active' : ''}`}
+                onClick={() => setActiveSectionIndex(idx)}
+                style={{ textAlign: 'center', cursor: 'pointer', border: 'none', width: '100%' }}
+              >
+                <div className="stat-lbl" style={{ fontWeight: 600 }}>{section.label}</div>
+                <div className="stat-num">{attempted} / {section.questions.length}</div>
+                <div className="stat-lbl">Attempted</div>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="section-marker">
+          {activeSection.label} ({activeSection.questions.length} question
+          {activeSection.questions.length === 1 ? '' : 's'})
+        </div>
+        {activeSection.questions.map((q, idx) => (
+          <div className="q-card" key={q.question_id}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div className="q-num">Question {idx + 1}</div>
+              <button
+                type="button"
+                className={`btn small${markedForReview[q.question_id] ? ' primary' : ''}`}
+                onClick={() => onToggleReview(q.question_id)}
+              >
+                {markedForReview[q.question_id] ? '★ Marked for Review' : '☆ Mark for Review'}
+              </button>
             </div>
-            {section.questions.map((q, idx) => (
-              <div className="q-card" key={q.question_id}>
-                <div className="q-num">Question {idx + 1}</div>
-                <div className="q-text">{q.question_text}</div>
-                {OPTIONS.filter((opt) => q[OPTION_LABEL_KEY[opt]]).map((opt) => (
-                  <label className="option-row" key={opt}>
-                    <input
-                      type="radio"
-                      name={`q-${q.question_id}`}
-                      checked={answers[q.question_id] === opt}
-                      onChange={() => onSelectOption(q.question_id, opt)}
-                    />
-                    {q[OPTION_LABEL_KEY[opt]]}
-                  </label>
-                ))}
-              </div>
+            <div className="q-text">{q.question_text}</div>
+            {OPTIONS.filter((opt) => q[OPTION_LABEL_KEY[opt]]).map((opt) => (
+              <label className="option-row" key={opt}>
+                <input
+                  type="radio"
+                  name={`q-${q.question_id}`}
+                  checked={answers[q.question_id] === opt}
+                  onChange={() => onSelectOption(q.question_id, opt)}
+                />
+                {q[OPTION_LABEL_KEY[opt]]}
+              </label>
             ))}
           </div>
         ))}
@@ -456,8 +656,10 @@ export default function ExamAttemptPage() {
             <h4>Submit Assessment?</h4>
             <p>
               {unansweredCount > 0
-                ? `${unansweredCount} of ${Object.keys(answers).length} questions are still unanswered. `
+                ? `${unansweredCount} of ${totalCount} questions are still unanswered. `
                 : ''}
+              {markedCount > 0 ? `${markedCount} question${markedCount === 1 ? ' is' : 's are'} `
+                + 'still marked for review. ' : ''}
               Are you sure you want to submit the exam now? This cannot be undone and you will
               not be able to resume.
             </p>

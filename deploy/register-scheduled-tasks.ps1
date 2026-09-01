@@ -3,22 +3,22 @@
     Registers TalentGate's housekeeping jobs with Windows Task Scheduler.
 
 .DESCRIPTION
-    The same three jobs as deploy/crontab.example, for a Windows host running the app directly
-    rather than in a container. None of them is optional:
+    The same two jobs as deploy/crontab.example, for a Windows host running the app directly
+    rather than in a container. Neither is optional:
 
-      finalize_expired_attempts    - without it, exam attempts abandoned mid-way stay
-                                     in_progress forever and are never scored.
-      delete_expired_draft_batches - without it, Draft batches past their 24-hour window are
-                                     never deleted. The app hides them and deletes lazily when
-                                     someone opens one, but a draft nobody looks at again is
-                                     only removed here.
-      process_email_queue          - without it, invitation emails are never sent AT ALL.
-                                     Creating an Invitation only queues it; this command is the
-                                     only thing that actually sends one - not a backup job, the
-                                     entire pipeline. Registered every 1 minute for exactly that
-                                     reason. -MultipleInstances IgnoreNew below is what stops a
-                                     run still working through a large batch from overlapping
-                                     the next minute's tick.
+      finalize_expired_attempts - without it, exam attempts abandoned mid-way stay
+                                  in_progress forever and are never scored.
+      process_email_queue       - without it, invitation emails are never sent AT ALL.
+                                  Creating an Invitation only queues it; this command is the
+                                  only thing that actually sends one - not a backup job, the
+                                  entire pipeline. Registered every 1 minute for exactly that
+                                  reason. -MultipleInstances IgnoreNew below is what stops a
+                                  run still working through a large batch from overlapping
+                                  the next minute's tick.
+
+    Draft batches are NOT auto-deleted - that 24-hour expiry job (delete_expired_draft_batches)
+    was removed. A Draft now sits until a TA/admin deletes it explicitly from the Drafts list.
+    This script unregisters that old task if a previous run of this script left it behind.
 
     Run from an elevated PowerShell prompt. Re-running replaces the existing tasks.
 
@@ -56,9 +56,16 @@ if (-not (Test-Path $python)) {
 # nothing to process, so running more often than strictly needed is safe.
 $tasks = @(
     @{ Name = 'TalentGate-FinalizeExpiredAttempts'; Command = 'finalize_expired_attempts'; Minutes = 10 },
-    @{ Name = 'TalentGate-DeleteExpiredDraftBatches'; Command = 'delete_expired_draft_batches'; Minutes = 30 },
     @{ Name = 'TalentGate-ProcessEmailQueue'; Command = 'process_email_queue'; Minutes = 1 }
 )
+
+# Removes the task a previous run of this script may have registered for the now-removed
+# draft-batch auto-expiry job, so it doesn't keep running (and logging failures) forever.
+$staleTask = Get-ScheduledTask -TaskName 'TalentGate-DeleteExpiredDraftBatches' -ErrorAction SilentlyContinue
+if ($staleTask) {
+    Write-Host 'Removing stale task TalentGate-DeleteExpiredDraftBatches (auto-expiry was removed)...'
+    Unregister-ScheduledTask -TaskName 'TalentGate-DeleteExpiredDraftBatches' -Confirm:$false
+}
 
 foreach ($task in $tasks) {
     Write-Host "Registering $($task.Name) (every $($task.Minutes) min)..."

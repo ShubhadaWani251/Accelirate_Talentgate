@@ -51,6 +51,8 @@ class TerminationReason:
     SCREENSHOT_ATTEMPT = 'screenshot_attempt'
     CAMERA_OFF = 'camera_off'
     SYSTEM_ISSUE = 'system_issue'
+    LINK_REOPENED = 'link_reopened'
+    FULLSCREEN_NOT_ENTERED = 'fullscreen_not_entered'
 
 
 TERMINATION_MESSAGES = {
@@ -73,6 +75,13 @@ TERMINATION_MESSAGES = {
         'video is required for the whole assessment.',
     TerminationReason.SYSTEM_ISSUE:
         'Your assessment was ended because of a technical issue - camera/microphone access was lost.',
+    TerminationReason.LINK_REOPENED:
+        'Your assessment was ended because the assessment link was opened again after you had '
+        'already started. Once your assessment begins, it must be completed in that same '
+        'browser tab without closing it.',
+    TerminationReason.FULLSCREEN_NOT_ENTERED:
+        'Your assessment was ended because full-screen mode was not entered within 30 seconds '
+        'of reaching this step.',
 }
 
 # Short staff-facing labels for the same codes, used wherever a TA/Admin reads a candidate's
@@ -87,6 +96,8 @@ TERMINATION_LABELS = {
     TerminationReason.SCREENSHOT_ATTEMPT: 'Screenshot attempt (Print Screen)',
     TerminationReason.CAMERA_OFF: 'Camera switched off or blocked during the exam',
     TerminationReason.SYSTEM_ISSUE: 'Technical issue - camera/microphone lost',
+    TerminationReason.LINK_REOPENED: 'Assessment link reopened after starting (closed tab/lost session)',
+    TerminationReason.FULLSCREEN_NOT_ENTERED: 'Did not enter full-screen within 30 seconds',
 }
 
 
@@ -371,17 +382,26 @@ def start_or_resume_attempt(invitation_id, ip_address, user_agent):
     return attempt, True
 
 
-def save_answer(attempt, question_id, selected_option, time_spent_seconds=None):
+def save_answer(attempt, question_id, selected_option, time_spent_seconds=None,
+                marked_for_review=None):
     """Idempotent UPDATE, never an insert - the question must already be one of this attempt's
     assigned ExamAnswer rows (created at start time). Raises ExamAnswer.DoesNotExist if not,
     which the view translates to a 404.
+
+    `marked_for_review=None` means "leave it as-is" (the caller didn't send the field at all -
+    see AnswerSerializer) - selecting an option must not silently clear an existing review flag.
     """
     answer = attempt.examanswer_set.get(question_id=question_id)
     answer.selected_option = selected_option or None
     answer.answered_at = timezone.now() if selected_option else None
+    update_fields = ['selected_option', 'answered_at']
     if time_spent_seconds is not None:
         answer.time_spent_seconds = time_spent_seconds
-    answer.save(update_fields=['selected_option', 'answered_at', 'time_spent_seconds'])
+        update_fields.append('time_spent_seconds')
+    if marked_for_review is not None:
+        answer.marked_for_review = marked_for_review
+        update_fields.append('marked_for_review')
+    answer.save(update_fields=update_fields)
     return answer
 
 
@@ -402,6 +422,7 @@ def build_session_state(attempt):
             'option_c': question.option_c,
             'option_d': question.option_d,
             'selected_option': answer.selected_option,
+            'marked_for_review': answer.marked_for_review,
         })
     return {
         'remaining_seconds': remaining_seconds(attempt),

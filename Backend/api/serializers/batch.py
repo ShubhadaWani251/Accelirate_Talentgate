@@ -3,7 +3,6 @@ from rest_framework import serializers
 
 from api.models import Batch, Candidate, DuplicateCheck
 from api.serializers.common import format_aadhaar_last4
-from api.services import draft_expiry
 from api.services.batch_defaults import get_batch_defaults
 
 
@@ -58,7 +57,6 @@ class BatchSerializer(serializers.ModelSerializer):
     pass_count = serializers.SerializerMethodField()
     fail_count = serializers.SerializerMethodField()
     borderline_count = serializers.SerializerMethodField()
-    draft_expires_at = serializers.SerializerMethodField()
 
     class Meta:
         model = Batch
@@ -68,12 +66,12 @@ class BatchSerializer(serializers.ModelSerializer):
             'logical_questions', 'quantitative_questions', 'verbal_questions', 'programming_questions',
             'logical_cutoff', 'quantitative_cutoff', 'verbal_cutoff', 'programming_cutoff',
             'status', 'status_display', 'total_candidates',
-            'primary_ta_user', 'primary_ta_user_name', 'created_at', 'draft_expires_at',
+            'primary_ta_user', 'primary_ta_user_name', 'created_at',
             'pass_count', 'fail_count', 'borderline_count',
         ]
         read_only_fields = [
             'batch_id', 'status', 'status_display', 'total_candidates',
-            'primary_ta_user', 'primary_ta_user_name', 'created_at', 'draft_expires_at',
+            'primary_ta_user', 'primary_ta_user_name', 'created_at',
             # The exam schedule and question counts are set once, org-wide, on the admin-only
             # Configure Default Batch screen (services/batch_defaults.py) and snapshotted onto
             # each batch at creation (BatchListCreateView.post) - never client-writable, at
@@ -94,16 +92,6 @@ class BatchSerializer(serializers.ModelSerializer):
         if existing.exists():
             raise serializers.ValidationError('A batch with this name already exists.')
         return value
-
-    def get_draft_expires_at(self, batch):
-        """When an unfinalized draft will be deleted - null for every other status.
-
-        Derived from created_at, not stored, so there's no second copy of the deadline that
-        could drift from the one the cleanup job actually enforces. The UI counts down against
-        this; it is informational only (see services/draft_expiry.py).
-        """
-        expires_at = draft_expiry.draft_expires_at(batch)
-        return expires_at.isoformat() if expires_at else None
 
     def get_pass_count(self, batch):
         if hasattr(batch, 'pass_count'):

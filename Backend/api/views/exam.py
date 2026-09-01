@@ -133,6 +133,20 @@ class ExamTokenLandingView(APIView):
             exam_session.finalize_attempt(attempt, outcome='submitted')
             attempt.refresh_from_db()
 
+        # The clock has genuinely started (started_at is set) but we're back on the PUBLIC
+        # landing page rather than the exam itself - the only legitimate way to still be
+        # in-progress and reach this view is a lost session (tab closed and reopened, a
+        # different browser/device, or cleared storage), since an ordinary same-tab reload of
+        # the exam page never touches this view at all (see ExamAttemptPage's own
+        # restoreAttemptToken, which resumes straight from GET /api/exam/session/). That gap is
+        # exactly what let a candidate close the tab after reading every question, look up the
+        # answers elsewhere, then reopen this same link with the timer and any already-marked
+        # answers untouched - so treat it as abandonment, zero-tolerance, same as a deliberate
+        # devtools/screenshot attempt.
+        if attempt.status == ExamAttempt.Status.IN_PROGRESS and attempt.started_at is not None:
+            exam_session.record_violation(attempt, TerminationReason.LINK_REOPENED)
+            attempt.refresh_from_db()
+
         if attempt.status != ExamAttempt.Status.IN_PROGRESS:
             return Response({'reason': 'completed'})
         return Response({'reason': 'ok', 'resume': True})
@@ -191,6 +205,13 @@ class ExamVerifyEmailView(APIView):
             if exam_session.is_expired(attempt):
                 exam_session.finalize_attempt(attempt, outcome='submitted')
                 return Response({'detail': 'This assessment has already ended.'},
+                                 status=status.HTTP_400_BAD_REQUEST)
+            # Same gap as ExamTokenLandingView (see its comment): the clock is running but we're
+            # back on the public verify-email step rather than the exam itself, which only
+            # happens when the original session is gone. End it rather than resuming.
+            if attempt.started_at is not None:
+                exam_session.record_violation(attempt, TerminationReason.LINK_REOPENED)
+                return Response({'detail': 'This assessment has already been completed.'},
                                  status=status.HTTP_400_BAD_REQUEST)
             return Response({
                 'resume': True,
@@ -351,10 +372,15 @@ class ExamAnswerView(APIView):
                 request.user, question_id,
                 serializer.validated_data.get('selected_option'),
                 serializer.validated_data.get('time_spent_seconds'),
+                serializer.validated_data.get('marked_for_review'),
             )
         except ExamAnswer.DoesNotExist:
             raise Http404
-        return Response({'question_id': question_id, 'selected_option': answer.selected_option})
+        return Response({
+            'question_id': question_id,
+            'selected_option': answer.selected_option,
+            'marked_for_review': answer.marked_for_review,
+        })
 
 
 @method_decorator(ratelimit(key=ratelimit_ip_key, rate='30/m', method='POST', block=False), name='post')

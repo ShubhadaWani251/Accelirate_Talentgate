@@ -196,14 +196,15 @@ See **Deployment** below for ready-made configurations.
 | Command | Suggested interval | What it does |
 |---|---|---|
 | `python manage.py finalize_expired_attempts` | every 5-15 min | Finalizes exam attempts still `in_progress` past their deadline, and ones whose candidate never started before the invitation link expired. |
-| `python manage.py delete_expired_draft_batches` | every 15-60 min | **Deletes** Draft batches not finalized within 24 hours of creation, together with their staged candidates. Run `--dry-run` first to see what it would remove. |
-| `python manage.py process_email_queue` | every 1 min | Sends every queued invitation email - the only thing that does. Not a backup job like the other two; a candidate is waiting on this for their assessment link. Paced by `INVITE_SEND_DELAY_SECONDS` between sends, and stops auto-retrying a row past `INVITE_MAX_RETRY_ATTEMPTS` failures (`--include-failed` opts a run into retrying failures at all; `--ignore-retry-limit` overrides the cap for a deliberate one-off push). Skips rows whose link is already opened or expired. |
+| `python manage.py process_email_queue` | every 1 min | Sends every queued invitation email - the only thing that does. Not a backup job like the other one; a candidate is waiting on this for their assessment link. Paced by `INVITE_SEND_DELAY_SECONDS` between sends, and stops auto-retrying a row past `INVITE_MAX_RETRY_ATTEMPTS` failures (`--include-failed` opts a run into retrying failures at all; `--ignore-retry-limit` overrides the cap for a deliberate one-off push). Skips rows whose link is already opened or expired. |
 
-All three are safe to run more often than suggested - each is idempotent and does nothing when
-there is nothing to process. `delete_expired_draft_batches` really deletes rows, so read
-`Backend/api/services/draft_expiry.py` before changing the 24-hour window. `process_email_queue`
-specifically should not run LESS often than every minute or two - unlike the other two, nothing
-else stands in for it if it lags.
+Both are safe to run more often than suggested - each is idempotent and does nothing when there
+is nothing to process. `process_email_queue` specifically should not run LESS often than every
+minute or two - unlike the other, nothing else stands in for it if it lags.
+
+Draft batches are **not** auto-deleted - there used to be a 24-hour expiry job
+(`delete_expired_draft_batches`); it was removed. A Draft now sits until a TA/admin deletes it
+explicitly from the Drafts list in the UI (`services/draft_expiry.delete_draft_batch`).
 
 ## Testing
 
@@ -216,7 +217,7 @@ the invariants that are silent when they break rather than trying for line cover
 
 | File | What it pins down |
 |---|---|
-| `test_draft_expiry.py` | The 24-hour rule: clock starts at creation and is **not** reset by edits or uploads, activation stops expiry permanently, deletion takes staged candidates with it, the sweep is idempotent. |
+| `test_draft_expiry.py` | Manual Draft deletion: only a Draft can be deleted this way, it takes its staged candidates with it, and an activated batch is refused. |
 | `test_access_scoping.py` | Per-creator batches vs uploader-agnostic candidates, over both the queryset helpers and HTTP. |
 | `test_candidate_identity.py` | Only four Aadhaar digits are storable, a full 12-digit number is rejected rather than truncated, and two people sharing a suffix are not treated as duplicates. |
 | `test_email_delivery.py` | Status is never "sent" when the provider failed, a failure always carries a reason, the reason never echoes an API key, and the retry sweep skips links that are opened, expired, or on a batch that may not invite. |
@@ -410,10 +411,7 @@ app's own User Management screen, which enforces the real permissions.
   behind explicit opt-in flags - set both `True` behind a TLS-terminating proxy.
 - `CORPORATE_EMAIL_DOMAIN` currently includes a non-corporate domain for testing purposes -
   confirm this is tightened before go-live.
-- The two scheduled commands above must be wired into the host's scheduler. Draft-batch expiry
-  in particular has a lazy fallback (an expired draft is deleted the moment anyone touches it)
-  and a queryset filter that hides expired drafts immediately, but neither is a substitute:
-  only the scheduled job removes a draft that nobody ever looks at again.
+- The two scheduled commands above must be wired into the host's scheduler.
 
 ## Architectural decisions log
 

@@ -31,7 +31,7 @@ function lastAttemptText(candidate) {
 // passed validation - the previous step doesn't let you continue until its error list is empty -
 // so a column that always read "OK" would be pure noise. What matters here is the duplicate match
 // against history, and who gets an invite.
-export default function ReviewStep({ batch, onFinalized }) {
+export default function ReviewStep({ batch, onFinalized, onSavedAsDraft }) {
   const [candidates, setCandidates] = useState([]);
   // ONE selection, shared by both actions - the button you press decides what happens to the
   // checked rows: Delete Selected removes them, Create Batch invites them. Two separate
@@ -124,6 +124,14 @@ export default function ReviewStep({ batch, onFinalized }) {
     });
   }
 
+  // Leaves the batch exactly as it is - a Draft, with whatever's been uploaded/reviewed so far.
+  // Nothing to save here: the batch and its candidates are already persisted, this just exits
+  // the wizard before the window-date/finalize/send step. Resumable later from the Drafts list
+  // ("Continue"), same as closing the wizard any other way.
+  function handleSaveAsDraft() {
+    onSavedAsDraft(batch.batch_id);
+  }
+
   const withinWindow = candidates.filter((c) => c.duplicate_status === 'duplicate_within_window').length;
   const previouslyInvited = candidates.filter((c) => c.duplicate_status === 'previously_invited').length;
 
@@ -214,7 +222,12 @@ export default function ReviewStep({ batch, onFinalized }) {
         </div>
       )}
 
-      <div className="btn-row" style={{ marginTop: 16 }}>
+      <div className="btn-row" style={{ marginTop: 16, display: 'flex', gap: 10 }}>
+        {/* Exits the wizard leaving the batch as a Draft - no window date required, nothing
+            finalized, nothing sent. The alternative to committing to Send Invite right now. */}
+        <button className="btn" onClick={handleSaveAsDraft} disabled={busy}>
+          Save as Draft
+        </button>
         <button className="btn primary" onClick={handleFinalizeClick}
                 disabled={busy || candidates.length === 0}>
           Create Batch &amp; Proceed to Send Invite

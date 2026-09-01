@@ -50,6 +50,7 @@ export default function ExamInstructions() {
               <li>Your camera and microphone stay on for identity verification and continuous proctoring throughout the assessment. <b>Switching your camera off, or covering it, is treated the same as leaving the window</b> - one warning, then the attempt ends</li>
               <li>You're now in full-screen mode for the rest of this assessment</li>
               <li>Do not switch browser tabs, minimize, exit full-screen, or open other applications once the exam begins</li>
+              <li>Close other applications and turn off notifications before you begin. If a system popup or notification (email, chat, a call, an OS update prompt) appears during the assessment, <b>do not click, interact with, or dismiss it</b> — leave it alone and stay on the assessment window; interacting with it can end your attempt the same way switching windows does</li>
               {/* Stated precisely, because a candidate who is told "one warning" for everything
                   would reasonably feel misled when a Print Screen ends the attempt outright.
                   The split is defined server-side in exam_session.WARNABLE_REASONS. */}

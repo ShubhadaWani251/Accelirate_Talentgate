@@ -19,13 +19,22 @@ export const beginExam = () => examAxiosClient.post('/exam/begin/').then((r) => 
 
 export const getSession = () => examAxiosClient.get('/exam/session/').then((r) => r.data);
 
-export const saveAnswer = (questionId, selectedOption, timeSpentSeconds) =>
+// markedForReview omitted (undefined) leaves the flag as-is server-side - selectedOption has no
+// such "don't touch" option, so a review-only toggle (see setMarkedForReview below) must always
+// resend the candidate's current selection, never omit it.
+export const saveAnswer = (questionId, selectedOption, timeSpentSeconds, markedForReview) =>
   examAxiosClient
     .patch(`/exam/answers/${questionId}/`, {
       selected_option: selectedOption || '',
       ...(timeSpentSeconds != null ? { time_spent_seconds: timeSpentSeconds } : {}),
+      ...(markedForReview != null ? { marked_for_review: markedForReview } : {}),
     })
     .then((r) => r.data);
+
+// Toggling the flag without touching the answer - selectedOption is passed through unchanged
+// since the backend always applies it (see saveAnswer's comment above).
+export const setMarkedForReview = (questionId, selectedOption, markedForReview) =>
+  saveAnswer(questionId, selectedOption, undefined, markedForReview);
 
 export const uploadRecordingChunk = (chunkBlob) =>
   examAxiosClient.post('/exam/recording/chunk/', chunkBlob, {

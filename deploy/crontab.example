@@ -1,13 +1,14 @@
 # Scheduled jobs for a non-container deployment (cron). Install with: crontab deploy/crontab.example
 #
-# None of these are optional. Without the first, exam attempts abandoned mid-way stay in_progress
-# forever and are never scored. Without the second, Draft batches past their 24-hour window are
-# never actually deleted - the app hides them and deletes lazily when someone happens to open
-# one, but a draft nobody ever looks at again is only removed here. Without the third,
-# invitation emails are never sent AT ALL - creating an Invitation only queues it
-# (email_status=QUEUED); process_email_queue is the only thing that actually sends one. This is
-# not a backup job the way it used to be (see the command's own module docstring) - it is the
-# entire invitation-sending pipeline, which is why it runs every minute rather than every 15.
+# Neither of these is optional. Without the first, exam attempts abandoned mid-way stay
+# in_progress forever and are never scored. Without the second, invitation emails are never sent
+# AT ALL - creating an Invitation only queues it (email_status=QUEUED); process_email_queue is
+# the only thing that actually sends one. This is not a backup job the way it used to be (see
+# the command's own module docstring) - it is the entire invitation-sending pipeline, which is
+# why it runs every minute rather than every 15.
+#
+# Draft batches are NOT auto-deleted - that 24-hour expiry was removed. A Draft now sits until a
+# TA/admin deletes it explicitly from the Drafts list (BatchList.jsx).
 
 SHELL=/bin/sh
 # Adjust to the deployment's paths.
@@ -16,10 +17,6 @@ PY=/srv/talentgate/Backend/venv/bin/python
 
 # Finalize exam attempts past their deadline.
 */10 * * * * cd $APP && $PY manage.py finalize_expired_attempts >> /var/log/talentgate/scheduler.log 2>&1
-
-# Delete Draft batches not activated within 24 hours, and their staged candidates.
-# Run once with --dry-run first on any new deployment to see what it would remove.
-*/30 * * * * cd $APP && $PY manage.py delete_expired_draft_batches >> /var/log/talentgate/scheduler.log 2>&1
 
 # Send every queued invitation email. Every minute, not less often - a candidate is waiting on
 # this for their assessment link, not just cleanup. flock guards against a run that is still
