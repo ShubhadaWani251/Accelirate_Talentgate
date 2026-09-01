@@ -314,3 +314,53 @@ class TestAdminIsNotReachable:
     def test_the_admin_app_is_not_installed(self):
         from django.conf import settings
         assert 'django.contrib.admin' not in settings.INSTALLED_APPS
+
+
+class TestPublicAuthEndpointsIgnoreAStaleAuthorizationHeader:
+    """Reported: the staff login page showed SimpleJWT's raw "Given token not valid for any
+    token type" instead of /auth/refresh/'s own "Session expired..." message.
+
+    Root cause: none of these views override authentication_classes, so the global
+    CustomJWTAuthentication (DEFAULT_AUTHENTICATION_CLASSES) still ran against whatever stale
+    Authorization header the browser attached - axiosClient's interceptor attaches one to every
+    request, including these - and rejected the request in DRF's authentication phase, before
+    the view's own post() ever ran. permission_classes=[AllowAny] does not prevent this;
+    authentication and permission are separate phases. A garbage/expired Bearer token must not
+    stop any of these from running their own logic.
+    """
+
+    STALE_AUTH = {'HTTP_AUTHORIZATION': 'Bearer garbage-stale-access-token'}
+
+    def test_refresh_runs_its_own_logic_not_a_stale_token_401(self, api_client):
+        response = api_client.post('/api/auth/refresh/', **self.STALE_AUTH)
+        # RefreshView's own check (no cookie present), not SimpleJWT's raw token error.
+        assert response.data == {'detail': 'No refresh token.'}
+
+    def test_login_runs_its_own_logic_not_a_stale_token_401(self, api_client, db):
+        response = api_client.post(
+            '/api/auth/login/', {'email': 'nobody@accelirate.com', 'password': 'wrong'},
+            **self.STALE_AUTH,
+        )
+        assert response.data == {'detail': 'Invalid email or password.'}
+
+    def test_forgot_password_runs_its_own_logic_not_a_stale_token_401(self, api_client, db):
+        response = api_client.post(
+            '/api/auth/forgot-password/', {'email': 'nobody@accelirate.com'}, **self.STALE_AUTH,
+        )
+        assert response.status_code == 400
+        assert response.data['detail'] == 'No account found for this email address.'
+
+    def test_resend_otp_runs_its_own_logic_not_a_stale_token_401(self, api_client, db):
+        response = api_client.post(
+            '/api/auth/resend-otp/', {'email': 'nobody@accelirate.com'}, **self.STALE_AUTH,
+        )
+        assert response.status_code == 200
+
+    def test_verify_otp_reset_runs_its_own_logic_not_a_stale_token_401(self, api_client, db):
+        response = api_client.post(
+            '/api/auth/verify-otp/',
+            {'email': 'nobody@accelirate.com', 'otp': '000000',
+             'new_password': 'Whatever1Valid!', 'confirm_password': 'Whatever1Valid!'},
+            **self.STALE_AUTH,
+        )
+        assert response.data == {'detail': 'Invalid or expired code.'}

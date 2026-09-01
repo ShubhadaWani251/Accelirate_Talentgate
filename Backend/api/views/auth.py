@@ -79,6 +79,13 @@ def _clear_refresh_cookie(response):
 
 @method_decorator(ratelimit(key=ratelimit_ip_key, rate='10/m', method='POST', block=False), name='post')
 class LoginView(APIView):
+    # Without this, a stale/expired access token sitting in the browser (e.g. from a session
+    # that died while this tab was open) still gets validated by the global
+    # CustomJWTAuthentication before this view's own code ever runs - raising SimpleJWT's raw
+    # "Given token not valid for any token type" instead of ever reaching the actual login
+    # logic below, since DRF's authentication phase runs regardless of AllowAny. Matches the
+    # pattern already used by the exam portal's public endpoints (views/exam.py).
+    authentication_classes = []
     permission_classes = [AllowAny]
 
     def post(self, request):
@@ -145,6 +152,12 @@ class LogoutView(APIView):
 
 
 class RefreshView(APIView):
+    # This is the specific endpoint that reported the bug: a stale access token attached to
+    # THIS call (the browser's axios interceptor attaches whatever it has in memory to every
+    # request, including this one) made DRF's authentication phase reject it before post()
+    # ever ran, so the friendly "Session expired..." response below was never reached at all -
+    # see the identical comment on LoginView just above.
+    authentication_classes = []
     permission_classes = [AllowAny]
 
     def post(self, request):
@@ -170,6 +183,8 @@ class RefreshView(APIView):
 
 @method_decorator(ratelimit(key=ratelimit_ip_key, rate='5/m', method='POST', block=False), name='post')
 class ForgotPasswordView(APIView):
+    # See LoginView's identical comment - same gap, same fix.
+    authentication_classes = []
     permission_classes = [AllowAny]
 
     def post(self, request):
@@ -210,6 +225,8 @@ class ForgotPasswordView(APIView):
 
 @method_decorator(ratelimit(key=ratelimit_ip_key, rate='5/m', method='POST', block=False), name='post')
 class ResendOtpView(APIView):
+    # See LoginView's identical comment - same gap, same fix.
+    authentication_classes = []
     permission_classes = [AllowAny]
 
     def post(self, request):
@@ -239,6 +256,8 @@ class ResendOtpView(APIView):
 
 @method_decorator(ratelimit(key=ratelimit_ip_key, rate='10/m', method='POST', block=False), name='post')
 class VerifyOtpResetView(APIView):
+    # See LoginView's identical comment - same gap, same fix.
+    authentication_classes = []
     permission_classes = [AllowAny]
     MAX_ATTEMPTS = 5
 
