@@ -528,7 +528,30 @@ export default function ExamAttemptPage() {
 
   return (
     <div className="app-shell">
-      <BrandHeader roleCode="candidate" />
+      {/* Genuinely stuck to the top now, not just "fixed-feeling" - BrandHeader and the
+          Answered/Remaining/timer bar stack inside one sticky wrapper so they scroll together
+          as a single unit while only the questions beneath move. The timer in particular has to
+          stay visible without scrolling back up - it's the one thing that actually governs the
+          exam (see remaining_seconds; a tampered client clock changes nothing), so losing sight
+          of it while reading a question is the one thing worth preventing here. */}
+      <div style={{ position: 'sticky', top: 0, zIndex: 20 }}>
+        <BrandHeader roleCode="candidate" />
+        <div style={{ background: '#fff', borderBottom: '1px solid #e7eaee',
+                     boxShadow: '0 1px 3px rgba(16,24,40,.06)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                       flexWrap: 'wrap', gap: 8, maxWidth: 760, margin: '0 auto',
+                       padding: '10px 16px' }}>
+            <h3 style={{ margin: 0 }}>Assessment</h3>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+                Answered <b>{answeredCount}</b> / {totalCount} &middot; Remaining <b>{unansweredCount}</b>
+                {markedCount > 0 && <> &middot; Marked for Review <b>{markedCount}</b></>}
+              </span>
+              <div className={`timer-badge${lowTime ? ' low-time' : ''}`}>⏱ {timer.formatted} remaining</div>
+            </div>
+          </div>
+        </div>
+      </div>
       <div style={{ flex: 1, padding: '20px 16px', maxWidth: 760, margin: '0 auto', width: '100%' }}>
         {extraDisplay && (
           <div className="alert error" style={{ marginBottom: 10 }}>
@@ -548,22 +571,6 @@ export default function ExamAttemptPage() {
             goes off again your assessment will be ended.
           </div>
         )}
-
-        {/* Fixed-feeling summary header: the overall countdown is what actually governs the
-            exam (see remaining_seconds - a tampered client clock changes nothing), Answered/
-            Remaining count every question across every section regardless of which page is
-            showing. */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                     flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
-          <h3 style={{ margin: 0 }}>Assessment</h3>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-              Answered <b>{answeredCount}</b> / {totalCount} &middot; Remaining <b>{unansweredCount}</b>
-              {markedCount > 0 && <> &middot; Marked for Review <b>{markedCount}</b></>}
-            </span>
-            <div className={`timer-badge${lowTime ? ' low-time' : ''}`}>⏱ {timer.formatted} remaining</div>
-          </div>
-        </div>
 
         {/* One page per section, switched via the same stat-card picker as admin's Question
             Bank screen (QuestionBank.jsx) - each card doubles as both the section's identity
