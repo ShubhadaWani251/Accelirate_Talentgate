@@ -27,6 +27,7 @@ from api.services.candidate_validation import (
     EDITABLE_FIELDS, clamp_aadhaar_to_last4, revalidate_batch_candidates, summarize_candidates,
 )
 from api.services import exam_session
+from api.services.candidate_profile import link_profile
 from api.services.duplicate_check import clear_duplicate, run_duplicate_check
 from api.services.excel_upload import (
     generate_template_workbook, generate_validation_report_workbook,
@@ -467,6 +468,11 @@ class BatchCandidateRowView(APIView):
         # See services/candidate_validation.identity_key for what "the same person" means now.
         if candidate.aadhaar_last4 != original_aadhaar:
             run_duplicate_check(candidate)
+
+        # Every field editable here is person-level (see candidate_profile.PROFILE_MIRRORED_
+        # FIELDS), so any correction on this row should also correct the shared profile - not
+        # just this batch's copy of it.
+        link_profile(candidate)
 
         revalidate_batch_candidates(batch)
         log_action(request, request.user, 'update', 'candidate', candidate.candidate_id,

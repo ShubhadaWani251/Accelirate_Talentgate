@@ -6,6 +6,7 @@ from api.models import Candidate
 from api.services.candidate_validation import (
     candidate_identity_key, clamp_aadhaar_to_last4, identity_key, revalidate_batch_candidates,
 )
+from api.services.candidate_profile import link_profile
 from api.services.duplicate_check import preload_duplicate_lookup, run_duplicate_check
 
 # Every column is mandatory - a sheet missing one is reported by name (see missing_columns
@@ -379,6 +380,7 @@ def stage_candidates_from_workbook(batch, file_obj, user, cooling_off_months=3):
             created_by=user,
         )
         run_duplicate_check(candidate, cooling_off_months=cooling_off_months, existing_lookup=duplicate_lookup)
+        link_profile(candidate)
         if candidate.aadhaar_last4:
             # Keep the lookup current so a later row in this SAME upload that repeats a
             # person is still caught as a duplicate against this one, not just against

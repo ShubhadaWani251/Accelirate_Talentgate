@@ -294,6 +294,7 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
     email_sent_at = serializers.SerializerMethodField()
     email_last_attempt_at = serializers.SerializerMethodField()
     email_retry_count = serializers.SerializerMethodField()
+    other_batches = serializers.SerializerMethodField()
 
     class Meta:
         model = Candidate
@@ -306,6 +307,7 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
             'evidence', 'timeline',
             'email_status', 'email_status_display', 'email_error', 'email_sent_at',
             'email_last_attempt_at', 'email_retry_count',
+            'other_batches',
         ]
 
     def get_aadhaar_last4(self, candidate):
@@ -375,6 +377,33 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
                 'cleared': cleared,
             })
         return rows
+
+    def get_other_batches(self, candidate):
+        """This person's other batch appearances, same real-person identity (see
+        services/candidate_profile.py) - empty when this row has no profile (no Aadhaar to key
+        on) or the profile has no other memberships. Each entry links to that OTHER candidate
+        row's own detail page; nothing here is merged or deleted, just surfaced.
+        """
+        if not candidate.profile_id:
+            return []
+        others = (
+            candidate.profile.memberships
+            .exclude(candidate_id=candidate.candidate_id)
+            .exclude(is_deleted=True)
+            .select_related('batch')
+            .order_by('-created_at')
+        )
+        return [
+            {
+                'candidate_id': other.candidate_id,
+                'batch_name': other.batch.batch_name,
+                'created_at': other.created_at,
+                'result': other.result,
+                'result_display': other.get_result_display(),
+                'overall_score': other.overall_score,
+            }
+            for other in others
+        ]
 
     def get_evidence(self, candidate):
         attempt = _latest_attempt(candidate)

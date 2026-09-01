@@ -4,6 +4,43 @@ from .users import User
 from .batch import Batch
 
 
+class CandidateProfile(models.Model):
+    """One row per real person, identified by (Aadhaar last 4 + name) - see
+    services/candidate_profile.py. Aggregates a person's Candidate rows across every batch
+    they've ever appeared in, so the All Candidates page can show one entry per person instead
+    of one per batch upload. Holds only the mutable, person-level fields; everything about a
+    specific attempt (score, status, evidence) stays on the per-batch Candidate row it actually
+    describes - a person can have different results in different batches, so those can't live
+    here. Whichever Candidate row was uploaded/edited most recently wins: its data overwrites
+    these fields every time (see candidate_profile.link_profile).
+    """
+    profile_id = models.BigAutoField(primary_key=True)
+    identity_key = models.CharField(max_length=140, unique=True)
+    first_name = models.CharField(max_length=80)
+    last_name = models.CharField(max_length=80, null=True, blank=True)
+    email = models.EmailField(max_length=150)
+    phone = models.CharField(max_length=20, null=True, blank=True)
+    aadhaar_last4 = models.CharField(max_length=4)
+    college_name = models.CharField(max_length=150, null=True, blank=True)
+    degree = models.CharField(max_length=50, null=True, blank=True)
+    stream = models.CharField(max_length=100, null=True, blank=True)
+    percentage = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    passing_out_year = models.SmallIntegerField(null=True, blank=True)
+    location = models.CharField(max_length=100, null=True, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'candidate_profiles'
+
+    def __str__(self):
+        return f"{self.first_name} {self.last_name} ({self.email})"
+
+    @property
+    def full_name(self):
+        return f"{self.first_name} {self.last_name}" if self.last_name else self.first_name
+
+
 class Candidate(models.Model):
     """One row per candidate profile within a batch."""
     class ValidationStatus(models.TextChoices):
@@ -71,6 +108,14 @@ class Candidate(models.Model):
     location = models.CharField(max_length=100, null=True, blank=True)
 
     batch = models.ForeignKey(Batch, on_delete=models.CASCADE, db_column='batch_id')
+    # The one real-person record this row belongs to, resolved by (Aadhaar last 4 + name) - see
+    # services/candidate_profile.py. Null when there's no Aadhaar to key on (nothing to match
+    # against), mirroring run_duplicate_check's own early-out for the same case. SET_NULL rather
+    # than CASCADE: deleting one batch's row (or the whole batch) must never destroy the shared
+    # profile other batches' rows still point at.
+    profile = models.ForeignKey('CandidateProfile', on_delete=models.SET_NULL,
+                                null=True, blank=True, db_column='profile_id',
+                                related_name='memberships')
     upload_row_number = models.SmallIntegerField(
         null=True, blank=True,
         help_text="Original row # in the uploaded Excel file, for traceability during review.",
@@ -133,9 +178,14 @@ class DuplicateCheck(models.Model):
         NEW = 'new', 'New Candidate'
         # Seen before, but never sat the assessment - so the cooling-off window hasn't started.
         # Worth flagging (they may be mid-process in another batch) without blocking anything.
-        PREVIOUSLY_INVITED = 'previously_invited', 'Invited Before - Not Attempted'
-        DUPLICATE_CLEARED = 'duplicate_cleared', 'Duplicate Found - Cleared'
-        DUPLICATE_WITHIN_WINDOW = 'duplicate_within_window', 'Duplicate Found - Within Window'
+        PREVIOUSLY_INVITED = 'previously_invited', 'Invite Already Sent'
+        # Both of these say plainly WHAT happened (sat an exam before) and WHY the colour differs
+        # (see ReviewStep.jsx/CandidateErrorRow.jsx's DUPLICATE_PILL) - a TA reading just the pill
+        # text shouldn't have to reason about cooling_off_months to know cleared is fine.
+        DUPLICATE_CLEARED = 'duplicate_cleared', 'Already Took the Exam - Cooling Period Completed'
+        DUPLICATE_WITHIN_WINDOW = (
+            'duplicate_within_window', 'Already Took the Exam - Within Cooling Period'
+        )
 
     check_id = models.BigAutoField(primary_key=True)
     candidate = models.ForeignKey(Candidate, on_delete=models.CASCADE,

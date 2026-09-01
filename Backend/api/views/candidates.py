@@ -158,6 +158,27 @@ class CandidateListView(APIView):
         batch_id = request.query_params.get('batch_id')
         if batch_id:
             qs = qs.filter(batch_id=batch_id)
+        else:
+            # All Candidates, unscoped to one batch: one row per real person - the batch
+            # membership created most recently - rather than one row per batch appearance. See
+            # services/candidate_profile.py. Rows with no profile (no Aadhaar to key on) still
+            # show individually, same as they always have.
+            #
+            # Reduced in Python rather than DISTINCT ON: this needs to run on both Postgres
+            # (production) and SQLite (settings_test.py deliberately uses SQLite - see its
+            # module docstring), and DISTINCT ON is Postgres-only. The result set here is
+            # candidates, not exam answers, so this stays cheap even at real-world scale.
+            latest_membership_ids = []
+            seen_profiles = set()
+            for candidate_id, profile_id in (
+                qs.filter(profile__isnull=False)
+                .order_by('profile_id', '-created_at')
+                .values_list('candidate_id', 'profile_id')
+            ):
+                if profile_id not in seen_profiles:
+                    seen_profiles.add(profile_id)
+                    latest_membership_ids.append(candidate_id)
+            qs = qs.filter(Q(candidate_id__in=latest_membership_ids) | Q(profile__isnull=True))
 
         result = request.query_params.get('result', '').strip()
         if result:

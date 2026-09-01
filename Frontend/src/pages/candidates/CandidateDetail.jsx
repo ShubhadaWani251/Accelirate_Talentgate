@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import * as candidateApi from '../../api/candidateApi';
 import ServerErrorPage from '../../components/error/ServerErrorPage';
@@ -253,6 +253,30 @@ export default function CandidateDetail() {
           </table>
         </div>
       </div>
+
+      {candidate.other_batches?.length > 0 && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <div className="box-label">Other Batches</div>
+          {/* Same person (matched by Aadhaar + name), appearing in other batches too - see
+              services/candidate_profile.py. Each is still its own record with its own result;
+              this is just a pointer to the others, not a merge. */}
+          <div className="table-scroll">
+            <table className="data-table">
+              <thead><tr><th>Batch</th><th>Date</th><th>Result</th><th></th></tr></thead>
+              <tbody>
+                {candidate.other_batches.map((row) => (
+                  <tr key={row.candidate_id}>
+                    <td>{row.batch_name}</td>
+                    <td>{formatDateTime(row.created_at)}</td>
+                    <td><span className={`pill ${RESULT_PILL[row.result] || 'gray'}`}>{row.result_display}</span></td>
+                    <td><Link className="link-text" to={`/candidates/${row.candidate_id}`}>View</Link></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div className="btn-row no-print" style={{ display: 'flex', gap: 10, marginTop: 16 }}>
         <button className="btn primary" onClick={() => setInviteConfirmOpen(true)} disabled={sending}>
