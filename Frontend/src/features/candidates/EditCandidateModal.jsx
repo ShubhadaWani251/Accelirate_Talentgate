@@ -2,6 +2,7 @@ import { useState } from 'react';
 import toast from 'react-hot-toast';
 import * as candidateApi from '../../api/candidateApi';
 import { extractErrorMessage } from '../../utils/passwordSchema';
+import { fromDatetimeLocalValue, toDatetimeLocalValue } from '../../utils/datetime';
 import { ButtonSpinner } from '../../components/loading/Spinner';
 
 // Deliberately excludes Aadhaar last 4 and Batch from the editable fields - the backend
@@ -21,9 +22,17 @@ export default function EditCandidateModal({ candidate, onClose, onSaved }) {
   });
   const [saving, setSaving] = useState(false);
   const [resendConfirming, setResendConfirming] = useState(false);
+  const [linkValidFrom, setLinkValidFrom] = useState('');
+  const [linkValidUntil, setLinkValidUntil] = useState('');
 
   function set(field, value) {
     setForm({ ...form, [field]: value });
+  }
+
+  function openResendConfirm() {
+    setLinkValidFrom(toDatetimeLocalValue(candidate.link_valid_from));
+    setLinkValidUntil(toDatetimeLocalValue(candidate.link_valid_until));
+    setResendConfirming(true);
   }
 
   async function handleSave() {
@@ -40,6 +49,14 @@ export default function EditCandidateModal({ candidate, onClose, onSaved }) {
   }
 
   async function handleResendInvite() {
+    if (!linkValidFrom || !linkValidUntil) {
+      toast.error('Both Link Valid From and Link Valid Until are required.');
+      return;
+    }
+    if (linkValidUntil <= linkValidFrom) {
+      toast.error('Link Valid Until must be after Link Valid From.');
+      return;
+    }
     setResendConfirming(false);
     setSaving(true);
     let saved = false;
@@ -49,7 +66,13 @@ export default function EditCandidateModal({ candidate, onClose, onSaved }) {
       // discard whatever the TA just typed in this form.
       await candidateApi.updateCandidate(candidate.candidate_id, form);
       saved = true;
-      const res = await candidateApi.resendInvite(candidate.candidate_id);
+      // Gives THIS invitation its own window rather than touching the batch's (which is
+      // locked once the batch leaves Draft - see CandidateResendInviteView/create_single_
+      // reinvite) - so this only ever affects this one candidate's new link.
+      const res = await candidateApi.resendInvite(candidate.candidate_id, {
+        link_valid_from: fromDatetimeLocalValue(linkValidFrom),
+        link_valid_until: fromDatetimeLocalValue(linkValidUntil),
+      });
       toast.success(`Changes saved. ${res.detail}`);
       onSaved();
     } catch (err) {
@@ -91,7 +114,7 @@ export default function EditCandidateModal({ candidate, onClose, onSaved }) {
           <div className="field"><label>Location</label><input value={form.location} onChange={(e) => set('location', e.target.value)} /></div>
           <div className="btn-row" style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
             <button className="btn" onClick={onClose}>Cancel</button>
-            <button className="btn" onClick={() => setResendConfirming(true)}>📧 Send Invite Again</button>
+            <button className="btn" onClick={openResendConfirm}>📧 Send Invite Again</button>
             <button className="btn primary" onClick={handleSave} disabled={saving}>
               <ButtonSpinner loading={saving}>💾 Save</ButtonSpinner>
             </button>
@@ -101,7 +124,7 @@ export default function EditCandidateModal({ candidate, onClose, onSaved }) {
 
       {resendConfirming && (
         <div className="modal-overlay" onClick={() => setResendConfirming(false)}>
-          <div className="modal-box" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 360 }}>
+          <div className="modal-box" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 430 }}>
             <h4>Send Invite Again?</h4>
             {/* form.email, NOT candidate.email: the edits are saved before sending, so the invite
                 goes to the address currently in the form. Showing the original prop here named a
@@ -114,6 +137,20 @@ export default function EditCandidateModal({ candidate, onClose, onSaved }) {
               )}{' '}
               Continue?
             </p>
+            {/* This window belongs to the whole batch, not just this candidate - changing it
+                here affects every other candidate in it too. */}
+            <div className="grid-2">
+              <div className="field">
+                <label htmlFor="edit_resend_link_valid_from">Link Valid From</label>
+                <input id="edit_resend_link_valid_from" type="datetime-local" value={linkValidFrom}
+                       onChange={(e) => setLinkValidFrom(e.target.value)} />
+              </div>
+              <div className="field">
+                <label htmlFor="edit_resend_link_valid_until">Link Valid Until</label>
+                <input id="edit_resend_link_valid_until" type="datetime-local" value={linkValidUntil}
+                       onChange={(e) => setLinkValidUntil(e.target.value)} />
+              </div>
+            </div>
             <div className="btn-row" style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
               <button className="btn" onClick={() => setResendConfirming(false)}>Cancel</button>
               <button className="btn primary" onClick={handleResendInvite}>Confirm &amp; Send</button>

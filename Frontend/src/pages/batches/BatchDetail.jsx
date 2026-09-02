@@ -22,6 +22,7 @@ import NotFoundPage from '../../components/error/NotFoundPage';
 import { isResourceMissing } from '../../utils/apiError';
 import { Skeleton, SkeletonCard, SkeletonPage, SkeletonTable } from '../../components/loading/Skeleton';
 import { extractErrorMessage } from '../../utils/passwordSchema';
+import { fromDatetimeLocalValue, toDatetimeLocalValue } from '../../utils/datetime';
 
 const STATUS_PILL = { draft: 'gray', in_progress: 'blue', completed: 'green', cancelled: 'red' };
 
@@ -49,6 +50,14 @@ export default function BatchDetail() {
   const [notifyOpen, setNotifyOpen] = useState(false);
   const [inviteConfirmOpen, setInviteConfirmOpen] = useState(false);
   const [invitesSending, setInvitesSending] = useState(false);
+  const [linkValidFrom, setLinkValidFrom] = useState('');
+  const [linkValidUntil, setLinkValidUntil] = useState('');
+
+  function openInviteConfirm() {
+    setLinkValidFrom(toDatetimeLocalValue(batch.link_valid_from));
+    setLinkValidUntil(toDatetimeLocalValue(batch.link_valid_until));
+    setInviteConfirmOpen(true);
+  }
   const [certificationOpen, setCertificationOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
 
@@ -93,15 +102,29 @@ export default function BatchDetail() {
   // Confirmed before sending: this emails real candidates a brand-new link, which invalidates
   // nothing but does mean the previous link is no longer the one they were told about.
   async function handleSendInvites() {
+    if (!linkValidFrom || !linkValidUntil) {
+      toast.error('Both Link Valid From and Link Valid Until are required.');
+      return;
+    }
+    if (linkValidUntil <= linkValidFrom) {
+      toast.error('Link Valid Until must be after Link Valid From.');
+      return;
+    }
     setInvitesSending(true);
     try {
-      const res = await candidateApi.resendInvitesBulk(Array.from(selected));
+      // Gives these invitations their own shared window rather than touching the batch's
+      // (which is locked once it leaves Draft - see CandidateBulkResendInviteView/
+      // create_single_reinvite) - so this only ever affects the candidates selected here.
+      const res = await candidateApi.resendInvitesBulk(Array.from(selected), {
+        link_valid_from: fromDatetimeLocalValue(linkValidFrom),
+        link_valid_until: fromDatetimeLocalValue(linkValidUntil),
+      });
       toast.success(res.detail);
       setInviteConfirmOpen(false);
       setSelected(new Set());
       refreshCandidates();
     } catch (err) {
-      toast.error(extractErrorMessage(err));
+      toast.error(extractErrorMessage(err, ['link_valid_from', 'link_valid_until']));
     } finally {
       setInvitesSending(false);
     }
@@ -207,7 +230,7 @@ export default function BatchDetail() {
         onToggleRow={toggleRow}
         onToggleSelectAll={toggleSelectAll}
         onEdit={setEditingCandidate}
-        onOpenInvite={() => setInviteConfirmOpen(true)}
+        onOpenInvite={openInviteConfirm}
         onOpenNotify={() => setNotifyOpen(true)}
         onOpenCertification={() => setCertificationOpen(true)}
         onOpenExport={() => setExportOpen(true)}
@@ -247,6 +270,20 @@ export default function BatchDetail() {
               use. Candidates who have already submitted or been terminated cannot retake the
               assessment.
             </p>
+            {/* This window belongs to the whole batch - changing it here affects every
+                candidate in it, not just the ones selected. */}
+            <div className="grid-2">
+              <div className="field">
+                <label htmlFor="bulk_link_valid_from">Link Valid From</label>
+                <input id="bulk_link_valid_from" type="datetime-local" value={linkValidFrom}
+                       onChange={(e) => setLinkValidFrom(e.target.value)} />
+              </div>
+              <div className="field">
+                <label htmlFor="bulk_link_valid_until">Link Valid Until</label>
+                <input id="bulk_link_valid_until" type="datetime-local" value={linkValidUntil}
+                       onChange={(e) => setLinkValidUntil(e.target.value)} />
+              </div>
+            </div>
             <div className="btn-row">
               <button className="btn" type="button" onClick={() => setInviteConfirmOpen(false)}>
                 Cancel

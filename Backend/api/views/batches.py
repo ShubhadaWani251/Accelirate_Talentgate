@@ -525,21 +525,34 @@ class BatchCandidateDeleteView(APIView):
         if Invitation.objects.filter(batch=batch).exists():
             return Response({'detail': 'Cannot remove candidates after invites have been sent.'},
                              status=status.HTTP_400_BAD_REQUEST)
-        candidate_ids = request.data.get('candidate_ids', [])
-        if not isinstance(candidate_ids, list) or not candidate_ids:
-            return Response({'detail': 'candidate_ids must be a non-empty list.'},
-                             status=status.HTTP_400_BAD_REQUEST)
+
+        if request.data.get('clear_all'):
+            # Discards every row currently staged on this Draft batch. Used when a TA abandons
+            # an upload and goes back to try a different file (BatchWizard's "Upload another
+            # file"), so the new file starts from a genuinely clean slate instead of being
+            # deduped against whatever the abandoned attempt already staged - see
+            # excel_upload.stage_candidates_from_workbook's seen_identity/seen_email, which seed
+            # from every row already on the batch, including ones from a discarded first try.
+            to_delete = batch.candidate_set.all()
+        else:
+            candidate_ids = request.data.get('candidate_ids', [])
+            if not isinstance(candidate_ids, list) or not candidate_ids:
+                return Response({'detail': 'candidate_ids must be a non-empty list.'},
+                                 status=status.HTTP_400_BAD_REQUEST)
+            to_delete = batch.candidate_set.filter(candidate_id__in=candidate_ids)
 
         # QuerySet.delete()'s own return value is the TOTAL objects deleted across cascades
         # (each Candidate's DuplicateCheck rows cascade-delete too) - count candidates
-        # specifically instead of trusting that number as "candidates deleted".
-        to_delete = batch.candidate_set.filter(candidate_id__in=candidate_ids)
+        # specifically instead of trusting that number as "candidates deleted". Ids are read
+        # off before deleting for the same reason, and used for the log either way (clear_all
+        # has no client-supplied list to log instead).
         candidate_count = to_delete.count()
+        deleted_ids = list(to_delete.values_list('candidate_id', flat=True))
         to_delete.delete()
         batch.total_candidates = batch.candidate_set.filter(is_deleted=False).count()
         batch.save(update_fields=['total_candidates'])
         log_action(request, request.user, 'delete_candidates', 'batch', batch.batch_id,
-                   details={'candidate_ids': candidate_ids})
+                   details={'candidate_ids': deleted_ids})
 
         # Re-validate what's left and hand the whole table back: removing a row changes other
         # rows' verdicts (delete one of a duplicated pair and its twin is no longer a

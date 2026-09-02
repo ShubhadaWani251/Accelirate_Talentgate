@@ -29,13 +29,25 @@ class ExamNotYetOpenError(Exception):
         super().__init__(f'Exam opens at {opens_at.isoformat()}')
 
 
-def link_not_yet_open(batch, now=None):
-    """True if the assessment window hasn't started yet. `batch.link_valid_from` is frozen once
-    a batch leaves Draft (BatchDetailView.EDITABLE_AFTER_DRAFT), so this is stable for the whole
-    life of a sent invitation - never a moving target underneath an in-progress attempt.
+def invitation_opens_at(invitation):
+    """The effective 'valid from' for one invitation - its own override if a re-invite was
+    given one (see models.Invitation.link_valid_from), else the batch's. Single source of
+    truth so link_not_yet_open and the candidate-facing 'opens at' messages in views/exam.py
+    can never disagree about which value is the real one.
+    """
+    return invitation.link_valid_from or invitation.batch.link_valid_from
+
+
+def link_not_yet_open(invitation, now=None):
+    """True if this invitation's assessment window hasn't started yet. The effective
+    link_valid_from (see invitation_opens_at) is frozen once a batch leaves Draft
+    (BatchDetailView.EDITABLE_AFTER_DRAFT) and a re-invite's own override is fixed at creation,
+    so this is stable for the whole life of a sent invitation - never a moving target
+    underneath an in-progress attempt.
     """
     now = now or timezone.now()
-    return bool(batch.link_valid_from) and now < batch.link_valid_from
+    opens_at = invitation_opens_at(invitation)
+    return bool(opens_at) and now < opens_at
 
 
 class TerminationReason:
@@ -306,24 +318,24 @@ def begin_exam(attempt):
     Idempotent: a reload/resume re-hits this and keeps the original started_at rather than
     granting a fresh full duration (which would otherwise be a trivial way to get unlimited time).
 
-    Raises ExamNotYetOpenError if the batch's window hasn't opened yet - e.g. invites sent today
-    for tomorrow's window, and a candidate opens the link early. This is the authoritative gate:
+    Raises ExamNotYetOpenError if the assessment window hasn't opened yet - e.g. invites sent
+    today for tomorrow's window, and a candidate opens the link early. This is the authoritative
+    gate:
     the landing screen and email-verify step both also check this earlier, for a cleaner
     candidate-facing message before they've gone through camera/identity capture, but every path
     into an exam ends up here, so this is what actually stops the clock from starting regardless
     of how those earlier checks are reached or bypassed.
     """
     if attempt.started_at is None:
-        batch = attempt.invitation.batch
-        if link_not_yet_open(batch):
-            raise ExamNotYetOpenError(batch.link_valid_from)
+        invitation = attempt.invitation
+        if link_not_yet_open(invitation):
+            raise ExamNotYetOpenError(invitation_opens_at(invitation))
         attempt.started_at = timezone.now()
         attempt.save(update_fields=['started_at'])
         # The link is consumed at exactly this moment - the candidate is now in the exam
         # window and the clock has started. Doing it here rather than at identity capture
         # means an abandoned photo step doesn't burn the invitation. Guarded by the same
         # started_at check so a reload/resume doesn't rewrite it.
-        invitation = attempt.invitation
         if not invitation.is_link_used:
             invitation.is_link_used = True
             invitation.save(update_fields=['is_link_used'])

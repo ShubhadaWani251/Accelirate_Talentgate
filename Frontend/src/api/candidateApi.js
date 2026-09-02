@@ -26,13 +26,19 @@ export const getCandidate = (id) => axiosClient.get(`/candidates/${id}/`).then((
 export const updateCandidate = (id, payload) =>
   axiosClient.patch(`/candidates/${id}/`, payload).then((r) => r.data);
 
-export const resendInvite = (id) => axiosClient.post(`/candidates/${id}/resend-invite/`).then((r) => r.data);
+// linkWindow ({ link_valid_from, link_valid_until } in ISO, both optional) gives THIS
+// invitation its own valid-from/until, independent of the batch's - which is locked to its
+// original dates once the batch leaves Draft, specifically so resending to one candidate can't
+// shift the window for everyone else in it. Omit to inherit the batch's current window.
+export const resendInvite = (id, linkWindow = {}) =>
+  axiosClient.post(`/candidates/${id}/resend-invite/`, linkWindow).then((r) => r.data);
 
-// Issues a FRESH link to each selected candidate. Not the same as the upload wizard's
-// send-invites step, which only covers candidates awaiting their first invite - this one
-// always mints a new token, which is what someone whose link expired actually needs.
-export const resendInvitesBulk = (candidateIds) =>
-  axiosClient.post('/candidates/resend-invite/', { candidate_ids: candidateIds })
+// Issues a FRESH link to each selected candidate, all sharing the one linkWindow given. Not the
+// same as the upload wizard's send-invites step, which only covers candidates awaiting their
+// first invite - this one always mints a new token, which is what someone whose link expired
+// actually needs.
+export const resendInvitesBulk = (candidateIds, linkWindow = {}) =>
+  axiosClient.post('/candidates/resend-invite/', { candidate_ids: candidateIds, ...linkWindow })
     .then((r) => r.data);
 
 export const getCandidateHistory = (id) =>

@@ -9,7 +9,7 @@ import {
   Skeleton, SkeletonCard, SkeletonPage, SkeletonTable,
 } from '../../components/loading/Skeleton';
 import { ButtonSpinner } from '../../components/loading/Spinner';
-import { formatDateTime } from '../../utils/datetime';
+import { formatDateTime, fromDatetimeLocalValue, toDatetimeLocalValue } from '../../utils/datetime';
 import { extractErrorMessage } from '../../utils/passwordSchema';
 
 const RESULT_PILL = { pending: 'gray', pass: 'green', fail: 'red' };
@@ -23,6 +23,16 @@ export default function CandidateDetail() {
   const [sending, setSending] = useState(false);
   const [downloadingZip, setDownloadingZip] = useState(false);
   const [inviteConfirmOpen, setInviteConfirmOpen] = useState(false);
+  // Seeded from the batch's CURRENT window each time the dialog opens (not on load), so a
+  // resend days later doesn't offer a stale value from when the page first rendered.
+  const [linkValidFrom, setLinkValidFrom] = useState('');
+  const [linkValidUntil, setLinkValidUntil] = useState('');
+
+  function openInviteConfirm() {
+    setLinkValidFrom(toDatetimeLocalValue(candidate.link_valid_from));
+    setLinkValidUntil(toDatetimeLocalValue(candidate.link_valid_until));
+    setInviteConfirmOpen(true);
+  }
 
   async function refresh() {
     setLoading(true);
@@ -45,14 +55,28 @@ export default function CandidateDetail() {
   }, [id]);
 
   async function handleSendInvite() {
+    if (!linkValidFrom || !linkValidUntil) {
+      toast.error('Both Link Valid From and Link Valid Until are required.');
+      return;
+    }
+    if (linkValidUntil <= linkValidFrom) {
+      toast.error('Link Valid Until must be after Link Valid From.');
+      return;
+    }
     setSending(true);
     try {
-      const res = await candidateApi.resendInvite(id);
+      // Gives THIS invitation its own window rather than touching the batch's (which is
+      // locked once the batch leaves Draft - see CandidateResendInviteView/create_single_
+      // reinvite) - so this only ever affects this one candidate's new link.
+      const res = await candidateApi.resendInvite(id, {
+        link_valid_from: fromDatetimeLocalValue(linkValidFrom),
+        link_valid_until: fromDatetimeLocalValue(linkValidUntil),
+      });
       toast.success(res.detail);
       setInviteConfirmOpen(false);
       refresh();
     } catch (err) {
-      toast.error(extractErrorMessage(err));
+      toast.error(extractErrorMessage(err, ['link_valid_from', 'link_valid_until']));
     } finally {
       setSending(false);
     }
@@ -279,7 +303,7 @@ export default function CandidateDetail() {
       )}
 
       <div className="btn-row no-print" style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-        <button className="btn primary" onClick={() => setInviteConfirmOpen(true)} disabled={sending}>
+        <button className="btn primary" onClick={openInviteConfirm} disabled={sending}>
           <ButtonSpinner loading={sending}>Send Invite Link</ButtonSpinner>
         </button>
         <button className="btn" onClick={() => window.print()}>🖨 Export Candidate Details (PDF)</button>
@@ -294,6 +318,21 @@ export default function CandidateDetail() {
               were sent previously will no longer be the one they should use. If they have
               already submitted or been terminated, they cannot retake the assessment.
             </p>
+            {/* This window belongs to the whole batch ({candidate.batch_name}), not just this
+                candidate - changing it here affects every other candidate in it too, same as
+                setting it does from the upload wizard. */}
+            <div className="grid-2">
+              <div className="field">
+                <label htmlFor="resend_link_valid_from">Link Valid From</label>
+                <input id="resend_link_valid_from" type="datetime-local" value={linkValidFrom}
+                       onChange={(e) => setLinkValidFrom(e.target.value)} />
+              </div>
+              <div className="field">
+                <label htmlFor="resend_link_valid_until">Link Valid Until</label>
+                <input id="resend_link_valid_until" type="datetime-local" value={linkValidUntil}
+                       onChange={(e) => setLinkValidUntil(e.target.value)} />
+              </div>
+            </div>
             <div className="btn-row">
               <button className="btn" type="button" onClick={() => setInviteConfirmOpen(false)}>
                 Cancel

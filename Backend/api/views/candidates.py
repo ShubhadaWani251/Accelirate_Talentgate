@@ -7,7 +7,7 @@ import zipfile
 from django.db.models import Prefetch, Q
 from django.http import Http404, HttpResponse
 from django.utils.decorators import method_decorator
-from django.utils.dateparse import parse_date
+from django.utils.dateparse import parse_date, parse_datetime
 from django_ratelimit.decorators import ratelimit
 from rest_framework import status
 from rest_framework.response import Response
@@ -16,6 +16,7 @@ from rest_framework.views import APIView
 from api.models import AuditLog, Batch, Candidate, ExamAttempt
 from api.pagination import StandardResultsPagination
 from api.permissions import IsAdminOrTA
+from api.serializers.batch import link_window_error
 from api.serializers.candidates import (
     CandidateDetailSerializer,
     CandidateListSerializer,
@@ -57,6 +58,49 @@ def _get_candidate_or_404(user, candidate_id):
     # Access to this function still requires an authenticated admin or TA - IsAdminOrTA on the
     # views - so this widens visibility within those roles, not beyond them.
     return candidate
+
+
+class _LinkWindowError(Exception):
+    """Carries the Response a resend view should return for a bad/incomplete link window."""
+
+    def __init__(self, response):
+        self.response = response
+
+
+def _parse_link_window(data):
+    """Optional {link_valid_from, link_valid_until} pair from a resend request body - see
+    CandidateResendInviteView/CandidateBulkResendInviteView. Returns (None, None) when both
+    are omitted, which is valid: the new invitation just inherits the batch's own window,
+    exactly like a resend behaved before this parameter existed.
+
+    Raises _LinkWindowError (caught by the view) for anything present but invalid - malformed,
+    only one of the pair given, or out of order. The "shorter than the exam" check is NOT done
+    here, because that needs a specific candidate's batch duration, which callers checks
+    per-candidate once they have one.
+    """
+    raw_from = data.get('link_valid_from')
+    raw_until = data.get('link_valid_until')
+    if not raw_from and not raw_until:
+        return None, None
+
+    link_from = parse_datetime(raw_from) if raw_from else None
+    link_until = parse_datetime(raw_until) if raw_until else None
+    if (raw_from and not link_from) or (raw_until and not link_until):
+        raise _LinkWindowError(Response(
+            {'detail': 'link_valid_from/link_valid_until must be valid ISO 8601 datetimes.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        ))
+    if not (link_from and link_until):
+        raise _LinkWindowError(Response(
+            {'detail': 'Both Link Valid From and Link Valid Until are required together.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        ))
+    if link_until <= link_from:
+        raise _LinkWindowError(Response(
+            {'link_valid_until': 'Must be after Link Valid From.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        ))
+    return link_from, link_until
 
 
 def _to_decimal_param(value):
@@ -229,12 +273,21 @@ class CandidateResendInviteView(APIView):
 
     def post(self, request, candidate_id):
         candidate = _get_candidate_or_404(request.user, candidate_id)
+        try:
+            link_from, link_until = _parse_link_window(request.data)
+        except _LinkWindowError as exc:
+            return exc.response
+        if link_from and link_until:
+            error = link_window_error(link_from, link_until, candidate.batch.exam_duration_minutes)
+            if error:
+                return Response({'link_valid_until': error}, status=status.HTTP_400_BAD_REQUEST)
+
         # Draft and Cancelled both block sending; the service is the authority on which
         # statuses may invite and on the wording, so it isn't restated here.
         try:
             # Only queues it - management/commands/process_email_queue.py is what actually
             # sends, on its own schedule.
-            create_single_reinvite(candidate, request.user)
+            create_single_reinvite(candidate, request.user, link_from, link_until)
         except BatchNotInvitableError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         log_action(request, request.user, 'invite_sent', 'candidate', candidate.candidate_id,
@@ -263,6 +316,11 @@ class CandidateBulkResendInviteView(APIView):
             return Response({'detail': 'Select the candidates to send a new invite link to.'},
                              status=status.HTTP_400_BAD_REQUEST)
 
+        try:
+            link_from, link_until = _parse_link_window(request.data)
+        except _LinkWindowError as exc:
+            return exc.response
+
         # Scoped through the same per-candidate accessor the single endpoint uses, so a TA
         # cannot re-invite a candidate on someone else's batch by posting their id.
         candidates = []
@@ -283,9 +341,18 @@ class CandidateBulkResendInviteView(APIView):
         sendable, skipped_no_email = partition_by_deliverable(candidates)
 
         invitations, blocked = [], None
+        skipped_short_window = []
         for candidate in sendable:
+            # Checked per candidate, not once up front: a bulk selection could in principle
+            # span batches with different exam durations, and a window that covers one batch's
+            # exam might not cover another's.
+            if link_from and link_until:
+                error = link_window_error(link_from, link_until, candidate.batch.exam_duration_minutes)
+                if error:
+                    skipped_short_window.append(candidate)
+                    continue
             try:
-                invitations.append(create_single_reinvite(candidate, request.user))
+                invitations.append(create_single_reinvite(candidate, request.user, link_from, link_until))
             except BatchNotInvitableError as exc:
                 # Batch status is a property of the batch, not the candidate, so the first
                 # refusal applies to every candidate from that batch - report it once.
@@ -293,8 +360,13 @@ class CandidateBulkResendInviteView(APIView):
                 break
 
         if not invitations:
-            return Response({'detail': blocked or 'No invitations could be sent.'},
-                             status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {'detail': blocked or (
+                    'The link window is shorter than the exam for every selected candidate.'
+                    if skipped_short_window else 'No invitations could be sent.'
+                )},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # Only queues them - management/commands/process_email_queue.py is what actually sends,
         # on its own schedule.
@@ -305,11 +377,14 @@ class CandidateBulkResendInviteView(APIView):
         detail = f'A new assessment link has been queued for {len(invitations)} candidate(s).'
         if skipped_no_email:
             detail += f' {len(skipped_no_email)} skipped - no email address on record.'
+        if skipped_short_window:
+            detail += (f' {len(skipped_short_window)} skipped - the given window is shorter '
+                       f'than their exam.')
         if blocked:
             detail += f' Stopped early: {blocked}'
         return Response({
             'sent_count': len(invitations),
-            'skipped_count': len(skipped_no_email),
+            'skipped_count': len(skipped_no_email) + len(skipped_short_window),
             'detail': detail,
         })
 

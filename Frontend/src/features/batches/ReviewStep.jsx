@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import * as batchApi from '../../api/batchApi';
 import CandidateHistoryModal from '../candidates/CandidateHistoryModal';
+import EditStagingCandidateModal from './EditStagingCandidateModal';
 import { SkeletonTableRows } from '../../components/loading/Skeleton';
 import { formatDateTime } from '../../utils/datetime';
 import { extractErrorMessage } from '../../utils/passwordSchema';
@@ -40,6 +41,7 @@ export default function ReviewStep({ batch, onFinalized, onSavedAsDraft }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [historyCandidate, setHistoryCandidate] = useState(null);
+  const [editingCandidate, setEditingCandidate] = useState(null);
 
   function apply(payload) {
     setCandidates(payload.rows);
@@ -171,7 +173,7 @@ export default function ReviewStep({ batch, onFinalized, onSavedAsDraft }) {
               <th>Aadhaar Last 4</th>
               <th>Status</th>
               <th>Last Attempt</th>
-              <th>History</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -196,9 +198,12 @@ export default function ReviewStep({ batch, onFinalized, onSavedAsDraft }) {
                     </span>
                   </td>
                   <td>{lastAttemptText(c)}</td>
-                  <td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
                     <button className="btn small" onClick={() => setHistoryCandidate(c)}>
                       History
+                    </button>{' '}
+                    <button className="btn small" onClick={() => setEditingCandidate(c)}>
+                      Edit
                     </button>
                   </td>
                 </tr>
@@ -238,6 +243,15 @@ export default function ReviewStep({ batch, onFinalized, onSavedAsDraft }) {
         <CandidateHistoryModal
           candidate={historyCandidate}
           onClose={() => setHistoryCandidate(null)}
+        />
+      )}
+
+      {editingCandidate && (
+        <EditStagingCandidateModal
+          batch={batch}
+          candidate={editingCandidate}
+          onClose={() => setEditingCandidate(null)}
+          onSaved={(payload) => { apply(payload); setEditingCandidate(null); }}
         />
       )}
     </div>

@@ -99,6 +99,14 @@ export const deleteCandidates = (batchId, candidateIds) =>
     .post(`/batches/${batchId}/candidates/delete/`, { candidate_ids: candidateIds })
     .then((r) => r.data);
 
+// Discards every row currently staged on this Draft batch, so a re-upload (BatchWizard's
+// "Upload another file") starts from a clean slate instead of being deduped against an
+// abandoned first attempt's rows.
+export const clearStagedCandidates = (batchId) =>
+  axiosClient
+    .post(`/batches/${batchId}/candidates/delete/`, { clear_all: true })
+    .then((r) => r.data);
+
 // candidateIds is the reviewer's checkbox selection - finalizing creates the batch and
 // emails the invite to exactly those candidates, and nobody else.
 export const finalizeBatch = (batchId, candidateIds) =>

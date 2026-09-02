@@ -84,11 +84,17 @@ def create_invitations(batch, user, candidate_ids=None):
     return invitations
 
 
-def create_single_reinvite(candidate, user):
+def create_single_reinvite(candidate, user, link_valid_from=None, link_valid_until=None):
     """Issue one fresh Invitation for a candidate who's already been invited before
     (e.g. "Send Invite Again" from All Candidates / Candidate Details). Unlike
     create_invitations, this doesn't touch candidate.status - a re-invite doesn't change
     where the candidate is in the pipeline, it just gives them a new link/token.
+
+    link_valid_from/link_valid_until: optional override for THIS invitation's own window,
+    independent of the batch's - which is locked to its original dates once the batch leaves
+    Draft (views/batches.py's EDITABLE_AFTER_DRAFT), specifically so re-inviting one straggler
+    can't shift the window out from under every other candidate in the same batch. Omit either
+    to inherit the batch's current value, same as before these parameters existed.
 
     Raises BatchNotInvitableError if the candidate's batch is Draft or Cancelled.
     """
@@ -97,7 +103,8 @@ def create_single_reinvite(candidate, user):
         candidate=candidate,
         batch=candidate.batch,
         unique_link_token=_generate_token(),
-        link_expired_at=candidate.batch.link_valid_until,
+        link_valid_from=link_valid_from,
+        link_expired_at=link_valid_until or candidate.batch.link_valid_until,
         is_re_invite=True,
         sent_by=user,
     )

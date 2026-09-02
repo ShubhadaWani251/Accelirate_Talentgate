@@ -15,7 +15,9 @@ export default function BrandFooter({ roleCode }) {
             missing Router context, which would crash the error page itself while it is trying
             to report a different, unrelated crash. A plain anchor triggers an ordinary page
             load, which works identically whether or not a Router happens to be mounted. */}
-        <a className="flink" href="/help">Help &amp; Support</a>
+        {/* Candidates have no staff account and nothing in Help & Support applies to them (it's
+            written for admins/TAs) - only shown on the staff-facing roles. */}
+        {roleCode !== 'candidate' && <a className="flink" href="/help">Help &amp; Support</a>}
         <a className="flink" href="/privacy">Privacy Policy</a>
         <span>v0.1</span>
       </div>

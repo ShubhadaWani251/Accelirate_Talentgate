@@ -169,6 +169,12 @@ class CandidateListSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(read_only=True)
     aadhaar_last4 = serializers.SerializerMethodField()
     batch_name = serializers.CharField(source='batch.batch_name', read_only=True)
+    # The batch's current assessment-link window, so a "resend invite" action elsewhere in the
+    # UI can show/preselect it rather than sending blind - see CandidateResendInviteView, which
+    # (via create_single_reinvite) always uses whatever this is AT SEND TIME, not a copy taken
+    # here. Read-only: changing it goes through PATCH /batches/<id>/, same as the first send.
+    link_valid_from = serializers.DateTimeField(source='batch.link_valid_from', read_only=True)
+    link_valid_until = serializers.DateTimeField(source='batch.link_valid_until', read_only=True)
     status = serializers.SerializerMethodField()
     status_display = serializers.SerializerMethodField()
     result_display = serializers.CharField(source='get_result_display', read_only=True)
@@ -199,7 +205,7 @@ class CandidateListSerializer(serializers.ModelSerializer):
             'logical_score', 'quantitative_score', 'verbal_score', 'programming_score',
             'overall_score', 'total_correct', 'overall_total', 'has_attempt',
             'email_status', 'email_status_display', 'email_error', 'email_sent_at',
-            'email_retry_count',
+            'email_retry_count', 'link_valid_from', 'link_valid_until',
         ]
 
     def get_aadhaar_last4(self, candidate):
@@ -279,6 +285,10 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(read_only=True)
     aadhaar_last4 = serializers.SerializerMethodField()
     batch_name = serializers.CharField(source='batch.batch_name', read_only=True)
+    # See the identical fields on CandidateListSerializer - same purpose (a "resend invite"
+    # action needs to show/preselect the batch's current window), same read-only caveat.
+    link_valid_from = serializers.DateTimeField(source='batch.link_valid_from', read_only=True)
+    link_valid_until = serializers.DateTimeField(source='batch.link_valid_until', read_only=True)
     status = serializers.SerializerMethodField()
     status_display = serializers.SerializerMethodField()
     result_display = serializers.CharField(source='get_result_display', read_only=True)
@@ -307,6 +317,7 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
             'evidence', 'timeline',
             'email_status', 'email_status_display', 'email_error', 'email_sent_at',
             'email_last_attempt_at', 'email_retry_count',
+            'link_valid_from', 'link_valid_until',
             'other_batches',
         ]
 

@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import * as batchApi from '../../api/batchApi';
 import { Skeleton, SkeletonCard, SkeletonPage } from '../../components/loading/Skeleton';
+import { ButtonSpinner } from '../../components/loading/Spinner';
 import BatchSetupStep from './BatchSetupStep';
 import FixErrorsStep from './FixErrorsStep';
 import ReviewStep from './ReviewStep';
@@ -37,6 +38,35 @@ export default function BatchWizard() {
   const [stepKey, setStepKey] = useState(id ? null : 'setup');
   const [batch, setBatch] = useState(null);
   const [finalizeSummary, setFinalizeSummary] = useState(null);
+  const [reuploadConfirmOpen, setReuploadConfirmOpen] = useState(false);
+  const [clearingStaged, setClearingStaged] = useState(false);
+
+  // Discards whatever the abandoned first attempt staged before going back to Upload, so the
+  // next file is compared only against itself - not against rows from a file the TA is trying
+  // to replace (see batchApi.clearStagedCandidates). A batch with nothing staged yet (this
+  // step is also reachable before any upload happens) skips the confirmation entirely, since
+  // there is nothing to lose.
+  async function handleUploadAnotherFile() {
+    if (!batch || batch.total_candidates === 0) {
+      setStepKey('setup');
+      return;
+    }
+    setReuploadConfirmOpen(true);
+  }
+
+  async function confirmUploadAnotherFile() {
+    setClearingStaged(true);
+    try {
+      await batchApi.clearStagedCandidates(batch.batch_id);
+      setBatch(await batchApi.getBatch(batch.batch_id));
+      setReuploadConfirmOpen(false);
+      setStepKey('setup');
+    } catch (err) {
+      toast.error(extractErrorMessage(err));
+    } finally {
+      setClearingStaged(false);
+    }
+  }
 
   useEffect(() => {
     if (!id) return;
@@ -155,7 +185,7 @@ export default function BatchWizard() {
         <>
           <FixErrorsStep batch={batch} onDone={() => setStepKey('review')} />
           <div className="btn-row" style={{ marginTop: 12 }}>
-            <button className="btn" onClick={() => setStepKey('setup')}>
+            <button className="btn" onClick={handleUploadAnotherFile}>
               ← Upload another file
             </button>
           </div>
@@ -189,6 +219,30 @@ export default function BatchWizard() {
           onBack={() => setStepKey('review')}
           onSent={() => navigate(`/batches/${finalizeSummary.batch_id}`)}
         />
+      )}
+
+      {reuploadConfirmOpen && (
+        <div className="modal-overlay">
+          <div className="modal-box">
+            <h4>Upload a different file?</h4>
+            <p>
+              This batch already has <b>{batch?.total_candidates}</b> candidate(s) staged from
+              your last upload. Uploading another file will <b>discard them first</b>, so the
+              new file is compared only against itself — not silently skipped as duplicates of
+              rows you meant to replace. This cannot be undone.
+            </p>
+            <div className="btn-row">
+              <button className="btn" type="button" onClick={() => setReuploadConfirmOpen(false)}
+                      disabled={clearingStaged}>
+                Cancel
+              </button>
+              <button className="btn primary" type="button" disabled={clearingStaged}
+                      onClick={confirmUploadAnotherFile}>
+                <ButtonSpinner loading={clearingStaged}>Discard &amp; Upload New File</ButtonSpinner>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

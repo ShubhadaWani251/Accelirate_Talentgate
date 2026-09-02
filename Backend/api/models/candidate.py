@@ -260,6 +260,17 @@ class Invitation(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, null=True)
     link_clicked_at = models.DateTimeField(null=True, blank=True)
     is_link_used = models.BooleanField(default=False)
+    # Null means "inherits the batch's own link_valid_from" - true for every candidate's first
+    # invite, since that window IS the batch's at the moment it's finalized. Set explicitly only
+    # on a re-invite given its own window (see services/invites.create_single_reinvite), which
+    # exists because link_valid_from/until are locked on the batch itself once it leaves Draft
+    # (views/batches.py's EDITABLE_AFTER_DRAFT) - changing the batch's own dates would move the
+    # window for every OTHER candidate in it too, not just the one being re-invited. See
+    # services/exam_session.link_not_yet_open, the one place this is actually read.
+    link_valid_from = models.DateTimeField(null=True, blank=True)
+    # The 'until' half of the same pair - unlike link_valid_from this has never inherited from
+    # the batch at read time, only at creation (every invitation has always stored its own
+    # snapshot here), which is exactly the design link_valid_from now follows too.
     link_expired_at = models.DateTimeField()
     is_re_invite = models.BooleanField(default=False)
     sent_by = models.ForeignKey(User, on_delete=models.SET_NULL,

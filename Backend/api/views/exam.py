@@ -107,10 +107,11 @@ class ExamTokenLandingView(APIView):
             invitation.save(update_fields=['link_clicked_at'])
 
         if invitation.link_expired_at < timezone.now():
+            opens_at = exam_session.invitation_opens_at(invitation)
             return Response({
                 'reason': 'expired',
-                'link_valid_from': invitation.batch.link_valid_from.isoformat(),
-                'link_valid_until': invitation.batch.link_valid_until.isoformat(),
+                'link_valid_from': opens_at.isoformat() if opens_at else None,
+                'link_valid_until': invitation.link_expired_at.isoformat(),
             })
 
         attempt = ExamAttempt.objects.filter(invitation=invitation).first()
@@ -119,11 +120,11 @@ class ExamTokenLandingView(APIView):
         # window was open at the time it started (begin_exam enforces that), so this can never
         # block a genuinely in-progress exam, only a candidate arriving before it opens.
         if (attempt is None or attempt.started_at is None) and exam_session.link_not_yet_open(
-            invitation.batch
+            invitation
         ):
             return Response({
                 'reason': 'not_yet_open',
-                'opens_at': invitation.batch.link_valid_from.isoformat(),
+                'opens_at': exam_session.invitation_opens_at(invitation).isoformat(),
             })
 
         if attempt is None:
@@ -192,12 +193,13 @@ class ExamVerifyEmailView(APIView):
         # endpoint is reachable directly, and started_at can never be set before the window
         # opened (begin_exam enforces that), so this never blocks a real in-progress exam.
         if (attempt is None or attempt.started_at is None) and exam_session.link_not_yet_open(
-            invitation.batch
+            invitation
         ):
+            opens_at = exam_session.invitation_opens_at(invitation).isoformat()
             return Response(
                 {'detail': f'This assessment is not open yet. It becomes available at '
-                            f'{invitation.batch.link_valid_from.isoformat()}.',
-                 'opens_at': invitation.batch.link_valid_from.isoformat()},
+                            f'{opens_at}.',
+                 'opens_at': opens_at},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -249,11 +251,12 @@ class ExamIdentityCaptureView(APIView):
         # Identity capture always happens before the clock starts (begin_exam is the exam
         # screen's own first move, after this), so - unlike the landing/verify-email checks -
         # there's no in-progress-with-started_at case to carve out here.
-        if exam_session.link_not_yet_open(invitation.batch):
+        if exam_session.link_not_yet_open(invitation):
+            opens_at = exam_session.invitation_opens_at(invitation).isoformat()
             return Response(
                 {'detail': f'This assessment is not open yet. It becomes available at '
-                            f'{invitation.batch.link_valid_from.isoformat()}.',
-                 'opens_at': invitation.batch.link_valid_from.isoformat()},
+                            f'{opens_at}.',
+                 'opens_at': opens_at},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
