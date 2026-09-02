@@ -258,8 +258,15 @@ REST_FRAMEWORK = {
 # revocation on logout is handled by our own RevokedRefreshToken model (api/models/auth_token.py),
 # checked manually in the /api/auth/refresh/ view.
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    # Overridable so a local .env can shorten these to actually exercise the expiry/"Session
+    # expired" path within a human testing session, without touching the real defaults every
+    # other environment gets by leaving these unset.
+    'ACCESS_TOKEN_LIFETIME': timedelta(
+        minutes=int(os.environ.get('ACCESS_TOKEN_LIFETIME_MINUTES', 30))
+    ),
+    'REFRESH_TOKEN_LIFETIME': timedelta(
+        minutes=int(os.environ.get('REFRESH_TOKEN_LIFETIME_MINUTES', 60 * 24 * 7))
+    ),
     'UPDATE_LAST_LOGIN': False,
     'ALGORITHM': 'HS256',
     'SIGNING_KEY': SECRET_KEY,

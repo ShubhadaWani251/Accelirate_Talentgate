@@ -1,7 +1,11 @@
 import { useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
-import { authCheckStarted, credentialsReceived, sessionCleared, selectAuthStatus, selectRoleCode } from '../features/auth/authSlice';
+import toast from 'react-hot-toast';
+import {
+  authCheckStarted, credentialsReceived, sessionCleared, hadSessionBefore,
+  selectAuthStatus, selectRoleCode,
+} from '../features/auth/authSlice';
 import * as authApi from '../api/authApi';
 import ProtectedRoute from '../components/common/ProtectedRoute';
 import ProtectedLayout from '../components/layout/ProtectedLayout';
@@ -80,7 +84,14 @@ export default function AppRouter() {
     authApi
       .refresh()
       .then((data) => dispatch(credentialsReceived(data)))
-      .catch(() => dispatch(sessionCleared()));
+      .catch(() => {
+        // Read BEFORE dispatching - sessionCleared() clears the marker itself. Only warn when
+        // this browser actually had a session to lose; a first-ever visit (nothing logged in,
+        // nothing to refresh) hits this exact same failure and must stay silent.
+        const shouldWarn = hadSessionBefore();
+        dispatch(sessionCleared());
+        if (shouldWarn) toast.error('Session expired. Please log in again.');
+      });
   }, [dispatch]);
 
   // App boot: the session refresh decides which routes even exist for this user, so nothing

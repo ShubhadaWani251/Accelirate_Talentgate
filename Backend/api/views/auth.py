@@ -163,7 +163,17 @@ class RefreshView(APIView):
     def post(self, request):
         raw_refresh = request.COOKIES.get(settings.REFRESH_COOKIE_NAME)
         if not raw_refresh:
-            return Response({'detail': 'No refresh token.'}, status=status.HTTP_401_UNAUTHORIZED)
+            # A missing cookie and an invalid one (the TokenError branch below) are the same
+            # lived experience for whoever is looking at the screen - their session is gone,
+            # log in again - so both say exactly the same thing. They ARE reached differently:
+            # this fires once the cookie's own browser-side Max-Age (set to the same duration
+            # as the token itself, see _set_refresh_cookie) has elapsed and the browser simply
+            # stops sending it, which can beat the token's own expiry check below to the punch
+            # depending on exactly when the next request happens to fire. Showing a different,
+            # rawer-sounding message for that timing accident would undo the whole point of the
+            # friendly one below.
+            return Response({'detail': 'Session expired. Please log in again.'},
+                             status=status.HTTP_401_UNAUTHORIZED)
 
         try:
             (new_refresh, new_access), user = rotate_refresh_token(raw_refresh)

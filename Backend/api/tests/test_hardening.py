@@ -333,8 +333,10 @@ class TestPublicAuthEndpointsIgnoreAStaleAuthorizationHeader:
 
     def test_refresh_runs_its_own_logic_not_a_stale_token_401(self, api_client):
         response = api_client.post('/api/auth/refresh/', **self.STALE_AUTH)
-        # RefreshView's own check (no cookie present), not SimpleJWT's raw token error.
-        assert response.data == {'detail': 'No refresh token.'}
+        # RefreshView's own check (no cookie present), not SimpleJWT's raw token error - and
+        # phrased the same friendly way as an invalid (rather than absent) cookie, since both
+        # mean the same thing to whoever is looking at the screen.
+        assert response.data == {'detail': 'Session expired. Please log in again.'}
 
     def test_login_runs_its_own_logic_not_a_stale_token_401(self, api_client, db):
         response = api_client.post(
@@ -364,3 +366,42 @@ class TestPublicAuthEndpointsIgnoreAStaleAuthorizationHeader:
             **self.STALE_AUTH,
         )
         assert response.data == {'detail': 'Invalid or expired code.'}
+
+
+class TestRefreshAlwaysShowsTheSameFriendlyMessage:
+    """Reported live: a two-minute REFRESH_TOKEN_LIFETIME (set only to make the expiry actually
+    observable within a human testing session) showed the raw "No refresh token." instead of
+    "Session expired..." - because the refresh cookie's own browser-side Max-Age is set to that
+    same duration (see auth._set_refresh_cookie), so once it elapses the BROWSER itself stops
+    sending the cookie, landing on a different code path than an invalid-but-present one. Both
+    now say exactly the same thing, since they're the same lived experience either way.
+    """
+
+    def test_no_cookie_at_all(self, api_client):
+        response = api_client.post('/api/auth/refresh/')
+
+        assert response.status_code == 401
+        assert response.data == {'detail': 'Session expired. Please log in again.'}
+
+    def test_a_present_but_garbage_cookie(self, api_client):
+        api_client.cookies['refresh_token'] = 'not-a-real-jwt'
+
+        response = api_client.post('/api/auth/refresh/')
+
+        assert response.status_code == 401
+        assert response.data == {'detail': 'Session expired. Please log in again.'}
+
+    def test_a_present_but_expired_cookie(self, api_client, ta_user):
+        from datetime import timedelta
+        from django.utils import timezone
+        from rest_framework_simplejwt.tokens import RefreshToken
+
+        expired = RefreshToken()
+        expired['user_id'] = ta_user.user_id
+        expired.set_exp(lifetime=timedelta(seconds=-1))
+        api_client.cookies['refresh_token'] = str(expired)
+
+        response = api_client.post('/api/auth/refresh/')
+
+        assert response.status_code == 401
+        assert response.data == {'detail': 'Session expired. Please log in again.'}
