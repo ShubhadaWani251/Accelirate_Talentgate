@@ -5,7 +5,7 @@ from django.db.models import Case, Count, IntegerField, Q, Value, When
 from api.models import Batch, Candidate, Question, QuestionBankSection, User
 from api.serializers.batch import annotate_batch_counts
 from api.serializers.question import normalize_question_text
-from api.services.access import visible_batches_qs, visible_candidates_qs
+from api.services.access import dedupe_by_profile, visible_batches_qs, visible_candidates_qs
 from api.services.batch_status_filter import filter_batches_by_status_group
 
 
@@ -19,6 +19,10 @@ def _batches_qs_for(user):
 def _build_stats(batches_qs, candidates_qs):
     # One aggregate query for the candidate-derived numbers (was 3 separate .count() calls),
     # same conditional-Count technique annotate_batch_counts already uses for batches.
+    #
+    # candidates_qs is deduped by profile (see services/access.dedupe_by_profile) before it
+    # reaches here - "Total Candidates" counts real PEOPLE, matching what the All Candidates
+    # page itself shows, not one count per batch appearance of the same person.
     candidate_stats = candidates_qs.aggregate(
         total_candidates=Count('candidate_id'),
         completed=Count('candidate_id', filter=Q(status=Candidate.Status.COMPLETED)),
@@ -123,7 +127,7 @@ def build_dashboard_summary(user, batch_status='active'):
     """
     is_admin = user.role.role_code == 'admin'
     batches_qs = _batches_qs_for(user)
-    candidates_qs = visible_candidates_qs(user)
+    candidates_qs = dedupe_by_profile(visible_candidates_qs(user))
 
     response = {
         'stats': _build_stats(batches_qs, candidates_qs),

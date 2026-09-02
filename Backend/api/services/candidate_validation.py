@@ -12,9 +12,11 @@ therefore never be edited into a state the original upload would have rejected.
 
 import re
 from collections import Counter
+from datetime import datetime
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.validators import validate_email as django_validate_email
+from django.utils import timezone
 
 from api.models import Candidate
 
@@ -36,9 +38,17 @@ EDITABLE_FIELDS = {
     'percentage': 'Percentage',
     'passing_out_year': 'Passing Out Year',
     'location': 'Location',
+    'date_of_birth': 'Date of Birth',
 }
 
 _AADHAAR_RE = re.compile(r'^\d{4}$')
+# DD/MM/YYYY is the documented format; the hyphenated variant and the two shapes Excel's own
+# native date cells stringify to (see excel_upload._cell_to_text) are accepted too.
+_DOB_FORMATS = ('%d/%m/%Y', '%d-%m-%Y', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d')
+# Nothing born before this is a plausible candidate for an entry-level hiring pipeline - same
+# spirit as _MIN_YEAR/_MAX_YEAR below, catching a mis-typed year rather than enforcing an age
+# policy.
+_MIN_DOB_YEAR = 1940
 
 
 def clamp_aadhaar_to_last4(value):
@@ -101,9 +111,24 @@ def normalize_email(value):
     return (value or '').strip().lower()
 
 
-def normalize_name(value):
-    """Casefold and collapse whitespace, so "Asha  Rao" and "asha rao" are one person."""
-    return ' '.join((value or '').split()).casefold()
+def parse_dob_text(text):
+    """Parse a Date of Birth cell/field into a date, or None if it isn't one.
+
+    DD/MM/YYYY is the documented format (the upload template and every edit form use it), with
+    a couple of lenient variants: a hyphenated typing of the same format, and whatever str()
+    produces for a cell Excel already parsed as a native date - openpyxl hands those back as
+    datetime objects, which excel_upload._cell_to_text stringifies to 'YYYY-MM-DD HH:MM:SS' or
+    'YYYY-MM-DD' rather than losing them just because the column happened to be date-formatted.
+    """
+    text = (text or '').strip()
+    if not text:
+        return None
+    for fmt in _DOB_FORMATS:
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
 
 
 def identity_key(values):
@@ -111,29 +136,25 @@ def identity_key(values):
 
     Only the last 4 Aadhaar digits are stored, and 4 digits is far too weak to identify anyone
     on its own - there are 10,000 possible values, so in a 50-row batch there is roughly a 1-in-8
-    chance two unrelated candidates share a suffix. Pairing the digits with the name makes a
-    collision require both, which is rare enough to treat as the same person.
+    chance two unrelated candidates share a suffix. Pairing the digits with date of birth makes a
+    collision require both, which is rare enough to treat as the same person. Name is
+    deliberately NOT part of this key (it used to be) - a person's name is typed inconsistently
+    across uploads (spelling, order, a maiden name) far more often than their Aadhaar+DOB pair
+    changes, so keying on name produced missed matches that keying on DOB does not.
 
-    The trade-off is the opposite failure: the same person entered under a differently spelled
-    name (or a maiden name) reads as two people. That is the safer direction - a missed duplicate
-    is reviewed by a human, whereas a false duplicate can block a legitimate candidate from
-    being invited at all.
-
-    `values` is the dict shape returned by _values_of / used by validate_candidate_values.
+    `values` is the dict shape returned by _values_of / used by validate_candidate_values -
+    'date_of_birth' is a `date` (already parsed), not raw text.
     """
     last4 = (values.get('aadhaar_last4') or '').strip()
-    name = normalize_name(
-        f"{values.get('first_name') or ''} {values.get('last_name') or ''}"
-    )
-    return (last4, name)
+    dob = values.get('date_of_birth')
+    return (last4, dob.isoformat() if dob else '')
 
 
 def candidate_identity_key(candidate):
     """identity_key for a saved Candidate row."""
     return identity_key({
         'aadhaar_last4': candidate.aadhaar_last4,
-        'first_name': candidate.first_name,
-        'last_name': candidate.last_name,
+        'date_of_birth': candidate.date_of_birth,
     })
 
 
@@ -190,20 +211,36 @@ def validate_candidate_values(values, email_counts=None, raw=None, aadhaar_count
     elif email_counts and email_counts.get(normalize_email(email), 0) > 1:
         fail(_VS.DUPLICATE_EMAIL, 'Email', 'Duplicate email in this batch')
 
-    # --- Aadhaar (required, exactly 12 digits, unique within the batch) --------------
+    # --- Aadhaar (required, exactly 4 digits, unique within the batch) --------------
     # Only the last 4 digits are held (see models/candidate.py), so on their own they are a
     # weak identifier - 10,000 possible values means unrelated people collide routinely. The
-    # within-batch duplicate check is therefore on (last 4 + name), not the digits alone;
-    # flagging every shared suffix would bury the reviewer in false duplicates. The
+    # within-batch duplicate check is therefore on (last 4 + date of birth), not the digits
+    # alone; flagging every shared suffix would bury the reviewer in false duplicates. The
     # cross-batch cooling-off check keys on the same pair - see services/duplicate_check.py.
     aadhaar = (values.get('aadhaar_last4') or '').strip()
+    dob = values.get('date_of_birth')
     if not aadhaar:
         fail(_VS.MISSING_AADHAAR, 'Aadhaar Last 4 Digits', 'Aadhaar last 4 digits required')
     elif not _AADHAAR_RE.match(aadhaar):
         fail(_VS.INVALID_AADHAAR, 'Aadhaar Last 4 Digits', 'Must be exactly 4 digits')
-    elif aadhaar_counts and aadhaar_counts.get(identity_key(values), 0) > 1:
+    # dob required here too: without it, every row sharing just the Aadhaar suffix collapses
+    # onto the same (last4, '') key and would incorrectly flag each other as duplicates - the
+    # missing-DOB check below already reports the real problem for those rows.
+    elif dob and aadhaar_counts and aadhaar_counts.get(identity_key(values), 0) > 1:
         fail(_VS.DUPLICATE_AADHAAR, 'Aadhaar Last 4 Digits',
-             'Same name and Aadhaar last 4 digits already appear in this batch')
+             'Same Date of Birth and Aadhaar last 4 digits already appear in this batch')
+
+    # --- Date of Birth (required, DD/MM/YYYY, plausible range) -----------------------
+    # The other half of the identity key (see identity_key above).
+    raw_dob = (raw.get('date_of_birth') or '').strip()
+    if not raw_dob and dob is None:
+        fail(_VS.MISSING_DOB, 'Date of Birth', 'Date of Birth required')
+    elif raw_dob and dob is None:
+        fail(_VS.INVALID_DOB, 'Date of Birth', 'Must be a valid date (DD/MM/YYYY)')
+    elif dob is not None and dob > timezone.now().date():
+        fail(_VS.INVALID_DOB, 'Date of Birth', 'Cannot be in the future')
+    elif dob is not None and dob.year < _MIN_DOB_YEAR:
+        fail(_VS.INVALID_DOB, 'Date of Birth', f'Must be after {_MIN_DOB_YEAR}')
 
     # --- College (required) ----------------------------------------------------------
     if not (values.get('college_name') or '').strip():
@@ -278,9 +315,14 @@ def revalidate_batch_candidates(batch, candidates=None):
     email_counts = Counter(
         normalize_email(c.email) for c in candidates if (c.email or '').strip()
     )
-    # Keyed on (last 4 + normalized name), matching the check in validate_candidate_values.
+    # Keyed on (last 4 + date of birth), matching the check in validate_candidate_values. Rows
+    # with no DOB yet are left out entirely - validate_candidate_values only consults this
+    # counter when a row's OWN dob is present too, so a DOB-less row could never be usefully
+    # counted here anyway, and leaving it in would make every DOB-less row sharing an Aadhaar
+    # suffix collapse onto the same (last4, '') key.
     aadhaar_counts = Counter(
-        identity_key(_values_of(c)) for c in candidates if (c.aadhaar_last4 or '').strip()
+        identity_key(_values_of(c)) for c in candidates
+        if (c.aadhaar_last4 or '').strip() and c.date_of_birth
     )
 
     changed = []

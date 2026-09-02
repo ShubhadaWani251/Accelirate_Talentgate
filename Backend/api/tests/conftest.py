@@ -1,6 +1,6 @@
 """Shared test fixtures: object factories and cache isolation."""
 
-from datetime import timedelta
+from datetime import date, timedelta
 
 import pytest
 from django.conf import settings
@@ -124,6 +124,11 @@ def make_candidate(db):
             last_name='Test',
             email='cand%d@example.test' % n,
             aadhaar_last4='1234',
+            # Unique per candidate by default (like the name above), so two fixture-made
+            # candidates aren't accidentally the same identity (aadhaar_last4 + date_of_birth -
+            # see services/candidate_validation.identity_key) unless a test deliberately sets
+            # matching values on both to test that.
+            date_of_birth=date(1995, 1, 1) + timedelta(days=n),
             college_name='Test College',
             degree='BE',
             stream='CS',

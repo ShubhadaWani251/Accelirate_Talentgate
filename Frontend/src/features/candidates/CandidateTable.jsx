@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { SkeletonTableRows } from '../../components/loading/Skeleton';
+import { formatDateDMY } from '../../utils/datetime';
 
 const STATUS_PILL = {
   pending_invite: 'gray', invited: 'blue', in_progress: 'blue',
@@ -68,15 +69,16 @@ export default function CandidateTable({
             <tr>
               <th></th><th>Name</th><th>Email</th><th>Mobile</th><th>Batch Name</th><th>College</th><th>Degree</th>
               <th>Stream</th><th>Percentage</th><th>Passing Out Year</th><th>Location</th><th>Aadhaar Last 4</th>
+              <th>Date of Birth</th>
               <th>Status</th><th>Email Status</th><th>Logical</th><th>Quant.</th><th>Verbal</th><th>Programming</th>
               <th>Overall</th><th>Result</th><th>History</th><th>Edit</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <SkeletonTableRows rows={6} columns={22} />
+              <SkeletonTableRows rows={6} columns={23} />
             ) : candidates.length === 0 ? (
-              <tr><td colSpan={22}>No candidates found.</td></tr>
+              <tr><td colSpan={23}>No candidates found.</td></tr>
             ) : (
               candidates.map((c) => (
                 <tr key={c.candidate_id}>
@@ -92,6 +94,7 @@ export default function CandidateTable({
                   <td>{c.passing_out_year || '—'}</td>
                   <td>{c.location || '—'}</td>
                   <td>{c.aadhaar_last4 || '—'}</td>
+                  <td>{formatDateDMY(c.date_of_birth)}</td>
                   <td><span className={`pill ${STATUS_PILL[c.status] || 'gray'}`}>{c.status_display}</span></td>
                   {/* The failure reason is the title text rather than a visible cell: it is a
                       long API message, and only matters for the rows that failed. */}

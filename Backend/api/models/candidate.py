@@ -5,7 +5,7 @@ from .batch import Batch
 
 
 class CandidateProfile(models.Model):
-    """One row per real person, identified by (Aadhaar last 4 + name) - see
+    """One row per real person, identified by (Aadhaar last 4 + date of birth) - see
     services/candidate_profile.py. Aggregates a person's Candidate rows across every batch
     they've ever appeared in, so the All Candidates page can show one entry per person instead
     of one per batch upload. Holds only the mutable, person-level fields; everything about a
@@ -21,6 +21,12 @@ class CandidateProfile(models.Model):
     email = models.EmailField(max_length=150)
     phone = models.CharField(max_length=20, null=True, blank=True)
     aadhaar_last4 = models.CharField(max_length=4)
+    # Part of the identity key alongside aadhaar_last4 (see services/candidate_validation.
+    # identity_key) - null on every profile created before this field existed, which is fine:
+    # link_profile only ever links/matches a Candidate row that itself has a DOB, so a null
+    # here just means this profile predates the field and won't gain new memberships by name
+    # alone any more.
+    date_of_birth = models.DateField(null=True, blank=True)
     college_name = models.CharField(max_length=150, null=True, blank=True)
     degree = models.CharField(max_length=50, null=True, blank=True)
     stream = models.CharField(max_length=100, null=True, blank=True)
@@ -69,6 +75,8 @@ class Candidate(models.Model):
         MISSING_PERCENTAGE = 'missing_percentage', 'Missing Percentage'
         MISSING_YEAR = 'missing_year', 'Missing Passing Out Year'
         MISSING_LOCATION = 'missing_location', 'Missing Location'
+        MISSING_DOB = 'missing_dob', 'Missing Date of Birth'
+        INVALID_DOB = 'invalid_dob', 'Invalid Date of Birth'
 
     class Status(models.TextChoices):
         PENDING_INVITE = 'pending_invite', 'Pending Invite'
@@ -90,14 +98,18 @@ class Candidate(models.Model):
     phone = models.CharField(max_length=20, null=True, blank=True)
     # Only the last four digits are ever stored. A full Aadhaar number is sensitive identity
     # data the platform has no use for: it existed purely as a duplicate-detection key, and
-    # that job is now done by (last four + name) - see services/duplicate_check.py. Four digits
-    # alone collide often (10,000 possible values), which is exactly why the name is part of
-    # the key rather than this field being trusted on its own.
+    # that job is now done by (last four + date of birth) - see services/duplicate_check.py.
+    # Four digits alone collide often (10,000 possible values), which is exactly why DOB is
+    # part of the key rather than this field being trusted on its own.
     aadhaar_last4 = models.CharField(
         max_length=4,
         help_text="Last 4 digits of the candidate's Aadhaar number. The full number is never "
                   "stored.",
     )
+    # The other half of the identity key (see services/candidate_validation.identity_key).
+    # Null on every row uploaded before this field existed - see CandidateProfile.date_of_birth
+    # for what that means for matching.
+    date_of_birth = models.DateField(null=True, blank=True)
 
     # Education
     college_name = models.CharField(max_length=150, null=True, blank=True)
@@ -108,9 +120,10 @@ class Candidate(models.Model):
     location = models.CharField(max_length=100, null=True, blank=True)
 
     batch = models.ForeignKey(Batch, on_delete=models.CASCADE, db_column='batch_id')
-    # The one real-person record this row belongs to, resolved by (Aadhaar last 4 + name) - see
-    # services/candidate_profile.py. Null when there's no Aadhaar to key on (nothing to match
-    # against), mirroring run_duplicate_check's own early-out for the same case. SET_NULL rather
+    # The one real-person record this row belongs to, resolved by (Aadhaar last 4 + date of
+    # birth) - see services/candidate_profile.py. Null when there's no Aadhaar or DOB to key on
+    # (nothing to match against), mirroring run_duplicate_check's own early-out for the same
+    # case. SET_NULL rather
     # than CASCADE: deleting one batch's row (or the whole batch) must never destroy the shared
     # profile other batches' rows still point at.
     profile = models.ForeignKey('CandidateProfile', on_delete=models.SET_NULL,

@@ -147,6 +147,7 @@ export default function FixErrorsStep({ batch, onDone }) {
                 <th>Email</th>
                 <th>Mobile</th>
                 <th>Aadhaar Last 4</th>
+                <th>Date of Birth</th>
                 <th>College Name</th>
                 <th>Degree</th>
                 <th>Stream</th>
@@ -160,7 +161,7 @@ export default function FixErrorsStep({ batch, onDone }) {
             </thead>
             <tbody>
               {loading ? (
-                <SkeletonTableRows rows={5} columns={14} />
+                <SkeletonTableRows rows={5} columns={15} />
               ) : (
                 invalidRows.map((r) => (
                   <CandidateErrorRow

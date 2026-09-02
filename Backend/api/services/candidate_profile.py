@@ -1,6 +1,6 @@
 """Resolves and maintains the one CandidateProfile row per real person (by Aadhaar last 4 +
-name), so the same person's Candidate rows across different batches aggregate onto one entry
-for the All Candidates page instead of fragmenting into one row per batch appearance.
+date of birth), so the same person's Candidate rows across different batches aggregate onto one
+entry for the All Candidates page instead of fragmenting into one row per batch appearance.
 """
 
 from api.models import CandidateProfile
@@ -10,14 +10,14 @@ from api.services.candidate_validation import candidate_identity_key
 # edit form) - the person-level fields a profile mirrors from whichever Candidate row supplied
 # them most recently.
 PROFILE_MIRRORED_FIELDS = (
-    'first_name', 'last_name', 'email', 'phone', 'aadhaar_last4',
+    'first_name', 'last_name', 'email', 'phone', 'aadhaar_last4', 'date_of_birth',
     'college_name', 'degree', 'stream', 'percentage', 'passing_out_year', 'location',
 )
 
 
 def _profile_key(candidate):
-    last4, name = candidate_identity_key(candidate)
-    return f'{last4}:{name}'
+    last4, dob_iso = candidate_identity_key(candidate)
+    return f'{last4}:{dob_iso}'
 
 
 def link_profile(candidate):
@@ -25,10 +25,10 @@ def link_profile(candidate):
     mirrored fields with `candidate`'s own - the most recently uploaded/edited row always wins -
     and point `candidate.profile` at it.
 
-    No-op (returns None) when the candidate has no Aadhaar to key on: there's nothing to match
-    against, the same early-out services/duplicate_check.run_duplicate_check applies.
+    No-op (returns None) when the candidate has no Aadhaar or DOB to key on: there's nothing to
+    match against, the same early-out services/duplicate_check.run_duplicate_check applies.
     """
-    if not candidate.aadhaar_last4:
+    if not candidate.aadhaar_last4 or not candidate.date_of_birth:
         return None
 
     key = _profile_key(candidate)

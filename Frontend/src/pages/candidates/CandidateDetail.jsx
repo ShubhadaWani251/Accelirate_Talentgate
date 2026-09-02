@@ -9,7 +9,9 @@ import {
   Skeleton, SkeletonCard, SkeletonPage, SkeletonTable,
 } from '../../components/loading/Skeleton';
 import { ButtonSpinner } from '../../components/loading/Spinner';
-import { formatDateTime, fromDatetimeLocalValue, toDatetimeLocalValue } from '../../utils/datetime';
+import {
+  formatDateDMY, formatDateTime, fromDatetimeLocalValue, toDatetimeLocalValue,
+} from '../../utils/datetime';
 import { extractErrorMessage } from '../../utils/passwordSchema';
 
 const RESULT_PILL = { pending: 'gray', pass: 'green', fail: 'red' };
@@ -131,6 +133,7 @@ export default function CandidateDetail() {
           <div className="field"><label>Name</label><div>{candidate.full_name}</div></div>
           <div className="field"><label>Email</label><div>{candidate.email}</div></div>
           <div className="field"><label>Aadhaar Last 4 Digits</label><div>{candidate.aadhaar_last4 || '—'}</div></div>
+          <div className="field"><label>Date of Birth</label><div>{formatDateDMY(candidate.date_of_birth)}</div></div>
           {/* Shown here as well as in the list, with the full failure reason - this is where
               someone lands when investigating why a candidate never got their link. */}
           <div className="field">

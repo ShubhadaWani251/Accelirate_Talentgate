@@ -201,7 +201,7 @@ class CandidateListSerializer(serializers.ModelSerializer):
         fields = [
             'candidate_id', 'full_name', 'email', 'phone', 'batch_id', 'batch_name',
             'college_name', 'degree', 'stream', 'percentage', 'passing_out_year', 'location',
-            'aadhaar_last4', 'status', 'status_display', 'result', 'result_display',
+            'aadhaar_last4', 'date_of_birth', 'status', 'status_display', 'result', 'result_display',
             'logical_score', 'quantitative_score', 'verbal_score', 'programming_score',
             'overall_score', 'total_correct', 'overall_total', 'has_attempt',
             'email_status', 'email_status_display', 'email_error', 'email_sent_at',
@@ -311,7 +311,7 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
         fields = [
             'candidate_id', 'full_name', 'email', 'phone',
             'college_name', 'degree', 'stream', 'percentage', 'passing_out_year', 'location',
-            'aadhaar_last4', 'batch_id', 'batch_name', 'status', 'status_display',
+            'aadhaar_last4', 'date_of_birth', 'batch_id', 'batch_name', 'status', 'status_display',
             'result', 'result_display', 'overall_score', 'overall_total', 'total_correct',
             'section_results',
             'evidence', 'timeline',

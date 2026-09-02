@@ -4,7 +4,8 @@ from api.services.xlsx_safety import harden_workbook
 
 from api.models import Candidate
 from api.services.candidate_validation import (
-    candidate_identity_key, clamp_aadhaar_to_last4, identity_key, revalidate_batch_candidates,
+    candidate_identity_key, clamp_aadhaar_to_last4, identity_key, parse_dob_text,
+    revalidate_batch_candidates,
 )
 from api.services.candidate_profile import link_profile
 from api.services.duplicate_check import preload_duplicate_lookup, run_duplicate_check
@@ -13,8 +14,8 @@ from api.services.duplicate_check import preload_duplicate_lookup, run_duplicate
 # below) rather than silently importing blanks for it, and validate_candidate_values() rejects
 # any row where one of these is blank.
 TEMPLATE_COLUMNS = [
-    'Name', 'Email', 'Mobile', 'Aadhaar Last 4 Digits', 'College Name', 'Degree',
-    'Stream', 'Percentage', 'Passing Out Year', 'Location',
+    'Name', 'Email', 'Mobile', 'Aadhaar Last 4 Digits', 'Date of Birth (DD/MM/YYYY)',
+    'College Name', 'Degree', 'Stream', 'Percentage', 'Passing Out Year', 'Location',
 ]
 
 # Nothing is optional at the column level any more - kept as a named set (rather than deleted
@@ -62,6 +63,12 @@ _HEADER_MAP = {
     'adhaar': 'aadhaar_last4',
     'adhar': 'aadhaar_last4',
     'uid': 'aadhaar_last4',
+    'date of birth': 'date_of_birth',
+    'date of birth (dd/mm/yyyy)': 'date_of_birth',
+    'dob': 'date_of_birth',
+    'birth date': 'date_of_birth',
+    'd.o.b': 'date_of_birth',
+    'd.o.b.': 'date_of_birth',
     'college name': 'college_name',
     'college': 'college_name',
     'institute': 'college_name',
@@ -90,6 +97,7 @@ _FIELD_TO_COLUMN = {
     'email': 'Email',
     'phone': 'Mobile',
     'aadhaar_last4': 'Aadhaar Last 4 Digits',
+    'date_of_birth': 'Date of Birth (DD/MM/YYYY)',
     'college_name': 'College Name',
     'degree': 'Degree',
     'stream': 'Stream',
@@ -108,13 +116,17 @@ def generate_template_workbook():
     # is a varchar(4)) - it used to show a full 12-digit number, which uploaded this exact
     # template's own sample row straight into a DataError ("value too long for type character
     # varying(4)"), surfaced to the user as an opaque "could not read that file".
-    ws.append(['Jane Doe', 'jane.doe@example.com', '9876543210', '1234',
+    #
+    # The DOB example is written as plain text, not an Excel-native date cell - so it round-trips
+    # through the exact same DD/MM/YYYY text parser every other upload does, rather than exercising
+    # a different (datetime-object) code path than real recruiter sheets typically will.
+    ws.append(['Jane Doe', 'jane.doe@example.com', '9876543210', '1234', '15/06/2001',
                'XYZ College', 'B.Tech', 'Computer Science', '78.5', '2025', 'Pune'])
     return harden_workbook(wb)
 
 
 VALIDATION_REPORT_COLUMNS = [
-    'Row', 'Name', 'Email', 'Mobile', 'Aadhaar Last 4 Digits', 'College Name',
+    'Row', 'Name', 'Email', 'Mobile', 'Aadhaar Last 4 Digits', 'Date of Birth', 'College Name',
     'Status', 'Fields At Fault', 'Errors',
 ]
 
@@ -139,6 +151,7 @@ def generate_validation_report_workbook(candidates):
             candidate.email,
             candidate.phone,
             candidate.aadhaar_last4,
+            candidate.date_of_birth.strftime('%d/%m/%Y') if candidate.date_of_birth else '',
             candidate.college_name,
             candidate.get_validation_status_display(),
             ', '.join(dict.fromkeys(e['field'] for e in errors)),
@@ -148,8 +161,8 @@ def generate_validation_report_workbook(candidates):
 
 
 EXPORT_COLUMNS = [
-    'Name', 'Email', 'Mobile', 'Batch Name', 'College', 'Degree', 'Stream', 'Percentage',
-    'Passing Out Year', 'Location', 'Status', 'Result',
+    'Name', 'Email', 'Mobile', 'Date of Birth', 'Batch Name', 'College', 'Degree', 'Stream',
+    'Percentage', 'Passing Out Year', 'Location', 'Status', 'Result',
     'Logical Score', 'Quantitative Score', 'Verbal Score', 'Programming Score', 'Overall Score',
 ]
 
@@ -174,6 +187,7 @@ def generate_candidates_workbook(candidates, latest_attempt_fn, status_display_f
             candidate.full_name,
             candidate.email,
             candidate.phone,
+            candidate.date_of_birth.strftime('%d/%m/%Y') if candidate.date_of_birth else '',
             candidate.batch.batch_name,
             candidate.college_name,
             candidate.degree,
@@ -312,8 +326,8 @@ def stage_candidates_from_workbook(batch, file_obj, user, cooling_off_months=3):
     # to share one - a far worse failure than letting a near-duplicate through to review.
     seen_identity, seen_email = set(), set()
     for existing in (batch.candidate_set.filter(is_deleted=False)
-                     .only('aadhaar_last4', 'first_name', 'last_name', 'email')):
-        if (existing.aadhaar_last4 or '').strip():
+                     .only('aadhaar_last4', 'date_of_birth', 'first_name', 'last_name', 'email')):
+        if (existing.aadhaar_last4 or '').strip() and existing.date_of_birth:
             seen_identity.add(candidate_identity_key(existing))
         if existing.email.strip():
             seen_email.add(existing.email.strip().lower())
@@ -329,16 +343,17 @@ def stage_candidates_from_workbook(batch, file_obj, user, cooling_off_months=3):
         # and the Candidate.objects.create() call further down all need to see the same,
         # DB-safe value. See clamp_aadhaar_to_last4 for why this exists at all.
         aadhaar = clamp_aadhaar_to_last4((data.get('aadhaar_last4') or '').strip())
+        date_of_birth = parse_dob_text(data.get('date_of_birth'))
         email = (data.get('email') or '').strip()
         row_identity = identity_key({
-            'aadhaar_last4': aadhaar, 'first_name': first_name, 'last_name': last_name,
+            'aadhaar_last4': aadhaar, 'date_of_birth': date_of_birth,
         })
 
-        # Only one row per person. Name + Aadhaar suffix decides first; a repeated email is
-        # treated the same way, since the same address twice is the same inbox.
+        # Only one row per person. Aadhaar + DOB decides first; a repeated email is treated the
+        # same way, since the same address twice is the same inbox.
         matched_on = None
-        if aadhaar and row_identity in seen_identity:
-            matched_on = 'Name + Aadhaar Last 4 Digits'
+        if aadhaar and date_of_birth and row_identity in seen_identity:
+            matched_on = 'Aadhaar Last 4 Digits + Date of Birth'
         elif email and email.lower() in seen_email:
             matched_on = 'Email'
         if matched_on:
@@ -349,7 +364,7 @@ def stage_candidates_from_workbook(batch, file_obj, user, cooling_off_months=3):
                 'matched_on': matched_on,
             })
             continue
-        if aadhaar:
+        if aadhaar and date_of_birth:
             seen_identity.add(row_identity)
         if email:
             seen_email.add(email.lower())
@@ -364,24 +379,27 @@ def stage_candidates_from_workbook(batch, file_obj, user, cooling_off_months=3):
             # The already-clamped local, not a fresh read of data['aadhaar_last4'] - re-reading
             # here would silently undo the clamp above and bring the DataError crash right back.
             aadhaar_last4=aadhaar,
+            date_of_birth=date_of_birth,
             college_name=data.get('college_name') or None,
             degree=data.get('degree') or None,
             stream=data.get('stream') or None,
             percentage=_to_float(data.get('percentage')),
             passing_out_year=_to_int(data.get('passing_out_year')),
             location=data.get('location') or None,
-            # Keep the original text for the two numeric columns. Decimal/SmallInteger can't
-            # hold "abc", so it parses to NULL above and would otherwise be indistinguishable
-            # from an empty cell - meaning "must be a number" could never be reported.
+            # Keep the original text for fields whose model type can't hold a bad value.
+            # Decimal/SmallInteger/DateField all parse a bad cell to NULL, indistinguishable
+            # from an empty one, so "must be a number"/"must be a valid date" could never be
+            # reported without the raw text to fall back on.
             upload_raw={
                 'percentage': data.get('percentage') or '',
                 'passing_out_year': data.get('passing_out_year') or '',
+                'date_of_birth': data.get('date_of_birth') or '',
             },
             created_by=user,
         )
         run_duplicate_check(candidate, cooling_off_months=cooling_off_months, existing_lookup=duplicate_lookup)
         link_profile(candidate)
-        if candidate.aadhaar_last4:
+        if candidate.aadhaar_last4 and candidate.date_of_birth:
             # Keep the lookup current so a later row in this SAME upload that repeats a
             # person is still caught as a duplicate against this one, not just against
             # candidates that existed before the upload started.

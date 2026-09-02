@@ -24,7 +24,8 @@ from api.services.batch_defaults import get_batch_defaults, save_batch_defaults
 from api.services.batch_status_filter import filter_batches_by_status_group
 from api.services import draft_expiry
 from api.services.candidate_validation import (
-    EDITABLE_FIELDS, clamp_aadhaar_to_last4, revalidate_batch_candidates, summarize_candidates,
+    EDITABLE_FIELDS, clamp_aadhaar_to_last4, parse_dob_text, revalidate_batch_candidates,
+    summarize_candidates,
 )
 from api.services import exam_session
 from api.services.candidate_profile import link_profile
@@ -424,6 +425,7 @@ class BatchCandidateRowView(APIView):
             raise Http404
 
         original_aadhaar = candidate.aadhaar_last4
+        original_dob = candidate.date_of_birth
         updates = []
         for field in EDITABLE_FIELDS:
             if field not in request.data:
@@ -442,15 +444,15 @@ class BatchCandidateRowView(APIView):
                 # a reviewer pasting a full Aadhaar number here would otherwise hit a raw
                 # DataError from Postgres instead of a normal validation message.
                 value = clamp_aadhaar_to_last4(value)
-            if field in ('percentage', 'passing_out_year'):
-                # Record what was actually typed as well as the parsed value: "abc" parses to
-                # None, and without the raw text the reviewer would be told the field is empty
-                # rather than that it isn't a number.
+            if field in ('percentage', 'passing_out_year', 'date_of_birth'):
+                # Record what was actually typed as well as the parsed value: "abc" (or an
+                # unparseable date) parses to None, and without the raw text the reviewer would
+                # be told the field is empty rather than that it isn't a number/valid date.
                 raw = candidate.upload_raw if isinstance(candidate.upload_raw, dict) else {}
                 candidate.upload_raw = {**raw, field: '' if value is None else str(value)}
                 if 'upload_raw' not in updates:
                     updates.append('upload_raw')
-                value = _to_number(value, field)
+                value = parse_dob_text(value) if field == 'date_of_birth' else _to_number(value, field)
             elif field in ('last_name', 'phone', 'college_name', 'degree', 'stream', 'location'):
                 value = value or None
 
@@ -463,10 +465,14 @@ class BatchCandidateRowView(APIView):
 
         candidate.save(update_fields=updates)
 
-        # A corrected Aadhaar suffix (or name) makes this a different person as far as the
+        # A corrected Aadhaar suffix or DOB makes this a different person as far as the
         # duplicate history goes, so the previous check's verdict no longer describes this row.
         # See services/candidate_validation.identity_key for what "the same person" means now.
-        if candidate.aadhaar_last4 != original_aadhaar:
+        # Checked against the actual before/after values (not whether the field was merely
+        # present in updates) so re-submitting the SAME value doesn't re-run the check for
+        # nothing, and so an edit that touches Aadhaar/DOB but happens to parse to the same
+        # value still skips it correctly.
+        if candidate.aadhaar_last4 != original_aadhaar or candidate.date_of_birth != original_dob:
             run_duplicate_check(candidate)
 
         # Every field editable here is person-level (see candidate_profile.PROFILE_MIRRORED_

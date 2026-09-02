@@ -11,10 +11,10 @@ def preload_duplicate_lookup(aadhaar_last4_values):
     per candidate - used by stage_candidates_from_workbook so an N-row upload does a single
     lookup query rather than N.
 
-    Returns {(last4, normalized_name): [Candidate, ...]} newest first. The SQL filter is on the
-    4 digits alone (that is the indexed column), and the name half of the key is applied in
-    Python when building the map - so the query stays index-backed while the key stays specific
-    enough to be meaningful. See candidate_validation.identity_key for why the name is part of it.
+    Returns {(last4, dob_iso): [Candidate, ...]} newest first. The SQL filter is on the 4
+    digits alone (that is the indexed column), and the DOB half of the key is applied in Python
+    when building the map - so the query stays index-backed while the key stays specific enough
+    to be meaningful. See candidate_validation.identity_key for why DOB is part of it.
 
     Every prior record is kept, not just the newest: the deciding fact is whether the person
     ever SAT the assessment, and that attempt may belong to an older record than the most
@@ -58,7 +58,7 @@ def run_duplicate_check(candidate, cooling_off_months=3, existing_lookup=None):
     """Match candidate against historical candidates (any batch, excluding this one) and
     record a DuplicateCheck row.
 
-    Matching is on (Aadhaar last 4 + name), not the digits alone - see
+    Matching is on (Aadhaar last 4 + date of birth), not the digits alone - see
     candidate_validation.identity_key. Only 4 digits are stored now, and matching on those
     alone would flag roughly one unrelated pair in every 50-row batch as a duplicate.
 
@@ -73,7 +73,7 @@ def run_duplicate_check(candidate, cooling_off_months=3, existing_lookup=None):
     newly-created candidate (see stage_candidates_from_workbook) so duplicates WITHIN the same
     upload are still caught, not just duplicates against pre-existing historical candidates.
     """
-    if not candidate.aadhaar_last4:
+    if not candidate.aadhaar_last4 or not candidate.date_of_birth:
         return DuplicateCheck.objects.create(
             candidate=candidate,
             check_status=DuplicateCheck.CheckStatus.NEW,
@@ -85,8 +85,8 @@ def run_duplicate_check(candidate, cooling_off_months=3, existing_lookup=None):
         matches = list(existing_lookup.get(key) or [])
     else:
         # Filtered on the indexed 4 digits in SQL, then narrowed to the full identity key in
-        # Python - a name comparison in SQL would have to replicate normalize_name's casefold
-        # and whitespace collapsing, and the two could then disagree.
+        # Python - matching the exact tuple identity_key() builds, rather than re-deriving an
+        # equivalent SQL comparison that could drift out of sync with it.
         matches = [
             m for m in Candidate.objects
             .filter(aadhaar_last4=candidate.aadhaar_last4, is_deleted=False)

@@ -2,18 +2,17 @@
 
 Only the last four digits of an Aadhaar number are stored anywhere. That is a data-minimisation
 decision with a real consequence: four digits collide roughly once every ten thousand people, so
-they cannot identify anybody on their own. Duplicate detection therefore pairs them with a
-normalised name, and these tests pin down both halves - that a bare 12-digit number is rejected
-outright, and that two unrelated people who happen to share a suffix are not treated as the same
-person.
+they cannot identify anybody on their own. Duplicate detection therefore pairs them with date of
+birth, and these tests pin down both halves - that a bare 12-digit number is rejected outright,
+and that two unrelated people who happen to share a suffix are not treated as the same person.
 """
+
+from datetime import date
 
 import pytest
 
 from api.models import Candidate
-from api.services.candidate_validation import (
-    identity_key, normalize_name, validate_candidate_values,
-)
+from api.services.candidate_validation import identity_key, validate_candidate_values
 from api.services.duplicate_check import run_duplicate_check
 
 BASE_ROW = {
@@ -21,6 +20,7 @@ BASE_ROW = {
     'last_name': 'Rao',
     'email': 'asha.rao@example.test',
     'phone': '9876543210',
+    'date_of_birth': date(1999, 5, 20),
     'college_name': 'Test College',
     'degree': 'BE',
     'stream': 'CS',
@@ -77,45 +77,53 @@ class TestValidation:
         assert status == Candidate.ValidationStatus.OK, errors
 
 
-class TestNameNormalisation:
-    @pytest.mark.parametrize('a,b', [
-        ('Asha', ' asha '),
-        ('Asha', 'ASHA'),
-        ('Asha Rao', 'asha  rao'),
-    ])
-    def test_case_and_whitespace_do_not_make_a_new_person(self, a, b):
-        assert normalize_name(a) == normalize_name(b)
-
-
 class TestIdentityKey:
-    def test_same_digits_and_same_name_are_the_same_identity(self):
-        assert (identity_key({'aadhaar_last4': '1234', 'first_name': 'Asha', 'last_name': 'Rao'})
-                == identity_key({'aadhaar_last4': '1234', 'first_name': ' ASHA ',
-                                 'last_name': 'rao'}))
+    def test_same_digits_and_same_dob_are_the_same_identity(self):
+        assert (identity_key({'aadhaar_last4': '1234', 'date_of_birth': date(1999, 5, 20)})
+                == identity_key({'aadhaar_last4': '1234', 'date_of_birth': date(1999, 5, 20)}))
 
-    def test_same_digits_but_different_name_are_different_people(self):
-        """The point of pairing with the name. Four digits alone collide about 1 in 10,000, so
-        keying on them alone would flag unrelated candidates as duplicates of each other.
+    def test_same_digits_but_different_dob_are_different_people(self):
+        """The point of pairing with date of birth. Four digits alone collide about 1 in 10,000,
+        so keying on them alone would flag unrelated candidates as duplicates of each other.
         """
-        assert (identity_key({'aadhaar_last4': '1234', 'first_name': 'Asha', 'last_name': 'Rao'})
-                != identity_key({'aadhaar_last4': '1234', 'first_name': 'Vikram',
-                                 'last_name': 'Shah'}))
+        assert (identity_key({'aadhaar_last4': '1234', 'date_of_birth': date(1999, 5, 20)})
+                != identity_key({'aadhaar_last4': '1234', 'date_of_birth': date(2000, 1, 1)}))
 
-    def test_same_name_but_different_digits_are_different_people(self):
-        assert (identity_key({'aadhaar_last4': '1234', 'first_name': 'Asha', 'last_name': 'Rao'})
-                != identity_key({'aadhaar_last4': '9999', 'first_name': 'Asha',
-                                 'last_name': 'Rao'}))
+    def test_same_dob_but_different_digits_are_different_people(self):
+        assert (identity_key({'aadhaar_last4': '1234', 'date_of_birth': date(1999, 5, 20)})
+                != identity_key({'aadhaar_last4': '9999', 'date_of_birth': date(1999, 5, 20)}))
+
+    def test_name_plays_no_part_in_the_key(self):
+        """Name used to be the second half of this key; it no longer is. Two rows with the same
+        Aadhaar+DOB but completely different names are still one identity.
+        """
+        assert (identity_key({'aadhaar_last4': '1234', 'date_of_birth': date(1999, 5, 20),
+                              'first_name': 'Asha', 'last_name': 'Rao'})
+                == identity_key({'aadhaar_last4': '1234', 'date_of_birth': date(1999, 5, 20),
+                                 'first_name': 'Completely Different', 'last_name': 'Person'}))
+
+    def test_a_missing_dob_never_matches_anything_including_itself(self):
+        """No DOB means no key to match on - same early-out as a missing Aadhaar suffix (see
+        services/duplicate_check.run_duplicate_check). Two blank-DOB rows sharing an Aadhaar
+        suffix must not silently collide with each other.
+        """
+        a = identity_key({'aadhaar_last4': '1234', 'date_of_birth': None})
+        b = identity_key({'aadhaar_last4': '1234', 'date_of_birth': None})
+        assert a == b  # the tuple itself is equal...
+        # ...but callers (run_duplicate_check, link_profile) never reach identity_key() at all
+        # for a candidate with no DOB - they early-out first. See TestDuplicateDetection below.
 
 
 class TestDuplicateDetection:
     def test_the_same_person_in_an_earlier_batch_is_flagged(
         self, ta_user, make_batch, make_candidate
     ):
+        dob = date(1998, 3, 14)
         make_candidate(make_batch(ta_user), ta_user,
-                       first_name='Asha', last_name='Rao', aadhaar_last4='7777',
+                       date_of_birth=dob, aadhaar_last4='7777',
                        email='asha@example.test')
         repeat = make_candidate(make_batch(ta_user), ta_user,
-                                first_name='Asha', last_name='Rao', aadhaar_last4='7777',
+                                date_of_birth=dob, aadhaar_last4='7777',
                                 email='asha.again@example.test')
 
         assert run_duplicate_check(repeat).check_status != 'new'
@@ -127,13 +135,39 @@ class TestDuplicateDetection:
         legitimate candidate, which is worse than a missed duplicate getting human review.
         """
         make_candidate(make_batch(ta_user), ta_user,
-                       first_name='Asha', last_name='Rao', aadhaar_last4='7777',
+                       date_of_birth=date(1998, 3, 14), aadhaar_last4='7777',
                        email='asha@example.test')
         unrelated = make_candidate(make_batch(ta_user), ta_user,
-                                   first_name='Vikram', last_name='Shah', aadhaar_last4='7777',
+                                   date_of_birth=date(2001, 11, 2), aadhaar_last4='7777',
                                    email='vikram@example.test')
 
         assert run_duplicate_check(unrelated).check_status == 'new'
+
+    def test_same_dob_different_name_is_still_flagged(
+        self, ta_user, make_batch, make_candidate
+    ):
+        """Name is no longer part of the key - a re-upload under a differently spelled (or
+        entirely different) name still matches, as long as Aadhaar+DOB agree.
+        """
+        dob = date(1998, 3, 14)
+        make_candidate(make_batch(ta_user), ta_user, date_of_birth=dob, aadhaar_last4='7777',
+                       first_name='Asha', last_name='Rao', email='asha@example.test')
+        repeat = make_candidate(make_batch(ta_user), ta_user, date_of_birth=dob,
+                                aadhaar_last4='7777', first_name='A', last_name='Rau',
+                                email='a.rau@example.test')
+
+        assert run_duplicate_check(repeat).check_status != 'new'
+
+    def test_a_candidate_with_no_dob_is_never_flagged(
+        self, ta_user, make_batch, make_candidate
+    ):
+        dob = date(1998, 3, 14)
+        make_candidate(make_batch(ta_user), ta_user, date_of_birth=dob, aadhaar_last4='7777',
+                       email='asha@example.test')
+        no_dob = make_candidate(make_batch(ta_user), ta_user, date_of_birth=None,
+                                aadhaar_last4='7777', email='no.dob@example.test')
+
+        assert run_duplicate_check(no_dob).check_status == 'new'
 
 
 class TestApiNeverExposesMoreThanFourDigits:

@@ -1,3 +1,5 @@
+from django.db.models import Q
+
 from api.models import Batch, Candidate
 
 
@@ -76,3 +78,28 @@ def visible_candidates_qs(user):
     return Candidate.objects.select_related('batch').filter(
         is_deleted=False, batch__is_deleted=False,
     ).exclude(batch__status=Batch.Status.DRAFT)
+
+
+def dedupe_by_profile(qs):
+    """Collapse `qs` to one row per real person: the most recently created CandidateProfile
+    membership, plus every row with no profile (no Aadhaar+DOB to key on, so nothing to dedupe
+    against - see services/candidate_profile.py). This is the shared "how many PEOPLE, not
+    batch-appearances" rule - the All Candidates listing (views/candidates.CandidateListView,
+    when not scoped to one batch) and the dashboard's stat cards both need exactly this, and
+    used to compute it independently, which is exactly how they could silently disagree.
+
+    Reduced in Python rather than a DISTINCT ON query: this needs to run on both Postgres
+    (production) and SQLite (settings_test.py deliberately uses SQLite - see its module
+    docstring), and DISTINCT ON is Postgres-only.
+    """
+    latest_membership_ids = []
+    seen_profiles = set()
+    for candidate_id, profile_id in (
+        qs.filter(profile__isnull=False)
+        .order_by('profile_id', '-created_at')
+        .values_list('candidate_id', 'profile_id')
+    ):
+        if profile_id not in seen_profiles:
+            seen_profiles.add(profile_id)
+            latest_membership_ids.append(candidate_id)
+    return qs.filter(Q(candidate_id__in=latest_membership_ids) | Q(profile__isnull=True))

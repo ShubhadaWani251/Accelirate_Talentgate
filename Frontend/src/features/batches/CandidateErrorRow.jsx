@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { formatDateDMY, isoToDMY } from '../../utils/datetime';
 
 // Order matches the spreadsheet template, so a reviewer editing a row is looking at the same
 // sequence of fields they see in Excel. `label` doubles as the error_fields key the server
@@ -13,6 +14,7 @@ const EDITABLE = [
   { key: 'email', label: 'Email', placeholder: 'name@example.com' },
   { key: 'phone', label: 'Mobile', placeholder: '10-digit mobile number' },
   { key: 'aadhaar_last4', label: 'Aadhaar Last 4 Digits', type: 'aadhaar' },
+  { key: 'date_of_birth', label: 'Date of Birth', placeholder: 'DD/MM/YYYY' },
   { key: 'college_name', label: 'College Name', placeholder: 'e.g. XYZ Institute of Technology' },
   { key: 'degree', label: 'Degree', placeholder: 'e.g. B.Tech' },
   { key: 'stream', label: 'Stream', placeholder: 'e.g. Computer Science' },
@@ -43,6 +45,7 @@ export default function CandidateErrorRow({
       email: row.email || '',
       phone: row.phone || '',
       aadhaar_last4: '',
+      date_of_birth: isoToDMY(row.date_of_birth),
       college_name: row.college_name || '',
       degree: row.degree || '',
       stream: row.stream || '',
@@ -66,7 +69,7 @@ export default function CandidateErrorRow({
   if (editing) {
     return (
       <tr>
-        <td colSpan={14} style={{ background: 'var(--accent-soft)' }}>
+        <td colSpan={15} style={{ background: 'var(--accent-soft)' }}>
           <div className="box-label" style={{ marginBottom: 8 }}>
             Editing row {row.upload_row_number ?? row.candidate_id}
           </div>
@@ -108,6 +111,7 @@ export default function CandidateErrorRow({
       <td className={cell('Email')}>{row.email || '(missing)'}</td>
       <td className={cell('Mobile')}>{row.phone || '—'}</td>
       <td className={cell('Aadhaar Last 4 Digits')}>{row.aadhaar_last4 || '(missing)'}</td>
+      <td className={cell('Date of Birth')}>{row.date_of_birth ? formatDateDMY(row.date_of_birth) : '(missing)'}</td>
       <td className={cell('College Name')}>{row.college_name || '(missing)'}</td>
       <td className={cell('Degree')}>{row.degree || '—'}</td>
       <td className={cell('Stream')}>{row.stream || '—'}</td>

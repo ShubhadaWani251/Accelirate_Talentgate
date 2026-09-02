@@ -2,9 +2,9 @@
 
 The upload-review screen's History button exists so a TA can see what happened to a candidate
 *before* this upload - so history deliberately spans two records: the candidate row being
-reviewed, plus whichever historical candidate row the Aadhaar duplicate check matched. Each
-event carries the batch it belongs to, so a TA can tell "this attempt was 5 months ago in
-BATCH-0098" from "this row was uploaded today".
+reviewed, plus whichever historical candidate row the CURRENT (most recent) Aadhaar+DOB
+duplicate check matched. Each event carries the batch it belongs to, so a TA can tell "this
+attempt was 5 months ago in BATCH-0098" from "this row was uploaded today".
 """
 
 from api.models import AuditLog, Candidate, ExamAttempt, Invitation
@@ -72,19 +72,28 @@ def _events_for_record(candidate):
 
 def build_candidate_history(candidate):
     """Chronological events for this candidate plus any historical record matched by the
-    Aadhaar duplicate check. Returns oldest-first, which is how the wireframe's History
-    modal reads (Uploaded -> Invite Sent -> Completed).
+    CURRENT (most recent) duplicate check. Returns oldest-first, which is how the wireframe's
+    History modal reads (Uploaded -> Invite Sent -> Completed).
+
+    Only the LATEST DuplicateCheck counts, not every one ever run for this row - a row can be
+    edited (Aadhaar/DOB corrected on the Review step) after an earlier check matched it to
+    someone, and run_duplicate_check always records a NEW check rather than updating the old
+    one, so old rows accumulate. Following every one of them would keep showing a match the
+    correction has since disproven - inconsistent with the duplicate-status pill on the same
+    screen, which already only ever shows the latest verdict (see CandidateStagingSerializer.
+    _latest_check). Same "pick the max by checked_at" pattern here, so History and the pill can
+    never disagree.
     """
     records = [candidate]
 
-    matched_ids = {
-        check.existing_candidate_id
-        for check in candidate.duplicate_checks.all()
-        if check.existing_candidate_id and check.existing_candidate_id != candidate.candidate_id
-    }
-    if matched_ids:
+    latest_check = max(
+        candidate.duplicate_checks.all(), key=lambda check: check.checked_at, default=None,
+    )
+    if (latest_check and latest_check.existing_candidate_id
+            and latest_check.existing_candidate_id != candidate.candidate_id):
         records.extend(
-            Candidate.objects.select_related('batch').filter(candidate_id__in=matched_ids)
+            Candidate.objects.select_related('batch')
+            .filter(candidate_id=latest_check.existing_candidate_id)
         )
 
     events = []

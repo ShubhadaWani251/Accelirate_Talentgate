@@ -1,5 +1,6 @@
-"""One CandidateProfile per real person (by Aadhaar last 4 + name), aggregating that person's
-Candidate rows across every batch they've appeared in - see api/services/candidate_profile.py.
+"""One CandidateProfile per real person (by Aadhaar last 4 + date of birth), aggregating that
+person's Candidate rows across every batch they've appeared in - see
+api/services/candidate_profile.py.
 
 Covers: profile creation/reuse on upload and on inline row edit ("recent entry wins"), the All
 Candidates listing collapsing to one row per profile while a batch-scoped listing still shows
@@ -7,6 +8,7 @@ every row, and the candidate detail page's "other batches" history.
 """
 
 import io
+from datetime import date
 
 from openpyxl import Workbook
 
@@ -14,12 +16,15 @@ from api.models import Batch, CandidateProfile
 from api.services.candidate_profile import link_profile
 from api.services.excel_upload import stage_candidates_from_workbook
 
+DOB = date(1999, 5, 20)
+DOB_TEXT = '20/05/1999'
+
 
 def _workbook_with_row(*row):
     wb = Workbook()
     ws = wb.active
-    ws.append(['Name', 'Email', 'Mobile', 'Aadhaar Last 4 Digits', 'College Name', 'Degree',
-              'Stream', 'Percentage', 'Passing Out Year', 'Location'])
+    ws.append(['Name', 'Email', 'Mobile', 'Aadhaar Last 4 Digits', 'Date of Birth (DD/MM/YYYY)',
+              'College Name', 'Degree', 'Stream', 'Percentage', 'Passing Out Year', 'Location'])
     ws.append(list(row))
     buf = io.BytesIO()
     wb.save(buf)
@@ -30,8 +35,8 @@ def _workbook_with_row(*row):
 class TestProfileCreatedOnUpload:
     def test_first_upload_of_an_identity_creates_a_profile(self, ta_user, make_batch):
         batch = make_batch(ta_user, status=Batch.Status.DRAFT)
-        buf = _workbook_with_row('Asha Rao', 'asha@example.test', '9876543210',
-                                 '5678', 'Test College', 'BE', 'CS', '75', '2025', 'Pune')
+        buf = _workbook_with_row('Asha Rao', 'asha@example.test', '9876543210', '5678', DOB_TEXT,
+                                 'Test College', 'BE', 'CS', '75', '2025', 'Pune')
 
         created, *_ = stage_candidates_from_workbook(batch, buf, ta_user)
 
@@ -39,19 +44,21 @@ class TestProfileCreatedOnUpload:
         candidate = created[0]
         assert candidate.profile_id is not None
         assert candidate.profile.college_name == 'Test College'
+        assert candidate.profile.date_of_birth == DOB
 
     def test_a_later_batch_upload_of_the_same_identity_attaches_to_the_same_profile(
         self, ta_user, make_batch,
     ):
         first_batch = make_batch(ta_user, status=Batch.Status.DRAFT)
-        first_buf = _workbook_with_row('Asha Rao', 'asha@example.test', '9876543210',
-                                       '5678', 'Old College', 'BE', 'CS', '70', '2024', 'Pune')
+        first_buf = _workbook_with_row('Asha Rao', 'asha@example.test', '9876543210', '5678',
+                                       DOB_TEXT, 'Old College', 'BE', 'CS', '70', '2024', 'Pune')
         first_created, *_ = stage_candidates_from_workbook(first_batch, first_buf, ta_user)
         profile_id = first_created[0].profile_id
 
         second_batch = make_batch(ta_user, status=Batch.Status.DRAFT)
-        second_buf = _workbook_with_row('Asha Rao', 'asha.new@example.test', '9876543210',
-                                        '5678', 'New College', 'ME', 'IT', '85', '2025', 'Mumbai')
+        # Different name, same Aadhaar+DOB - name plays no part in the identity any more.
+        second_buf = _workbook_with_row('A Rau', 'asha.new@example.test', '9876543210', '5678',
+                                        DOB_TEXT, 'New College', 'ME', 'IT', '85', '2025', 'Mumbai')
         second_created, *_ = stage_candidates_from_workbook(second_batch, second_buf, ta_user)
 
         assert second_created[0].profile_id == profile_id
@@ -63,8 +70,18 @@ class TestProfileCreatedOnUpload:
 
     def test_a_row_with_no_aadhaar_never_gets_a_profile(self, ta_user, make_batch):
         batch = make_batch(ta_user, status=Batch.Status.DRAFT)
-        buf = _workbook_with_row('No Aadhaar', 'noaadhaar@example.test', '9876543210',
-                                 '', 'Test College', 'BE', 'CS', '75', '2025', 'Pune')
+        buf = _workbook_with_row('No Aadhaar', 'noaadhaar@example.test', '9876543210', '',
+                                 DOB_TEXT, 'Test College', 'BE', 'CS', '75', '2025', 'Pune')
+
+        created, *_ = stage_candidates_from_workbook(batch, buf, ta_user)
+
+        assert len(created) == 1
+        assert created[0].profile_id is None
+
+    def test_a_row_with_no_dob_never_gets_a_profile(self, ta_user, make_batch):
+        batch = make_batch(ta_user, status=Batch.Status.DRAFT)
+        buf = _workbook_with_row('No Dob', 'nodob@example.test', '9876543210', '5678', '',
+                                 'Test College', 'BE', 'CS', '75', '2025', 'Pune')
 
         created, *_ = stage_candidates_from_workbook(batch, buf, ta_user)
 
@@ -77,8 +94,8 @@ class TestProfileUpdatedOnRowEdit:
         self, ta_user, client_for, make_batch, make_candidate,
     ):
         batch = make_batch(ta_user, status=Batch.Status.DRAFT)
-        candidate = make_candidate(batch, ta_user, aadhaar_last4='5678', first_name='Asha',
-                                   last_name='Rao', college_name='Old College')
+        candidate = make_candidate(batch, ta_user, aadhaar_last4='5678', date_of_birth=DOB,
+                                   first_name='Asha', last_name='Rao', college_name='Old College')
         link_profile(candidate)
         profile_id = candidate.profile_id
 
@@ -98,11 +115,11 @@ class TestAllCandidatesListingDedupesByProfile:
     ):
         older_batch = make_batch(ta_user, batch_name='Older Batch')
         newer_batch = make_batch(ta_user, batch_name='Newer Batch')
-        older = make_candidate(older_batch, ta_user, aadhaar_last4='5678', first_name='Asha',
-                               last_name='Rao')
+        older = make_candidate(older_batch, ta_user, aadhaar_last4='5678', date_of_birth=DOB,
+                               first_name='Asha', last_name='Rao')
         link_profile(older)
-        newer = make_candidate(newer_batch, ta_user, aadhaar_last4='5678', first_name='Asha',
-                               last_name='Rao')
+        newer = make_candidate(newer_batch, ta_user, aadhaar_last4='5678', date_of_birth=DOB,
+                               first_name='Asha', last_name='Rao')
         link_profile(newer)
 
         response = client_for(ta_user).get('/api/candidates/?page_size=200')
@@ -117,11 +134,11 @@ class TestAllCandidatesListingDedupesByProfile:
     ):
         older_batch = make_batch(ta_user, batch_name='Older Batch')
         newer_batch = make_batch(ta_user, batch_name='Newer Batch')
-        older = make_candidate(older_batch, ta_user, aadhaar_last4='5678', first_name='Asha',
-                               last_name='Rao')
+        older = make_candidate(older_batch, ta_user, aadhaar_last4='5678', date_of_birth=DOB,
+                               first_name='Asha', last_name='Rao')
         link_profile(older)
-        newer = make_candidate(newer_batch, ta_user, aadhaar_last4='5678', first_name='Asha',
-                               last_name='Rao')
+        newer = make_candidate(newer_batch, ta_user, aadhaar_last4='5678', date_of_birth=DOB,
+                               first_name='Asha', last_name='Rao')
         link_profile(newer)
 
         response = client_for(ta_user).get(
@@ -150,11 +167,11 @@ class TestCandidateDetailOtherBatches:
     ):
         older_batch = make_batch(ta_user, batch_name='Older Batch')
         newer_batch = make_batch(ta_user, batch_name='Newer Batch')
-        older = make_candidate(older_batch, ta_user, aadhaar_last4='5678', first_name='Asha',
-                               last_name='Rao')
+        older = make_candidate(older_batch, ta_user, aadhaar_last4='5678', date_of_birth=DOB,
+                               first_name='Asha', last_name='Rao')
         link_profile(older)
-        newer = make_candidate(newer_batch, ta_user, aadhaar_last4='5678', first_name='Asha',
-                               last_name='Rao')
+        newer = make_candidate(newer_batch, ta_user, aadhaar_last4='5678', date_of_birth=DOB,
+                               first_name='Asha', last_name='Rao')
         link_profile(newer)
 
         response = client_for(ta_user).get('/api/candidates/%d/' % newer.candidate_id)

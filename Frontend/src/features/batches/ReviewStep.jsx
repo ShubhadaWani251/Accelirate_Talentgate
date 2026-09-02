@@ -4,7 +4,7 @@ import * as batchApi from '../../api/batchApi';
 import CandidateHistoryModal from '../candidates/CandidateHistoryModal';
 import EditStagingCandidateModal from './EditStagingCandidateModal';
 import { SkeletonTableRows } from '../../components/loading/Skeleton';
-import { formatDateTime } from '../../utils/datetime';
+import { formatDateDMY, formatDateTime } from '../../utils/datetime';
 import { extractErrorMessage } from '../../utils/passwordSchema';
 
 // Green = safe to invite, amber = worth a look, red = needs a decision. Same three colours
@@ -171,6 +171,7 @@ export default function ReviewStep({ batch, onFinalized, onSavedAsDraft }) {
               <th>Name</th>
               <th>Email</th>
               <th>Aadhaar Last 4</th>
+              <th>Date of Birth</th>
               <th>Status</th>
               <th>Last Attempt</th>
               <th></th>
@@ -178,9 +179,9 @@ export default function ReviewStep({ batch, onFinalized, onSavedAsDraft }) {
           </thead>
           <tbody>
             {loading ? (
-              <SkeletonTableRows rows={5} columns={8} />
+              <SkeletonTableRows rows={5} columns={9} />
             ) : candidates.length === 0 ? (
-              <tr><td colSpan={8}>No candidates on this batch.</td></tr>
+              <tr><td colSpan={9}>No candidates on this batch.</td></tr>
             ) : (
               candidates.map((c) => (
                 <tr key={c.candidate_id}>
@@ -192,6 +193,7 @@ export default function ReviewStep({ batch, onFinalized, onSavedAsDraft }) {
                   <td>{c.full_name}</td>
                   <td>{c.email}</td>
                   <td>{c.aadhaar_last4}</td>
+                  <td>{formatDateDMY(c.date_of_birth)}</td>
                   <td>
                     <span className={`pill ${DUPLICATE_PILL[c.duplicate_status] || 'gray'}`}>
                       {c.duplicate_status_display || 'Not Checked'}

@@ -42,8 +42,8 @@ class TestClampHelper:
 def _workbook_with_row(*row):
     wb = Workbook()
     ws = wb.active
-    ws.append(['Name', 'Email', 'Mobile', 'Aadhaar Last 4 Digits', 'College Name', 'Degree',
-              'Stream', 'Percentage', 'Passing Out Year', 'Location'])
+    ws.append(['Name', 'Email', 'Mobile', 'Aadhaar Last 4 Digits', 'Date of Birth (DD/MM/YYYY)',
+              'College Name', 'Degree', 'Stream', 'Percentage', 'Passing Out Year', 'Location'])
     ws.append(list(row))
     buf = io.BytesIO()
     wb.save(buf)
@@ -70,7 +70,8 @@ class TestBulkUploadSurvivesAFullAadhaarNumber:
     def test_a_row_with_a_full_twelve_digit_number_does_not_crash(self, ta_user, make_batch):
         batch = make_batch(ta_user, status=Batch.Status.DRAFT)
         buf = _workbook_with_row('Asha Rao', 'asha@example.test', '9876543210',
-                                 '198765432109', 'Test College', 'BE', 'CS', '75', '2025', 'Pune')
+                                 '198765432109', '15/06/2001',
+                                 'Test College', 'BE', 'CS', '75', '2025', 'Pune')
 
         with transaction.atomic():
             created, missing, staged, skipped = stage_candidates_from_workbook(batch, buf, ta_user)
@@ -85,11 +86,11 @@ class TestBulkUploadSurvivesAFullAadhaarNumber:
         batch = make_batch(ta_user, status=Batch.Status.DRAFT)
         wb = Workbook()
         ws = wb.active
-        ws.append(['Name', 'Email', 'Mobile', 'Aadhaar Last 4 Digits', 'College Name', 'Degree',
-                  'Stream', 'Percentage', 'Passing Out Year', 'Location'])
-        ws.append(['Asha Rao', 'asha@example.test', '9876543210', '198765432109',
+        ws.append(['Name', 'Email', 'Mobile', 'Aadhaar Last 4 Digits', 'Date of Birth (DD/MM/YYYY)',
+                  'College Name', 'Degree', 'Stream', 'Percentage', 'Passing Out Year', 'Location'])
+        ws.append(['Asha Rao', 'asha@example.test', '9876543210', '198765432109', '15/06/2001',
                   'Test College', 'BE', 'CS', '75', '2025', 'Pune'])
-        ws.append(['Vikram Shah', 'vikram@example.test', '9876543211', '5678',
+        ws.append(['Vikram Shah', 'vikram@example.test', '9876543211', '5678', '02/11/2000',
                   'Test College', 'BE', 'CS', '80', '2025', 'Pune'])
         buf = io.BytesIO()
         wb.save(buf)
@@ -108,7 +109,8 @@ class TestBulkUploadSurvivesAFullAadhaarNumber:
         from api.services.candidate_validation import revalidate_batch_candidates
         batch = make_batch(ta_user, status=Batch.Status.DRAFT)
         buf = _workbook_with_row('Asha Rao', 'asha@example.test', '9876543210',
-                                 '198765432109', 'Test College', 'BE', 'CS', '75', '2025', 'Pune')
+                                 '198765432109', '15/06/2001',
+                                 'Test College', 'BE', 'CS', '75', '2025', 'Pune')
 
         with transaction.atomic():
             stage_candidates_from_workbook(batch, buf, ta_user)

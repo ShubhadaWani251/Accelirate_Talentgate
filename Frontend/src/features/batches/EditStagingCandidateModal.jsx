@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import * as batchApi from '../../api/batchApi';
 import { extractErrorMessage } from '../../utils/passwordSchema';
 import { ButtonSpinner } from '../../components/loading/Spinner';
+import { isoToDMY } from '../../utils/datetime';
 
 // Same editable-field set and "blank Aadhaar box means leave it alone" convention as
 // CandidateErrorRow.jsx's inline edit form (Validate step) - this is the equivalent for the
@@ -16,6 +17,7 @@ export default function EditStagingCandidateModal({ batch, candidate, onClose, o
     email: candidate.email || '',
     phone: candidate.phone || '',
     aadhaar_last4: '',
+    date_of_birth: isoToDMY(candidate.date_of_birth),
     college_name: candidate.college_name || '',
     degree: candidate.degree || '',
     stream: candidate.stream || '',
@@ -68,6 +70,11 @@ export default function EditStagingCandidateModal({ batch, candidate, onClose, o
             <input value={form.aadhaar_last4} placeholder="Leave blank to keep the current value"
                    onChange={(e) => set('aadhaar_last4', e.target.value)} />
           </div>
+        </div>
+        <div className="field">
+          <label>Date of Birth</label>
+          <input value={form.date_of_birth} placeholder="DD/MM/YYYY"
+                 onChange={(e) => set('date_of_birth', e.target.value)} />
         </div>
         <div className="field"><label>College Name</label><input value={form.college_name} onChange={(e) => set('college_name', e.target.value)} /></div>
         <div className="grid-2">

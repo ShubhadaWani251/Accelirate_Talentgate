@@ -200,6 +200,7 @@ class CandidateStagingSerializer(serializers.ModelSerializer):
         model = Candidate
         fields = [
             'candidate_id', 'upload_row_number', 'full_name', 'email', 'aadhaar_last4',
+            'date_of_birth',
             'validation_status', 'validation_status_display',
             'duplicate_status', 'duplicate_status_display', 'last_attempt',
             'errors', 'error_fields',
