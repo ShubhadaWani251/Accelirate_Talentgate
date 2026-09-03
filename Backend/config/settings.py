@@ -119,7 +119,20 @@ DATABASES = {
             # without TLS configured needs DB_SSLMODE=disable set explicitly in .env.
             'sslmode': os.environ.get('DB_SSLMODE', 'require'),
         },
-        'CONN_MAX_AGE': int(os.environ.get('DB_CONN_MAX_AGE', 0)),
+        # A nonzero default: with 0 (Django's own default) every single request opens a brand
+        # new TLS connection to a remote Postgres (sslmode=require above) and tears it down
+        # again, which is pure added latency under load for no benefit - gunicorn's threads
+        # already bound how many connections one worker can hold open at once, so reusing them
+        # for a minute doesn't risk accumulating unbounded idle connections. 60s is the commonly
+        # recommended starting point for exactly this deployment shape (a handful of app-server
+        # processes against one managed Postgres instance) - long enough to amortize the
+        # handshake across a request burst, short enough that a recycled/idle worker's
+        # connections age out quickly rather than piling up. Revisit this (towards a real pooler
+        # like PgBouncer, which Azure Postgres Flexible Server can front for you) before ever
+        # running more than one App Service instance - CONN_MAX_AGE keeps connections open per
+        # (worker x thread), and that count multiplies by instance count under autoscale, against
+        # a Postgres server whose own max_connections doesn't grow with it.
+        'CONN_MAX_AGE': int(os.environ.get('DB_CONN_MAX_AGE', 60)),
     }
 }
 # Password validation

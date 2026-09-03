@@ -27,7 +27,7 @@ from api.services.image_validation import InvalidImageUpload, validate_identity_
 from api.services.exam_session import TerminationReason
 from api.services.question_selection import SECTION_LABELS, SECTION_ORDER, InsufficientQuestionsError
 from api.services.tokens import issue_attempt_token
-from api.utils.net import get_client_ip, ratelimit_ip_key
+from api.utils.net import get_client_ip, ratelimit_attempt_key, ratelimit_token_key
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +85,7 @@ def _result_payload(attempt):
     }
 
 
-@method_decorator(ratelimit(key=ratelimit_ip_key, rate='10/m', method='GET', block=False), name='get')
+@method_decorator(ratelimit(key=ratelimit_token_key, rate='10/m', method='GET', block=False), name='get')
 class ExamTokenLandingView(APIView):
     """GET /api/exam/token/<token>/ - screen c-verify's initial load. Never reveals the
     candidate's identity off a bare token; that only happens once the email is confirmed
@@ -153,7 +153,7 @@ class ExamTokenLandingView(APIView):
         return Response({'reason': 'ok', 'resume': True})
 
 
-@method_decorator(ratelimit(key=ratelimit_ip_key, rate='10/m', method='POST', block=False), name='post')
+@method_decorator(ratelimit(key=ratelimit_token_key, rate='10/m', method='POST', block=False), name='post')
 class ExamVerifyEmailView(APIView):
     """POST /api/exam/token/<token>/verify-email/ - screen c-verify's "Continue". Matching
     email proceeds to Instructions (fresh start) or straight back into an in-progress attempt
@@ -227,7 +227,7 @@ class ExamVerifyEmailView(APIView):
         return Response({'resume': False, **_instructions_payload(invitation)})
 
 
-@method_decorator(ratelimit(key=ratelimit_ip_key, rate='5/m', method='POST', block=False), name='post')
+@method_decorator(ratelimit(key=ratelimit_token_key, rate='5/m', method='POST', block=False), name='post')
 class ExamIdentityCaptureView(APIView):
     """POST /api/exam/token/<token>/identity/ - screen c-idverify. Creates the ExamAttempt (or
     fetches the one already created by a retried submit) and its randomized question set, then
@@ -386,11 +386,16 @@ class ExamAnswerView(APIView):
         })
 
 
-@method_decorator(ratelimit(key=ratelimit_ip_key, rate='30/m', method='POST', block=False), name='post')
+@method_decorator(ratelimit(key=ratelimit_attempt_key, rate='30/m', method='POST', block=False), name='post')
 class ExamRecordingChunkView(APIView):
     """POST /api/exam/recording/chunk/ - raw binary body, one ~10s MediaRecorder chunk,
     appended to the attempt's Azure append-blob. Body is read via request.body (Django's raw
     bytes) rather than any DRF parser, since the content isn't JSON/form/multipart.
+
+    Keyed per-attempt rather than per-IP (see ratelimit_attempt_key): many candidates recording
+    concurrently from one physical test center share an IP, and each one legitimately uploads a
+    chunk every ~10s for the whole exam - an IP-wide cap collapses all of them into one shared
+    budget instead of bounding any single attempt's own upload rate.
     """
     authentication_classes = [CandidateAttemptAuthentication]
     permission_classes = [IsAuthenticated]
