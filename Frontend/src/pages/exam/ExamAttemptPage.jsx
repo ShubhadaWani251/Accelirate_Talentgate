@@ -25,6 +25,10 @@ import ExamTerminated from './ExamTerminated';
 
 const OPTIONS = ['A', 'B', 'C', 'D'];
 const OPTION_LABEL_KEY = { A: 'option_a', B: 'option_b', C: 'option_c', D: 'option_d' };
+// Must match WARNING_RESPONSE_SECONDS in Backend/api/services/exam_session.py - the warning
+// modal's own copy (warning.detail, from the server) states this same number, so the two
+// cannot drift apart without the countdown contradicting what the candidate was just told.
+const WARNING_RESPONSE_SECONDS = 10;
 
 function flattenAnswers(sections) {
   const answers = {};
@@ -62,10 +66,13 @@ export default function ExamAttemptPage() {
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
   const [terminationMessage, setTerminationMessage] = useState('');
-  // The one warning a candidate gets for leaving the exam window: { detail, used, allowed }, or
+  // A warning the candidate gets for leaving the exam window: { detail, used, allowed }, or
   // null. Purely for display - the authoritative count lives on the server, so this is not what
-  // stops a second warning being issued.
+  // stops a further warning being issued.
   const [warning, setWarning] = useState(null);
+  // Counts down while a warning is showing - see the effect below. Purely for display; the
+  // actual deadline is the effect's own setTimeout, not this number reaching 0.
+  const [warningSecondsLeft, setWarningSecondsLeft] = useState(WARNING_RESPONSE_SECONDS);
   // Re-arm counters for the guards' once-only latches. Two of them, because the window guards
   // and the full-screen guard have to come back at different moments - see onViolation and
   // acknowledgeWarning.
@@ -234,6 +241,42 @@ export default function ExamAttemptPage() {
     // Re-armed last, once full-screen is actually back.
     setFullscreenGuardGen((g) => g + 1);
   }, []);
+
+  // A warning sitting on screen unacknowledged is its own risk - the candidate could be reading
+  // notes or talking to someone for as long as it stays open, all while the exam timer keeps
+  // running. Keyed on `warning` itself (not violationRef) so acknowledgeWarning's setWarning(null)
+  // is what stops this - same shape as the 30-second full-screen grace period below, one clock
+  // per gate. Ending here reports a distinct reason (warning_not_acknowledged) rather than
+  // replaying whatever the original violation was, since the candidate's failure now is not
+  // responding, not the original trigger.
+  useEffect(() => {
+    if (!warning) return undefined;
+    setWarningSecondsLeft(WARNING_RESPONSE_SECONDS);
+    const interval = setInterval(() => {
+      setWarningSecondsLeft((s) => Math.max(0, s - 1));
+    }, 1000);
+    const timeout = setTimeout(() => {
+      examApi
+        .reportViolation('warning_not_acknowledged')
+        .then((data) => {
+          setWarning(null);
+          setTerminationMessage(data.detail);
+          setView('terminated');
+        })
+        .catch(() => {
+          setWarning(null);
+          setTerminationMessage(
+            'Your assessment was ended and could not be reported to the server. '
+            + 'Please contact the Staffing team.'
+          );
+          setView('terminated');
+        });
+    }, WARNING_RESPONSE_SECONDS * 1000);
+    return () => {
+      clearInterval(interval);
+      clearTimeout(timeout);
+    };
+  }, [warning]);
 
   const examActive = view === 'exam' && fullscreenReady && begun;
 
@@ -762,6 +805,11 @@ export default function ExamAttemptPage() {
             <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>
               Warning {warning.used} of {warning.allowed}. This has been recorded and is visible
               to the Staffing team. Your timer has continued to run.
+            </p>
+            <p style={{ fontWeight: 600,
+                       color: warningSecondsLeft <= 3 ? 'var(--brand-red)' : undefined }}>
+              Return within {warningSecondsLeft} second{warningSecondsLeft === 1 ? '' : 's'}, or
+              your assessment will be ended automatically.
             </p>
             <div className="btn-row">
               <button className="btn primary block" type="button" onClick={acknowledgeWarning}>

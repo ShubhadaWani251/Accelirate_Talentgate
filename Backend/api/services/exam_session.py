@@ -65,6 +65,7 @@ class TerminationReason:
     SYSTEM_ISSUE = 'system_issue'
     LINK_REOPENED = 'link_reopened'
     FULLSCREEN_NOT_ENTERED = 'fullscreen_not_entered'
+    WARNING_NOT_ACKNOWLEDGED = 'warning_not_acknowledged'
 
 
 TERMINATION_MESSAGES = {
@@ -94,6 +95,9 @@ TERMINATION_MESSAGES = {
     TerminationReason.FULLSCREEN_NOT_ENTERED:
         'Your assessment was ended because full-screen mode was not entered within 30 seconds '
         'of reaching this step.',
+    TerminationReason.WARNING_NOT_ACKNOWLEDGED:
+        'Your assessment was ended because you did not return to the assessment within 10 '
+        'seconds of a warning being shown.',
 }
 
 # Short staff-facing labels for the same codes, used wherever a TA/Admin reads a candidate's
@@ -110,6 +114,7 @@ TERMINATION_LABELS = {
     TerminationReason.SYSTEM_ISSUE: 'Technical issue - camera/microphone lost',
     TerminationReason.LINK_REOPENED: 'Assessment link reopened after starting (closed tab/lost session)',
     TerminationReason.FULLSCREEN_NOT_ENTERED: 'Did not enter full-screen within 30 seconds',
+    TerminationReason.WARNING_NOT_ACKNOWLEDGED: 'Did not return within 10 seconds of a warning',
 }
 
 
@@ -136,8 +141,8 @@ def is_violation_reason(reason_code):
 
 # ---------------------------------------------------------------- warning tier
 #
-# Leaving the exam window gets ONE warning before the attempt is ended. Only this family of
-# reasons is warnable, and deliberately so:
+# Leaving the exam window gets up to MAX_WARNINGS warnings before the attempt is ended. Only
+# this family of reasons is warnable, and deliberately so:
 #
 #   - They can genuinely happen by accident. A notification stealing focus, a stray Alt+Tab, a
 #     misplaced Esc - none of those is proof of cheating, and termination is irreversible.
@@ -166,9 +171,16 @@ WARNABLE_REASONS = {
     TerminationReason.CAMERA_OFF,
 }
 
-# One warning, then out. Counted server-side (see record_violation) rather than in the browser,
-# so reloading the page - or clearing storage - cannot hand out a fresh warning.
-MAX_WARNINGS = 1
+# Three warnings, then out on the fourth. Counted server-side (see record_violation) rather than
+# in the browser, so reloading the page - or clearing storage - cannot hand out a fresh warning.
+MAX_WARNINGS = 3
+
+# A warning that just sits there unacknowledged is functionally the same risk as ignoring it
+# outright - the candidate could be reading notes, talking to someone, or looking something up
+# for as long as the modal stays open, all while the exam timer keeps running (see
+# ExamAttemptPage's warning modal). Giving that its own short, hard deadline closes the gap
+# without changing what the three real warnings above are for.
+WARNING_RESPONSE_SECONDS = 10
 
 _WARNING_CAUSES = {
     TerminationReason.TAB_SWITCH:
@@ -194,20 +206,35 @@ _WARNING_REMEDIES = {
 _DEFAULT_WARNING_REMEDY = 'Stay in the assessment window until you submit'
 
 
-def warning_message(reason_code):
+def warning_message(reason_code, warning_number, max_warnings):
     """The candidate-facing warning text - names the specific cause, what to do, then the
     consequence.
 
     Same principle as TERMINATION_MESSAGES: never one generic "you did something wrong" for
     every cause. The consequence is stated in full because this is the only notice they get.
+
+    `warning_number` is this warning's own 1-based position (the value record_violation just
+    wrote); `max_warnings` is MAX_WARNINGS, passed in rather than read from the module global so
+    a test can exercise any combination without monkeypatching module state.
     """
     cause = _WARNING_CAUSES.get(reason_code, 'the assessment window was left')
     remedy = _WARNING_REMEDIES.get(reason_code, _DEFAULT_WARNING_REMEDY)
+    remaining = max_warnings - warning_number
+    if remaining > 0:
+        consequence = (
+            f'You have {remaining} warning{"s" if remaining != 1 else ""} left after this one - '
+            f'a further violation will end your assessment immediately.'
+        )
+    else:
+        consequence = (
+            'This was your final warning - the next violation will end your assessment '
+            'immediately.'
+        )
     return (
-        f'Warning: {cause}. '
-        f'This is your only warning. {remedy} - if this '
-        f'happens again your assessment will be ended immediately, your answers will be '
-        f'submitted as they are, and it cannot be resumed.'
+        f'Warning {warning_number} of {max_warnings}: {cause}. {remedy}. {consequence} '
+        f'You must also return to the assessment within {WARNING_RESPONSE_SECONDS} seconds of '
+        f'this warning, or it will be ended automatically - your answers submitted as they '
+        f'stand, and it cannot be resumed.'
     )
 
 
@@ -268,7 +295,7 @@ def record_violation(attempt, reason_code):
             return {
                 'action': 'warned',
                 'reason': reason_code,
-                'detail': warning_message(reason_code),
+                'detail': warning_message(reason_code, used + 1, MAX_WARNINGS),
                 'warnings_used': used + 1,
                 'warnings_allowed': MAX_WARNINGS,
             }

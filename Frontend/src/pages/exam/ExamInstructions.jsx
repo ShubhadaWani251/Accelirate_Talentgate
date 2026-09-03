@@ -50,11 +50,11 @@ export default function ExamInstructions() {
               <li>Your camera and microphone stay on for identity verification and continuous proctoring throughout the assessment. <b>Switching your camera off, or covering it, is treated the same as leaving the window</b> - one warning, then the attempt ends</li>
               <li>You're now in full-screen mode for the rest of this assessment</li>
               <li>Do not switch browser tabs, minimize, exit full-screen, or open other applications once the exam begins</li>
-              <li>Close other applications and turn off notifications before you begin. If a system popup or notification (email, chat, a call, an OS update prompt) appears during the assessment, <b>do not click, interact with, or dismiss it</b> — leave it alone and stay on the assessment window; interacting with it can end your attempt the same way switching windows does</li>
+              <li>Close other applications and turn off notifications before you begin — on Windows, turn on <b>Focus Assist</b> (search "Focus assist" in the Start menu, or Settings → System → Focus assist); on a Mac, turn on <b>Do Not Disturb / Focus</b> from Control Center. If a system popup or notification (email, chat, a call, an OS update prompt) still appears during the assessment, <b>do not click, interact with, or dismiss it</b> — leave it alone and stay on the assessment window; interacting with it can end your attempt the same way switching windows does</li>
               {/* Stated precisely, because a candidate who is told "one warning" for everything
                   would reasonably feel misled when a Print Screen ends the attempt outright.
                   The split is defined server-side in exam_session.WARNABLE_REASONS. */}
-              <li><b>You get one warning</b> the first time you leave the assessment window. The second time, your attempt ends immediately and your answers are submitted as they are</li>
+              <li><b>You get up to three warnings</b> for leaving the assessment window. After your third warning, the next occurrence ends your attempt immediately and your answers are submitted as they are. Each warning must also be acknowledged within <b>10 seconds</b> — if you do not click back into the assessment in time, your attempt ends automatically even if you still have warnings left</li>
               <li>Keyboard shortcuts like Print Screen, F12 or Ctrl+U end your attempt <b>immediately, with no warning</b></li>
               <li>Every such event is logged and shown to the Staffing team, with the specific reason shown to you too</li>
               {/* Stated explicitly because candidates routinely assume the opposite and leave
