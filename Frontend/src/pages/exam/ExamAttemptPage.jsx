@@ -103,6 +103,14 @@ export default function ExamAttemptPage() {
   // yet) - a plain network blip stays silent and just retries, per the existing catch below.
   const [beginError, setBeginError] = useState(null);
   const beginRequestedRef = useRef(false);
+  // A question to jump to once its section becomes active - set by scrollToQuestion when the
+  // target lives in a DIFFERENT section than the one currently rendered, since that question's
+  // .q-card doesn't exist in the DOM yet to scroll to until after the section switch re-renders.
+  const pendingScrollIdRef = useRef(null);
+  // The scrollable question column itself - goToSection resets its scroll position, since
+  // .exam-main is the only element that actually scrolls in this layout (see exam-shell/
+  // exam-body/exam-main in theme.css).
+  const mainRef = useRef(null);
 
   useEffect(() => {
     if (sessionState) {
@@ -417,6 +425,67 @@ export default function ExamAttemptPage() {
     [markedForReview]
   );
 
+  // Marked-for-review questions, grouped by their own section rather than one flat list -
+  // question numbering restarts at 1 per section everywhere else on this page (each .q-card
+  // shows "Question 1", "Question 2", ... within its own section), so a chip from Verbal and a
+  // chip from Logical can share the same number. Grouping keeps each one unambiguous instead of
+  // inventing a separate exam-wide numbering scheme just for this list.
+  const markedBySection = useMemo(() => {
+    if (!sessionState) return [];
+    return sessionState.sections
+      .map((section, sectionIndex) => ({
+        section,
+        sectionIndex,
+        items: section.questions
+          .map((q, i) => ({ questionId: q.question_id, num: i + 1 }))
+          .filter(({ questionId }) => markedForReview[questionId]),
+      }))
+      .filter((group) => group.items.length > 0);
+  }, [sessionState, markedForReview]);
+
+  // Scrolls a question's card into view, switching to its section first if it isn't the one
+  // currently rendered - see pendingScrollIdRef above for why that has to happen in two steps.
+  const scrollToQuestion = useCallback((questionId, sectionIndex) => {
+    if (sectionIndex !== undefined && sectionIndex !== activeSectionIndex) {
+      pendingScrollIdRef.current = questionId;
+      setActiveSectionIndex(sectionIndex);
+      return;
+    }
+    document.getElementById(`exam-q-${questionId}`)
+      ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [activeSectionIndex]);
+
+  // Previous/Next at the end of a section, for moving through the paper in order without
+  // reaching back up to the sidebar. Unlike scrollToQuestion above (jumping to one specific
+  // question, wherever it happens to sit on the new page), this always lands the candidate at
+  // the TOP of the new section - they just finished reading the last one end to end, so picking
+  // up mid-page in the next one would be disorienting rather than "smooth".
+  const goToSection = useCallback((index) => {
+    if (index < 0 || index >= sessionState.sections.length) return;
+    setActiveSectionIndex(index);
+    mainRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [sessionState]);
+
+  useEffect(() => {
+    const questionId = pendingScrollIdRef.current;
+    if (!questionId) return;
+    pendingScrollIdRef.current = null;
+    // The new section's questions render on this same pass; wait a frame so the card actually
+    // exists before asking the browser to scroll to it.
+    requestAnimationFrame(() => {
+      document.getElementById(`exam-q-${questionId}`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }, [activeSectionIndex]);
+
+  // "Review Marked Questions" on the submit-confirmation dialog - jumps straight to the first
+  // one instead of just closing the dialog and leaving the candidate to hunt for it themselves.
+  function onReviewMarkedQuestions() {
+    setShowConfirm(false);
+    const firstGroup = markedBySection[0];
+    if (firstGroup) scrollToQuestion(firstGroup.items[0].questionId, firstGroup.sectionIndex);
+  }
+
   async function onConfirmSubmit() {
     setShowConfirm(false);
     await finishExam();
@@ -527,112 +596,158 @@ export default function ExamAttemptPage() {
   const activeSection = sections[activeSectionIndex] || sections[0];
 
   return (
-    <div className="app-shell">
-      {/* Genuinely stuck to the top now, not just "fixed-feeling" - BrandHeader and the
-          Answered/Remaining/timer bar stack inside one sticky wrapper so they scroll together
-          as a single unit while only the questions beneath move. The timer in particular has to
-          stay visible without scrolling back up - it's the one thing that actually governs the
-          exam (see remaining_seconds; a tampered client clock changes nothing), so losing sight
-          of it while reading a question is the one thing worth preventing here. */}
-      <div style={{ position: 'sticky', top: 0, zIndex: 20 }}>
+    <div className="app-shell exam-shell">
+      {/* Truly fixed chrome, not just "sticky while scrolling": the outer shell locks to the
+          viewport height (.exam-shell) so nothing outside the question column ever scrolls at
+          all. The timer and Submit both live here because both matter regardless of which
+          question is on screen - the timer is what actually governs the exam (see
+          remaining_seconds; a tampered client clock changes nothing), and Submit needs to be
+          reachable without hunting back down through however many questions remain. */}
+      <div style={{ flexShrink: 0 }}>
         <BrandHeader roleCode="candidate" />
-        <div style={{ background: '#fff', borderBottom: '1px solid #e7eaee',
-                     boxShadow: '0 1px 3px rgba(16,24,40,.06)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                       flexWrap: 'wrap', gap: 8, maxWidth: 760, margin: '0 auto',
-                       padding: '10px 16px' }}>
+        <div className="exam-topbar">
+          <div className="exam-topbar-inner">
             <h3 style={{ margin: 0 }}>Assessment</h3>
             <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-                Answered <b>{answeredCount}</b> / {totalCount} &middot; Remaining <b>{unansweredCount}</b>
-                {markedCount > 0 && <> &middot; Marked for Review <b>{markedCount}</b></>}
-              </span>
               <div className={`timer-badge${lowTime ? ' low-time' : ''}`}>⏱ {timer.formatted} remaining</div>
+              <button className="btn danger" type="button" onClick={() => setShowConfirm(true)}>
+                Submit Exam
+              </button>
             </div>
           </div>
         </div>
       </div>
-      <div style={{ flex: 1, padding: '20px 16px', maxWidth: 760, margin: '0 auto', width: '100%' }}>
-        {extraDisplay && (
-          <div className="alert error" style={{ marginBottom: 10 }}>
-            <b>More than one display detected.</b> The assessment must be taken on a single
-            screen. Disconnect the additional display immediately.
-          </div>
-        )}
 
-        {/* Stays visible for as long as the camera is off, unlike the warning modal which the
-            candidate dismisses. That matters: the guard reports once per switch-off and will not
-            nag, so without a persistent banner someone who dismissed the warning before fixing
-            the camera would have nothing left telling them the exam is still unproctored. */}
-        {cameraOff && (
-          <div className="alert error" style={{ marginBottom: 10 }}>
-            <b>Your camera is not sending video.</b> Turn it back on now - check for a privacy
-            shutter, your camera switch, or another app (Teams, Zoom) using the camera. If it
-            goes off again your assessment will be ended.
+      <div className="exam-body">
+        <aside className="exam-sidebar">
+          <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+            Answered <b style={{ color: 'var(--text)' }}>{answeredCount}</b> / {totalCount}
+            <br />
+            Remaining <b style={{ color: 'var(--text)' }}>{unansweredCount}</b>
           </div>
-        )}
 
-        {/* One page per section, switched via the same stat-card picker as admin's Question
-            Bank screen (QuestionBank.jsx) - each card doubles as both the section's identity
-            and its own progress readout, and is clickable any time (sections stay freely
-            revisitable - no lock on leaving one, no per-section timer). */}
-        <div className="grid-4" style={{ marginBottom: 14 }}>
+          {/* One page per section, switched via a picker doubling as each section's own
+              progress readout - clickable any time (sections stay freely revisitable, no lock
+              on leaving one, no per-section timer). */}
+          <div className="exam-sidebar-label">Sections</div>
           {sections.map((section, idx) => {
             const attempted = section.questions.filter((q) => answers[q.question_id]).length;
             return (
               <button
                 key={section.key}
                 type="button"
-                className={`stat-card qb-stat-card ${idx === activeSectionIndex ? 'active' : ''}`}
+                className={`exam-section-btn ${idx === activeSectionIndex ? 'active' : ''}`}
                 onClick={() => setActiveSectionIndex(idx)}
-                style={{ textAlign: 'center', cursor: 'pointer', border: 'none', width: '100%' }}
               >
-                <div className="stat-lbl" style={{ fontWeight: 600 }}>{section.label}</div>
-                <div className="stat-num">{attempted} / {section.questions.length}</div>
-                <div className="stat-lbl">Attempted</div>
+                {section.label}
+                <span className="count">{attempted}/{section.questions.length}</span>
               </button>
             );
           })}
-        </div>
 
-        <div className="section-marker">
-          {activeSection.label} ({activeSection.questions.length} question
-          {activeSection.questions.length === 1 ? '' : 's'})
-        </div>
-        {activeSection.questions.map((q, idx) => (
-          <div className="q-card" key={q.question_id}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div className="q-num">Question {idx + 1}</div>
+          <div className="exam-sidebar-label">Marked for Review{markedCount > 0 ? ` (${markedCount})` : ''}</div>
+          {markedBySection.length === 0 ? (
+            <div className="exam-review-empty">None yet - use ☆ Mark for Review on a question to flag it here.</div>
+          ) : (
+            markedBySection.map(({ section, sectionIndex, items }) => (
+              <div className="exam-review-group" key={section.key}>
+                <div className="exam-review-group-label">{section.label}</div>
+                <div className="exam-review-chips">
+                  {items.map(({ questionId, num }) => (
+                    <button
+                      key={questionId}
+                      type="button"
+                      className="exam-review-chip"
+                      title={`Jump to ${section.label} - Question ${num}`}
+                      onClick={() => scrollToQuestion(questionId, sectionIndex)}
+                    >
+                      {num}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
+        </aside>
+
+        <main className="exam-main" ref={mainRef}>
+          {extraDisplay && (
+            <div className="alert error" style={{ marginBottom: 10 }}>
+              <b>More than one display detected.</b> The assessment must be taken on a single
+              screen. Disconnect the additional display immediately.
+            </div>
+          )}
+
+          {/* Stays visible for as long as the camera is off, unlike the warning modal which the
+              candidate dismisses. That matters: the guard reports once per switch-off and will
+              not nag, so without a persistent banner someone who dismissed the warning before
+              fixing the camera would have nothing left telling them the exam is still
+              unproctored. */}
+          {cameraOff && (
+            <div className="alert error" style={{ marginBottom: 10 }}>
+              <b>Your camera is not sending video.</b> Turn it back on now - check for a privacy
+              shutter, your camera switch, or another app (Teams, Zoom) using the camera. If it
+              goes off again your assessment will be ended.
+            </div>
+          )}
+
+          <div className="section-marker">
+            {activeSection.label} ({activeSection.questions.length} question
+            {activeSection.questions.length === 1 ? '' : 's'})
+          </div>
+          {activeSection.questions.map((q, idx) => (
+            <div className="q-card" id={`exam-q-${q.question_id}`} key={q.question_id}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div className="q-num">Question {idx + 1}</div>
+                <button
+                  type="button"
+                  className={`btn small${markedForReview[q.question_id] ? ' primary' : ''}`}
+                  onClick={() => onToggleReview(q.question_id)}
+                >
+                  {markedForReview[q.question_id] ? '★ Marked for Review' : '☆ Mark for Review'}
+                </button>
+              </div>
+              <div className="q-text">{q.question_text}</div>
+              {OPTIONS.filter((opt) => q[OPTION_LABEL_KEY[opt]]).map((opt) => (
+                <label className="option-row" key={opt}>
+                  <input
+                    type="radio"
+                    name={`q-${q.question_id}`}
+                    checked={answers[q.question_id] === opt}
+                    onChange={() => onSelectOption(q.question_id, opt)}
+                  />
+                  {q[OPTION_LABEL_KEY[opt]]}
+                </label>
+              ))}
+            </div>
+          ))}
+
+          {sections.length > 1 && (
+            <div className="exam-section-nav">
               <button
+                className="btn"
                 type="button"
-                className={`btn small${markedForReview[q.question_id] ? ' primary' : ''}`}
-                onClick={() => onToggleReview(q.question_id)}
+                disabled={activeSectionIndex === 0}
+                onClick={() => goToSection(activeSectionIndex - 1)}
               >
-                {markedForReview[q.question_id] ? '★ Marked for Review' : '☆ Mark for Review'}
+                ← Previous{sections[activeSectionIndex - 1]
+                  ? `: ${sections[activeSectionIndex - 1].label}` : ''}
+              </button>
+              <button
+                className="btn primary"
+                type="button"
+                disabled={activeSectionIndex === sections.length - 1}
+                onClick={() => goToSection(activeSectionIndex + 1)}
+              >
+                Next{sections[activeSectionIndex + 1]
+                  ? `: ${sections[activeSectionIndex + 1].label}` : ''} →
               </button>
             </div>
-            <div className="q-text">{q.question_text}</div>
-            {OPTIONS.filter((opt) => q[OPTION_LABEL_KEY[opt]]).map((opt) => (
-              <label className="option-row" key={opt}>
-                <input
-                  type="radio"
-                  name={`q-${q.question_id}`}
-                  checked={answers[q.question_id] === opt}
-                  onChange={() => onSelectOption(q.question_id, opt)}
-                />
-                {q[OPTION_LABEL_KEY[opt]]}
-              </label>
-            ))}
-          </div>
-        ))}
+          )}
 
-        <div className="btn-row" style={{ margin: '18px 0' }}>
-          <button className="btn danger" type="button" onClick={() => setShowConfirm(true)}>
-            Submit Exam
-          </button>
-        </div>
+          <BrandFooter roleCode="candidate" />
+        </main>
       </div>
-      <BrandFooter roleCode="candidate" />
 
       {/* The single warning for leaving the exam window. Deliberately a blocking modal with one
           button, not a toast: dismissing it is the user gesture that lets requestFullscreen()
@@ -661,15 +776,31 @@ export default function ExamAttemptPage() {
         <div className="modal-overlay">
           <div className="modal-box">
             <h4>Submit Assessment?</h4>
-            <p>
-              {unansweredCount > 0
-                ? `${unansweredCount} of ${totalCount} questions are still unanswered. `
-                : ''}
-              {markedCount > 0 ? `${markedCount} question${markedCount === 1 ? ' is' : 's are'} `
-                + 'still marked for review. ' : ''}
-              Are you sure you want to submit the exam now? This cannot be undone and you will
-              not be able to resume.
-            </p>
+            {markedCount > 0 ? (
+              <p>
+                You still have <b>{markedCount}</b> question{markedCount === 1 ? '' : 's'} marked
+                for review{unansweredCount > 0 ? ` and ${unansweredCount} unanswered` : ''}. You
+                can go back and resolve {markedCount === 1 ? 'it' : 'them'} first, or submit the
+                exam as it stands now. This cannot be undone and you will not be able to resume.
+              </p>
+            ) : (
+              <p>
+                {unansweredCount > 0
+                  ? `${unansweredCount} of ${totalCount} questions are still unanswered. `
+                  : ''}
+                Are you sure you want to submit the exam now? This cannot be undone and you will
+                not be able to resume.
+              </p>
+            )}
+            {/* A distinct full-width action above the usual pair, not a third button crammed
+                into .btn-row - that class has no flex layout of its own at the modal's 380px
+                width, so three real button labels degrade to one per line instead of a row. */}
+            {markedCount > 0 && (
+              <button className="btn block" type="button" style={{ marginBottom: 10 }}
+                      onClick={onReviewMarkedQuestions}>
+                Go Back &amp; Review Marked Questions
+              </button>
+            )}
             <div className="btn-row">
               <button className="btn" type="button" onClick={() => setShowConfirm(false)}>
                 Cancel, Go Back

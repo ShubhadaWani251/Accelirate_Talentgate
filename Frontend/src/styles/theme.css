@@ -323,6 +323,59 @@ table.data-table tbody tr:hover td { background: var(--accent-soft); }
 .option-row:hover { background: var(--accent-soft); }
 .option-row input[type='radio'] { width: 16px; height: 16px; accent-color: var(--brand-blue); cursor: pointer; }
 
+/* Exam-taking split layout: header/timer/submit bar and the left question navigator stay in
+   place; only the question column itself scrolls. Scoped to its own classes rather than
+   changing .app-shell/#root (min-height: 100vh, lets the page grow taller than the viewport) -
+   every other page relies on that, only this one needs the viewport truly locked. */
+.exam-shell { height: 100vh; overflow: hidden; }
+.exam-topbar { background: #fff; border-bottom: 1px solid #e7eaee; box-shadow: 0 1px 3px rgba(16,24,40,.06); }
+.exam-topbar-inner {
+  display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;
+  padding: 10px 16px;
+}
+.exam-body { flex: 1; min-height: 0; display: flex; }
+.exam-sidebar {
+  width: 250px; flex-shrink: 0; overflow-y: auto; background: #fbfbfc;
+  border-right: 1px solid #e7eaee; padding: 16px 14px;
+}
+.exam-main { flex: 1; min-width: 0; overflow-y: auto; padding: 20px 16px; }
+.exam-sidebar-label {
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px;
+  color: var(--muted); margin: 20px 0 8px;
+}
+.exam-sidebar-label:first-child { margin-top: 0; }
+.exam-section-btn {
+  display: block; width: 100%; text-align: left; padding: 9px 10px; border-radius: 8px;
+  border: 1px solid var(--line-soft); background: #fff; font-size: 12.5px; font-family: inherit;
+  color: var(--text); cursor: pointer; margin-bottom: 6px;
+}
+.exam-section-btn .count { float: right; color: var(--muted); font-weight: 400; }
+.exam-section-btn.active {
+  border-color: var(--brand-blue); background: var(--accent-soft); color: var(--brand-blue-dark);
+  font-weight: 600;
+}
+/* Marked-for-review, grouped by section so a chip's number is unambiguous - question numbering
+   restarts per section everywhere else on this page (see .q-num), so a flat cross-section list
+   would show two different questions both labelled "3". */
+.exam-review-group { margin-bottom: 10px; }
+.exam-review-group-label { font-size: 11px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
+.exam-review-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.exam-review-chip {
+  min-width: 30px; height: 28px; padding: 0 7px; border-radius: 7px; border: 1px solid var(--amber);
+  background: var(--amber-bg); color: var(--amber); font-size: 12px; font-weight: 700;
+  font-family: inherit; cursor: pointer;
+}
+.exam-review-chip:hover { filter: brightness(0.95); }
+.exam-review-empty { font-size: 12px; color: var(--muted); }
+
+/* Previous/Next at the end of a section's question list - a second, in-line way to move between
+   sections besides the sidebar picker, for a candidate who has just finished reading one
+   straight through and wants the next one without reaching back up. */
+.exam-section-nav {
+  display: flex; justify-content: space-between; gap: 10px; margin: 18px 0 6px;
+  padding-top: 14px; border-top: 1px solid var(--line-soft);
+}
+
 .wizard-steps { display: flex; gap: 8px; margin-bottom: 22px; flex-wrap: wrap; }
 .wizard-steps .wstep {
   padding: 7px 16px; border-radius: 999px; font-size: 12px; font-weight: 600; color: var(--muted);
@@ -514,6 +567,13 @@ table.data-table tbody tr:hover td { background: var(--accent-soft); }
   /* Sidebar above the list rather than beside it - 220px of chrome plus a wide table doesn't
      fit at tablet width. */
   .qb-layout { grid-template-columns: 1fr; }
+  /* The exam split-pane needs the same treatment, for the same reason: 250px of fixed navigator
+     plus real question content doesn't fit at tablet width either. Falls back to one normally-
+     scrolling page instead, navigator capped and independently scrollable above the questions. */
+  .exam-shell { height: auto; overflow: visible; }
+  .exam-body { flex-direction: column; }
+  .exam-sidebar { width: auto; max-height: 240px; border-right: none; border-bottom: 1px solid #e7eaee; }
+  .exam-main { overflow-y: visible; }
   .modal-box { max-width: 520px; }
   /* Nav wraps rather than squeezing Back/Home off-screen - both must stay reachable. */
   .app-nav { flex-wrap: wrap; gap: 10px; padding: 12px 16px; }
