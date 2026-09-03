@@ -81,6 +81,44 @@ class TestDobValidation:
         )
         assert status == 'invalid_dob', errors
 
+    def _years_ago(self, n):
+        today = timezone.now().date()
+        try:
+            return today.replace(year=today.year - n)
+        except ValueError:
+            # today is Feb 29 and (today.year - n) isn't a leap year - shift a day so this
+            # helper never raises depending on which day the suite happens to run.
+            return today.replace(month=2, day=28, year=today.year - n)
+
+    def test_a_candidate_who_turns_18_today_passes(self):
+        dob = self._years_ago(18)
+        status, errors = validate_candidate_values(
+            self._row(date_of_birth=dob), raw={'date_of_birth': dob.strftime('%d/%m/%Y')},
+        )
+        assert status == 'ok', errors
+
+    def test_a_candidate_who_turns_18_tomorrow_is_still_underage(self):
+        dob = self._years_ago(18) + timedelta(days=1)
+        status, errors = validate_candidate_values(
+            self._row(date_of_birth=dob), raw={'date_of_birth': dob.strftime('%d/%m/%Y')},
+        )
+        assert status == 'underage', errors
+        assert 'at least 18' in errors[0]['message']
+
+    def test_a_clearly_underage_candidate_is_rejected(self):
+        dob = self._years_ago(10)
+        status, errors = validate_candidate_values(
+            self._row(date_of_birth=dob), raw={'date_of_birth': dob.strftime('%d/%m/%Y')},
+        )
+        assert status == 'underage', errors
+
+    def test_underage_is_reported_against_the_date_of_birth_field(self):
+        dob = self._years_ago(15)
+        _status, errors = validate_candidate_values(
+            self._row(date_of_birth=dob), raw={'date_of_birth': dob.strftime('%d/%m/%Y')},
+        )
+        assert errors[0]['field'] == 'Date of Birth'
+
 
 class TestReviewStepEditRefreshesStatus:
     """The reported bug: editing a staged row on the Review step must re-run the duplicate

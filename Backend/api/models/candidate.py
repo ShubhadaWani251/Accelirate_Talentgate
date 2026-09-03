@@ -77,6 +77,11 @@ class Candidate(models.Model):
         MISSING_LOCATION = 'missing_location', 'Missing Location'
         MISSING_DOB = 'missing_dob', 'Missing Date of Birth'
         INVALID_DOB = 'invalid_dob', 'Invalid Date of Birth'
+        # A real, well-formed date - just one that puts the candidate under the minimum age as
+        # of today. Distinct from INVALID_DOB (a malformed/implausible date) so a TA reviewing
+        # the report sees the actual reason rather than a generic "invalid" for a row that
+        # parsed just fine.
+        UNDERAGE = 'underage', 'Underage'
 
     class Status(models.TextChoices):
         PENDING_INVITE = 'pending_invite', 'Pending Invite'

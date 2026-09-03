@@ -49,6 +49,10 @@ _DOB_FORMATS = ('%d/%m/%Y', '%d-%m-%Y', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d')
 # spirit as _MIN_YEAR/_MAX_YEAR below, catching a mis-typed year rather than enforcing an age
 # policy.
 _MIN_DOB_YEAR = 1940
+# The actual age policy, unlike _MIN_DOB_YEAR above: a candidate must be an adult. Checked
+# against the real current date (see _age_in_years), not a fixed cutoff year, so this is always
+# "18 today" rather than silently going stale.
+_MIN_CANDIDATE_AGE_YEARS = 18
 
 
 def clamp_aadhaar_to_last4(value):
@@ -129,6 +133,16 @@ def parse_dob_text(text):
         except ValueError:
             continue
     return None
+
+
+def _age_in_years(dob, as_of):
+    """Whole years elapsed from dob to as_of, on the ordinary "birthday" definition - someone
+    turns 18 on their 18th birthday itself, not the day after.
+    """
+    years = as_of.year - dob.year
+    if (as_of.month, as_of.day) < (dob.month, dob.day):
+        years -= 1
+    return years
 
 
 def identity_key(values):
@@ -241,6 +255,9 @@ def validate_candidate_values(values, email_counts=None, raw=None, aadhaar_count
         fail(_VS.INVALID_DOB, 'Date of Birth', 'Cannot be in the future')
     elif dob is not None and dob.year < _MIN_DOB_YEAR:
         fail(_VS.INVALID_DOB, 'Date of Birth', f'Must be after {_MIN_DOB_YEAR}')
+    elif dob is not None and _age_in_years(dob, timezone.now().date()) < _MIN_CANDIDATE_AGE_YEARS:
+        fail(_VS.UNDERAGE, 'Date of Birth',
+             f'Candidate must be at least {_MIN_CANDIDATE_AGE_YEARS} years old')
 
     # --- College (required) ----------------------------------------------------------
     if not (values.get('college_name') or '').strip():
