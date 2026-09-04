@@ -198,6 +198,12 @@ h1, h2, h3, h4, .brand, .btn, .box-label {
 .field-error { color: var(--brand-red); font-size: 11.5px; margin-top: 5px; }
 .field-hint { color: var(--muted); font-size: 11px; margin-top: 5px; }
 
+/* A read-only "Label: value" line, as opposed to .field's stacked label-above-input used for
+   actual form controls - Candidate Details' Personal Info card is read-only, so the same
+   vertical space .field spends on a full line for the label alone is just wasted here. */
+.field-inline { margin-bottom: 10px; font-size: 13px; line-height: 1.5; }
+.field-inline b { font-weight: 600; color: #4a5160; }
+
 /* Every button - regardless of variant - shares one size scale: this base rule sets the normal
    size, `.btn.small` (used for in-row table actions) is the one deliberate second tier, and
    nothing else should touch padding/font-size ad hoc. Auto-width by default: a button sizes to

@@ -1,6 +1,8 @@
-"""Azure Blob Storage for proctoring evidence: identity photos (block blobs) and the
-continuous session recording (an append blob, so ~10s MediaRecorder chunks can be uploaded
-as they're produced instead of buffering the whole exam in browser memory).
+"""Azure Blob Storage for proctoring evidence: identity photos (block blobs), the continuous
+session recording (an append blob, so ~10s MediaRecorder chunks can be uploaded as they're
+produced instead of buffering the whole exam in browser memory), and - once
+services.video_transcode has run - an MP4 copy of that same recording for a TA whose browser or
+network won't play WebM comfortably (download_recording / upload_recording_mp4).
 
 All uploads happen server-side - the candidate's browser never sees a storage key.
 
@@ -202,6 +204,44 @@ def append_recording_chunk(attempt_id, chunk_bytes):
     blob_client.append_block(chunk_bytes)
 
 
+def download_recording(attempt_id, dest_path):
+    """Downloads the raw WebM recording to a local file path, for services.video_transcode -
+    ffmpeg needs a real file (or stdin), not a Python bytes object, and downloading straight to
+    disk rather than into memory first keeps a long recording from ever being fully buffered in
+    the transcoding worker's RAM. Returns False (dest_path is left untouched) if there is no
+    recording to download - an attempt that never got past identity capture, say.
+    """
+    if _use_local_fallback():
+        source = _local_path(attempt_id, 'session_recording.webm')
+        if not source.exists():
+            return False
+        dest_path.write_bytes(source.read_bytes())
+        return True
+
+    blob_client = _container().get_blob_client(f'attempts/{attempt_id}/session_recording.webm')
+    if not blob_client.exists():
+        return False
+    with open(dest_path, 'wb') as f:
+        blob_client.download_blob().readinto(f)
+    return True
+
+
+def upload_recording_mp4(attempt_id, local_path):
+    """Uploads a transcoded MP4 file from local disk. Returns the unsigned URL to store on the
+    attempt, same shape as every other upload_* function here.
+    """
+    if _use_local_fallback():
+        _local_path(attempt_id, 'session_recording.mp4').write_bytes(local_path.read_bytes())
+        return _local_url(attempt_id, 'session_recording.mp4')
+
+    blob_client = _container().get_blob_client(f'attempts/{attempt_id}/session_recording.mp4')
+    with open(local_path, 'rb') as f:
+        blob_client.upload_blob(
+            f, overwrite=True, content_settings=ContentSettings(content_type='video/mp4'),
+        )
+    return _stored_url(blob_client)
+
+
 def delete_attempt_evidence(attempt_id):
     """Deletes every proctoring blob (both ID/face photos and the session recording) stored for
     one attempt. Used by the 30-day evidence retention sweep (services/evidence_retention.py) -
@@ -212,7 +252,9 @@ def delete_attempt_evidence(attempt_id):
     abandoned before identity verification) has nothing to delete, and a second sweep run after a
     partial failure must not raise just because the first run already removed some of these.
     """
-    filenames = ('id_photo.jpg', 'face_photo.jpg', 'session_recording.webm')
+    filenames = (
+        'id_photo.jpg', 'face_photo.jpg', 'session_recording.webm', 'session_recording.mp4',
+    )
     if _use_local_fallback():
         for filename in filenames:
             path = _local_path(attempt_id, filename)

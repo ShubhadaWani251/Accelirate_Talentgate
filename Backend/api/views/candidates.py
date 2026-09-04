@@ -561,7 +561,12 @@ class CandidateEvidenceZipView(APIView):
     EVIDENCE_FILES = [
         ('aadhaar_capture_url', 'aadhaar.jpg'),
         ('face_photo_url', 'face_photo.jpg'),
-        ('session_recording_url', 'session_recording.mp4'),
+        # .webm, not .mp4 - this used to claim .mp4 while writing unconverted WebM bytes into
+        # it, which meant the file this zip claimed was an MP4 wouldn't actually play as one.
+        # The genuine MP4 conversion (services.video_transcode) is a separate, later-arriving
+        # file - included below only once/if it actually exists, never in its place.
+        ('session_recording_url', 'session_recording.webm'),
+        ('session_recording_mp4_url', 'session_recording.mp4'),
     ]
 
     def get(self, request, candidate_id):

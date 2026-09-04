@@ -181,9 +181,10 @@ and a comment on what each one does. Highlights:
 
 ### Scheduled jobs (required in any real deployment)
 
-Three commands have to run on a timer. None is optional: without them, abandoned exam attempts
-sit `in_progress` forever, unfinalized draft batches are never cleaned up, and **invitation
-emails are never sent at all**.
+Four commands have to run on a timer. None is optional: without them, abandoned exam attempts
+sit `in_progress` forever, **invitation emails are never sent at all**, a candidate whose
+browser or Safe Exam Browser closes mid-exam is never flagged as such, and a TA whose
+browser/network won't handle a session recording's native WebM never gets an MP4 copy.
 
 There is no Celery/broker-based task queue - `process_email_queue` is a DB-backed one instead:
 creating an Invitation (sending an invite, or re-sending one) only sets `email_status=QUEUED` on
@@ -196,11 +197,15 @@ See **Deployment** below for ready-made configurations.
 | Command | Suggested interval | What it does |
 |---|---|---|
 | `python manage.py finalize_expired_attempts` | every 5-15 min | Finalizes exam attempts still `in_progress` past their deadline, and ones whose candidate never started before the invitation link expired. |
-| `python manage.py process_email_queue` | every 1 min | Sends every queued invitation email - the only thing that does. Not a backup job like the other one; a candidate is waiting on this for their assessment link. Paced by `INVITE_SEND_DELAY_SECONDS` between sends, and stops auto-retrying a row past `INVITE_MAX_RETRY_ATTEMPTS` failures (`--include-failed` opts a run into retrying failures at all; `--ignore-retry-limit` overrides the cap for a deliberate one-off push). Skips rows whose link is already opened or expired. |
+| `python manage.py process_email_queue` | every 1 min | Sends every queued invitation email - the only thing that does. Not a backup job like the other two; a candidate is waiting on this for their assessment link. Paced by `INVITE_SEND_DELAY_SECONDS` between sends, and stops auto-retrying a row past `INVITE_MAX_RETRY_ATTEMPTS` failures (`--include-failed` opts a run into retrying failures at all; `--ignore-retry-limit` overrides the cap for a deliberate one-off push). Skips rows whose link is already opened or expired. |
+| `python manage.py terminate_stale_attempts` | every 30-60 sec | Terminates an in-progress attempt whose browser/SEB has gone silent (no authenticated request - see `ExamAttempt.last_activity_at`) for longer than `--threshold-seconds` (default 60), as distinct from one that simply ran out of time (which `finalize_expired_attempts` above already owns). `--dry-run` reports what would be terminated without changing anything. |
+| `python manage.py transcode_recordings` | every 5-10 min | Converts a finished attempt's WebM session recording to MP4 (`services/video_transcode.py`, via the `imageio-ffmpeg`-bundled static binary - no system ffmpeg install needed) for a TA whose browser/network won't play WebM comfortably. Only ever attempts `submitted`/`terminated` attempts, never `in_progress` ones (the WebM is still being written to). Caps automatic retries at `MAX_TRANSCODE_ATTEMPTS` (3) per recording. `--dry-run` reports what would be converted; `--max` bounds one run's batch size. |
 
-Both are safe to run more often than suggested - each is idempotent and does nothing when there
-is nothing to process. `process_email_queue` specifically should not run LESS often than every
-minute or two - unlike the other, nothing else stands in for it if it lags.
+All four are safe to run more often than suggested - each is idempotent and does nothing when
+there is nothing to process. `process_email_queue` specifically should not run LESS often than
+every minute or two - unlike the others, nothing else stands in for it if it lags.
+`terminate_stale_attempts` should not run much less often than its own threshold either, or a
+closed session sits unflagged for longer than the threshold implies.
 
 Draft batches are **not** auto-deleted - there used to be a 24-hour expiry job
 (`delete_expired_draft_batches`); it was removed. A Draft now sits until a TA/admin deletes it
@@ -247,7 +252,7 @@ docker compose up --build
 ```
 
 That brings up four services: the Django app under gunicorn, an nginx container serving the
-built SPA, Redis, and a scheduler running the three housekeeping commands on a loop. The app is
+built SPA, Redis, and a scheduler running the four housekeeping commands on a loop. The app is
 reached on <http://localhost:8080>.
 
 **nginx proxies `/api/` to the backend, so the frontend and API share an origin.** That is the
@@ -344,7 +349,7 @@ produces a *new* server rather than rewinding this one, so recovery also means r
 
 ### Scheduled jobs
 
-Wire the three commands in the table above into whatever scheduler the host has. Ready-made:
+Wire the four commands in the table above into whatever scheduler the host has. Ready-made:
 
 | Host | Use |
 |---|---|

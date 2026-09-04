@@ -60,9 +60,9 @@ services:
 
   scheduler:
     # Reuses the backend image - same code, same dependencies, different command. Runs the
-    # housekeeping job the app cannot function correctly without: without it, abandoned exam
-    # attempts stay in_progress forever. (Draft batches are no longer auto-deleted - see
-    # BatchList.jsx's manual Delete action.)
+    # housekeeping jobs the app cannot function correctly without - see README's "Scheduled
+    # jobs" section. (Draft batches are no longer auto-deleted - see BatchList.jsx's manual
+    # Delete action.)
     build:
       context: ./Backend
     env_file: ./Backend/.env
@@ -77,18 +77,35 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     # A plain sleep loop rather than cron: one less moving part, logs straight to stdout where
     # the platform already collects them, and no crond-in-container signal handling to get
-    # wrong. Two loops, not one, because process_email_queue is not a backup job like
+    # wrong. Four loops, not one, because process_email_queue is not a backup job like
     # finalize_expired_attempts - it is the entire invitation-sending pipeline (creating an
     # Invitation only queues it; nothing else ever sends one - see that command's module
     # docstring), so it runs every minute. finalize_expired_attempts is genuine housekeeping
     # with no user waiting on it, so the original 10-minute interval still fits.
+    # terminate_stale_attempts runs every 30s - it's what notices a closed browser/SEB process
+    # mid-exam, and the whole point is catching that soon after it happens.
+    # transcode_recordings, like finalize_expired_attempts, has nobody waiting on it in real
+    # time - the 10-minute interval just bounds how long after an exam ends before its MP4
+    # copy is ready.
     command:
       - |
-        echo "scheduler: starting (email queue every 1 min, housekeeping every 10 min)"
+        echo "scheduler: starting (email queue every 1 min, stale-attempt check every 30s, housekeeping every 10 min)"
         (
           while true; do
             python manage.py process_email_queue || echo "scheduler: process_email_queue FAILED"
             sleep 60
+          done
+        ) &
+        (
+          while true; do
+            python manage.py terminate_stale_attempts || echo "scheduler: terminate_stale_attempts FAILED"
+            sleep 30
+          done
+        ) &
+        (
+          while true; do
+            python manage.py transcode_recordings || echo "scheduler: transcode_recordings FAILED"
+            sleep 600
           done
         ) &
         while true; do

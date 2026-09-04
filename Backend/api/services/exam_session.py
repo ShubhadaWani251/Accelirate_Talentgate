@@ -66,6 +66,7 @@ class TerminationReason:
     LINK_REOPENED = 'link_reopened'
     FULLSCREEN_NOT_ENTERED = 'fullscreen_not_entered'
     WARNING_NOT_ACKNOWLEDGED = 'warning_not_acknowledged'
+    WINDOW_CLOSED = 'window_closed'
 
 
 TERMINATION_MESSAGES = {
@@ -98,6 +99,9 @@ TERMINATION_MESSAGES = {
     TerminationReason.WARNING_NOT_ACKNOWLEDGED:
         'Your assessment was ended because you did not return to the assessment within 10 '
         'seconds of a warning being shown.',
+    TerminationReason.WINDOW_CLOSED:
+        'Your assessment was ended because Safe Exam Browser (or the assessment window) was '
+        'closed before you submitted.',
 }
 
 # Short staff-facing labels for the same codes, used wherever a TA/Admin reads a candidate's
@@ -115,6 +119,7 @@ TERMINATION_LABELS = {
     TerminationReason.LINK_REOPENED: 'Assessment link reopened after starting (closed tab/lost session)',
     TerminationReason.FULLSCREEN_NOT_ENTERED: 'Did not enter full-screen within 30 seconds',
     TerminationReason.WARNING_NOT_ACKNOWLEDGED: 'Did not return within 10 seconds of a warning',
+    TerminationReason.WINDOW_CLOSED: 'Safe Exam Browser / assessment window closed mid-exam',
 }
 
 
@@ -154,6 +159,12 @@ def is_violation_reason(reason_code):
 # Everything else stays first-strike. A devtools/view-source/Print-Screen keypress is a
 # deliberate act nobody performs by accident, and system_issue means the camera/mic feed is
 # gone - the exam cannot continue at all, so "warning, don't do it again" would be nonsense.
+#
+# window_closed (see terminate_stale_attempts) belongs in that same first-strike group for a
+# different, structural reason: by the time this reason fires, the candidate's browser process
+# is already gone, so there is nobody left to show a warning modal to. Marking it warnable would
+# just silently spend a warning slot with no visible effect - not a meaningful "second chance" at
+# all, just a confusing one.
 WARNABLE_REASONS = {
     TerminationReason.TAB_SWITCH,
     TerminationReason.WINDOW_BLUR,

@@ -1,3 +1,4 @@
+from django.utils import timezone
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import InvalidToken
@@ -91,5 +92,14 @@ class CandidateAttemptAuthentication(JWTAuthentication):
         if exam_session.is_expired(attempt):
             exam_session.finalize_attempt(attempt, outcome='submitted')
             raise AuthenticationFailed('Time expired for this attempt', code='attempt_expired')
+
+        # A heartbeat, not just bookkeeping: this is what
+        # management/commands/terminate_stale_attempts.py watches to notice a closed browser/SEB
+        # process mid-exam (see ExamAttempt.last_activity_at's own comment for why nothing more
+        # direct is possible). Every authenticated candidate request updates it - not just the
+        # ~10s recording-chunk upload - so an attempt still counts as "alive" for as long as
+        # anything at all is coming from it.
+        attempt.last_activity_at = timezone.now()
+        attempt.save(update_fields=['last_activity_at'])
 
         return attempt

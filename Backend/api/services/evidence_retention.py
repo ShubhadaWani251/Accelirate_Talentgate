@@ -22,7 +22,10 @@ from api.services import blob_storage
 # blob_storage.py.
 RETENTION_DAYS = int(os.environ.get('EVIDENCE_RETENTION_DAYS', '30'))
 
-EVIDENCE_FIELDS = ('aadhaar_capture_url', 'face_photo_url', 'session_recording_url')
+EVIDENCE_FIELDS = (
+    'aadhaar_capture_url', 'face_photo_url', 'session_recording_url',
+    'session_recording_mp4_url',
+)
 
 
 def expired_evidence_queryset(now=None):
@@ -36,7 +39,7 @@ def expired_evidence_queryset(now=None):
 
 def purge_expired_evidence(now=None):
     """Deletes blobs and clears the URL columns for every attempt whose evidence has passed
-    retention. Safe to run repeatedly - an attempt with all three URLs already null simply
+    retention. Safe to run repeatedly - an attempt with all four URLs already null simply
     doesn't match the queryset a second time.
     """
     attempts = list(expired_evidence_queryset(now))
@@ -46,6 +49,7 @@ def purge_expired_evidence(now=None):
         attempt.aadhaar_capture_url = None
         attempt.face_photo_url = None
         attempt.session_recording_url = None
+        attempt.session_recording_mp4_url = None
         attempt.save(update_fields=list(EVIDENCE_FIELDS))
         purged += 1
     return purged

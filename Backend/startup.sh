@@ -30,7 +30,7 @@ echo "==> Running deployment checks (warnings are not fatal)"
 python manage.py check --deploy || true
 
 echo "==> Starting scheduled jobs"
-# The two commands from README's "Scheduled jobs" section have to run on a timer, and this
+# The four commands from README's "Scheduled jobs" section have to run on a timer, and this
 # platform provides nothing to run them with: App Service on Linux has no cron, and WebJobs are
 # Windows-only. Without process_email_queue in particular, invitation emails are never sent at
 # all - creating an Invitation only queues it - and the failure is silent, because the UI
@@ -62,6 +62,12 @@ schedule() {
 # leaves its row QUEUED, which the next run picks up - the queue exists for exactly that.
 schedule 60 process_email_queue &
 schedule 600 finalize_expired_attempts &
+# 30s, not 60s like the others: this is what notices a closed browser/SEB process, and the
+# whole point is catching that soon after it happens rather than only at the next full minute.
+schedule 30 terminate_stale_attempts &
+# No candidate is waiting on this one in real time (unlike process_email_queue) - a 10-minute
+# cadence just bounds how long after an exam ends before its MP4 copy is ready.
+schedule 600 transcode_recordings &
 
 echo "==> Starting gunicorn"
 # --config picks up gunicorn.conf.py, which binds to $PORT. App Service sets PORT and expects the

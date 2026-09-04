@@ -423,6 +423,7 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
                 'aadhaar_capture_url': None, 'aadhaar_capture_download_url': None,
                 'face_photo_url': None, 'face_photo_download_url': None,
                 'session_recording_url': None, 'session_recording_download_url': None,
+                'session_recording_mp4_url': None, 'session_recording_mp4_download_url': None,
             }
         # Signed here, at the moment they are handed to the browser, rather than read straight
         # off the row. The stored values are unsigned pointers and would 404 on their own; each
@@ -454,6 +455,17 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
             'session_recording_download_url': blob_storage.fresh_read_url(
                 attempt.session_recording_url,
                 download_filename=f'{candidate_slug}_session_recording.webm',
+            ),
+            # Null until services.video_transcode has converted it (see
+            # management/commands/transcode_recordings.py) - the frontend shows this pair only
+            # once session_recording_mp4_url is actually present, same "null means not ready/not
+            # applicable yet" convention as every evidence field above.
+            'session_recording_mp4_url': blob_storage.fresh_read_url(
+                attempt.session_recording_mp4_url,
+            ),
+            'session_recording_mp4_download_url': blob_storage.fresh_read_url(
+                attempt.session_recording_mp4_url,
+                download_filename=f'{candidate_slug}_session_recording.mp4',
             ),
         }
 

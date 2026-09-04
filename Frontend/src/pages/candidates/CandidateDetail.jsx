@@ -130,22 +130,19 @@ export default function CandidateDetail() {
       <div className="grid-2">
         <div className="card">
           <div className="box-label">Personal Info</div>
-          <div className="field"><label>Name</label><div>{candidate.full_name}</div></div>
-          <div className="field"><label>Email</label><div>{candidate.email}</div></div>
-          <div className="field"><label>Aadhaar Last 4 Digits</label><div>{candidate.aadhaar_last4 || '—'}</div></div>
-          <div className="field"><label>Date of Birth</label><div>{formatDateDMY(candidate.date_of_birth)}</div></div>
+          <div className="field-inline"><b>Name:</b> {candidate.full_name}</div>
+          <div className="field-inline"><b>Email:</b> {candidate.email}</div>
+          <div className="field-inline"><b>Aadhaar Last 4 Digits:</b> {candidate.aadhaar_last4 || '—'}</div>
+          <div className="field-inline"><b>Date of Birth:</b> {formatDateDMY(candidate.date_of_birth)}</div>
           {/* Shown here as well as in the list, with the full failure reason - this is where
               someone lands when investigating why a candidate never got their link. */}
-          <div className="field">
-            <label>Invitation Email</label>
-            <div>
-              {candidate.email_status_display || 'Not invited'}
-              {candidate.email_sent_at && (
-                <span style={{ color: 'var(--muted)' }}>
-                  {' '}— {new Date(candidate.email_sent_at).toLocaleString()}
-                </span>
-              )}
-            </div>
+          <div className="field-inline">
+            <b>Invitation Email:</b> {candidate.email_status_display || 'Not invited'}
+            {candidate.email_sent_at && (
+              <span style={{ color: 'var(--muted)' }}>
+                {' '}— {new Date(candidate.email_sent_at).toLocaleString()}
+              </span>
+            )}
             {candidate.email_status === 'failed' && (
               <div className="field-error" style={{ whiteSpace: 'normal' }}>
                 {candidate.email_error || 'The email service reported a failure.'}
@@ -155,14 +152,14 @@ export default function CandidateDetail() {
               </div>
             )}
           </div>
-          <div className="field"><label>College</label><div>{candidate.college_name || '—'}</div></div>
-          <div className="field"><label>Degree</label><div>{candidate.degree || '—'}</div></div>
-          <div className="field"><label>Stream</label><div>{candidate.stream || '—'}</div></div>
-          <div className="field"><label>Percentage</label><div>{candidate.percentage != null ? `${candidate.percentage}%` : '—'}</div></div>
-          <div className="field"><label>Passing Out Year</label><div>{candidate.passing_out_year || '—'}</div></div>
-          <div className="field"><label>Location</label><div>{candidate.location || '—'}</div></div>
-          <div className="field"><label>Phone</label><div>{candidate.phone || '—'}</div></div>
-          <div className="field"><label>Batch</label><div>{candidate.batch_name}</div></div>
+          <div className="field-inline"><b>College:</b> {candidate.college_name || '—'}</div>
+          <div className="field-inline"><b>Degree:</b> {candidate.degree || '—'}</div>
+          <div className="field-inline"><b>Stream:</b> {candidate.stream || '—'}</div>
+          <div className="field-inline"><b>Percentage:</b> {candidate.percentage != null ? `${candidate.percentage}%` : '—'}</div>
+          <div className="field-inline"><b>Passing Out Year:</b> {candidate.passing_out_year || '—'}</div>
+          <div className="field-inline"><b>Location:</b> {candidate.location || '—'}</div>
+          <div className="field-inline"><b>Phone:</b> {candidate.phone || '—'}</div>
+          <div className="field-inline"><b>Batch:</b> {candidate.batch_name}</div>
         </div>
 
         <div className="card">
@@ -241,10 +238,28 @@ export default function CandidateDetail() {
               🎥<br /><span style={{ fontSize: 11, color: 'var(--muted)' }}>Session recording</span>
             </div>
             {candidate.evidence.session_recording_url ? (
-              <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 4 }}>
-                <a className="link-text" href={candidate.evidence.session_recording_url} target="_blank" rel="noopener noreferrer">▶ Play Recording</a>
-                <a className="link-text" href={candidate.evidence.session_recording_download_url} download>⬇ Download</a>
-              </div>
+              <>
+                <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 4 }}>
+                  <a className="link-text" href={candidate.evidence.session_recording_url} target="_blank" rel="noopener noreferrer">▶ Play Recording</a>
+                  <a className="link-text" href={candidate.evidence.session_recording_download_url} download>⬇ Download</a>
+                </div>
+                {/* WebM only plays reliably in Chrome/Edge/Firefox - this MP4 copy (converted
+                    server-side, see Backend/api/services/video_transcode.py) is for a TA whose
+                    browser or network doesn't handle WebM. It lands a little after the exam
+                    ends, not instantly, so show a "converting" hint rather than nothing while
+                    it's not there yet - a TA who lands here right after a submission shouldn't
+                    read a bare missing link as a broken recording. */}
+                {candidate.evidence.session_recording_mp4_url ? (
+                  <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 4 }}>
+                    <a className="link-text" href={candidate.evidence.session_recording_mp4_url} target="_blank" rel="noopener noreferrer">▶ Play as MP4</a>
+                    <a className="link-text" href={candidate.evidence.session_recording_mp4_download_url} download>⬇ Download MP4</a>
+                  </div>
+                ) : (
+                  <div style={{ textAlign: 'center', fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+                    MP4 copy not ready yet - converting shortly after the assessment ends
+                  </div>
+                )}
+              </>
             ) : (
               <div style={{ textAlign: 'center', fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Not yet recorded</div>
             )}

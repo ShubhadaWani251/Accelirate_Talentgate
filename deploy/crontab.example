@@ -1,11 +1,15 @@
 # Scheduled jobs for a non-container deployment (cron). Install with: crontab deploy/crontab.example
 #
-# Neither of these is optional. Without the first, exam attempts abandoned mid-way stay
+# None of these four is optional. Without the first, exam attempts abandoned mid-way stay
 # in_progress forever and are never scored. Without the second, invitation emails are never sent
 # AT ALL - creating an Invitation only queues it (email_status=QUEUED); process_email_queue is
 # the only thing that actually sends one. This is not a backup job the way it used to be (see
 # the command's own module docstring) - it is the entire invitation-sending pipeline, which is
-# why it runs every minute rather than every 15.
+# why it runs every minute rather than every 15. Without the third, a candidate whose browser or
+# Safe Exam Browser closes mid-exam is never flagged as such - the attempt just sits in_progress
+# until it eventually times out on its own, indistinguishable from someone who ran to the deadline
+# on purpose. Without the fourth, a TA whose browser/network won't handle a session recording's
+# native WebM never gets an MP4 copy of it.
 #
 # Draft batches are NOT auto-deleted - that 24-hour expiry was removed. A Draft now sits until a
 # TA/admin deletes it explicitly from the Drafts list (BatchList.jsx).
@@ -26,3 +30,15 @@ PY=/srv/talentgate/Backend/venv/bin/python
 # tick that finds the lock held simply skip rather than queue up behind it - the next tick a
 # minute later is a better use of that time than a growing backlog of waiting cron processes.
 * * * * * flock -n /tmp/talentgate-process-email-queue.lock $PY $APP/manage.py process_email_queue >> /var/log/talentgate/scheduler.log 2>&1
+
+# Catch a browser/Safe Exam Browser closing mid-exam. Every 30 seconds (cron's own finest grain
+# is one minute, so this uses the same sleep-loop shape as startup.sh rather than a second crontab
+# line) - the whole point of this command is noticing soon after it happens, not on some later
+# housekeeping sweep. Safe to run concurrently with itself if a run is still going when the next
+# would start - see the command's own module docstring on why no flock is needed here.
+* * * * * cd $APP && for i in 0 30; do (sleep $i; $PY manage.py terminate_stale_attempts >> /var/log/talentgate/scheduler.log 2>&1) & done; wait
+
+# Convert finished attempts' session recordings to MP4. No candidate or TA is waiting on this in
+# real time the way they are for the jobs above - it just bounds how long after an exam ends
+# before its MP4 copy shows up on Candidate Details.
+*/10 * * * * cd $APP && $PY manage.py transcode_recordings >> /var/log/talentgate/scheduler.log 2>&1

@@ -48,6 +48,12 @@ openpyxl==3.1.5
 
 # --- Proctoring evidence storage ---
 azure-storage-blob==12.24.0
+# Ships a real static ffmpeg binary inside the wheel (platform-specific: win/linux/mac all
+# covered) - services/video_transcode.py uses it to convert a candidate's WebM proctoring
+# recording to MP4 for TA download. No system-level ffmpeg install needed anywhere, which matters
+# because the one real deployment (App Service code-deploy, see README) has no apt-get access at
+# all to install one the traditional way.
+imageio-ffmpeg==0.6.0
 
 # --- Shared cache for rate-limit and login-lockout counters ---
 # Used via django.core.cache.backends.redis.RedisCache when REDIS_URL is set. Without it those

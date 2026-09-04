@@ -3,8 +3,8 @@
     Registers TalentGate's housekeeping jobs with Windows Task Scheduler.
 
 .DESCRIPTION
-    The same two jobs as deploy/crontab.example, for a Windows host running the app directly
-    rather than in a container. Neither is optional:
+    The same four jobs as deploy/crontab.example, for a Windows host running the app directly
+    rather than in a container. None is optional:
 
       finalize_expired_attempts - without it, exam attempts abandoned mid-way stay
                                   in_progress forever and are never scored.
@@ -15,6 +15,17 @@
                                   reason. -MultipleInstances IgnoreNew below is what stops a
                                   run still working through a large batch from overlapping
                                   the next minute's tick.
+      terminate_stale_attempts - without it, a candidate whose browser or Safe Exam Browser
+                                  closes mid-exam is never flagged as such - the attempt just
+                                  sits in_progress until it eventually times out on its own.
+                                  Registered every 1 minute (Task Scheduler's own finest
+                                  built-in repetition grain), a little coarser than
+                                  startup.sh's 30s loop but still catches a closed session
+                                  well within the command's own 60s staleness threshold.
+      transcode_recordings      - without it, a TA whose browser/network won't handle a
+                                  session recording's native WebM never gets an MP4 copy of
+                                  it. Nobody is waiting on this in real time, so 10 minutes
+                                  just bounds how long after an exam ends before it's ready.
 
     Draft batches are NOT auto-deleted - that 24-hour expiry job (delete_expired_draft_batches)
     was removed. A Draft now sits until a TA/admin deletes it explicitly from the Drafts list.
@@ -56,7 +67,9 @@ if (-not (Test-Path $python)) {
 # nothing to process, so running more often than strictly needed is safe.
 $tasks = @(
     @{ Name = 'TalentGate-FinalizeExpiredAttempts'; Command = 'finalize_expired_attempts'; Minutes = 10 },
-    @{ Name = 'TalentGate-ProcessEmailQueue'; Command = 'process_email_queue'; Minutes = 1 }
+    @{ Name = 'TalentGate-ProcessEmailQueue'; Command = 'process_email_queue'; Minutes = 1 },
+    @{ Name = 'TalentGate-TerminateStaleAttempts'; Command = 'terminate_stale_attempts'; Minutes = 1 },
+    @{ Name = 'TalentGate-TranscodeRecordings'; Command = 'transcode_recordings'; Minutes = 10 }
 )
 
 # Removes the task a previous run of this script may have registered for the now-removed
