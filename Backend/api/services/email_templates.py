@@ -181,6 +181,13 @@ INVITATION_TEMPLATE = {
         'Important Instructions\n\n'
         '- Before clicking the assessment link, please clear your browser cache to avoid any '
         'loading issues.\n\n'
+        '- Recommended: use Safe Exam Browser (SEB) for this assessment - a free lockdown '
+        'browser that keeps other applications and notifications from interrupting you. If '
+        'you already have it installed, click the link below to download your configuration '
+        'file; opening it launches Safe Exam Browser directly into your assessment:\n'
+        '{seb_config_link}\n'
+        'If you do not have Safe Exam Browser installed, or prefer not to use it, you may '
+        'continue with your regular browser instead using the assessment link above.\n\n'
         '- Please make sure your camera and microphone are working properly before you begin '
         'the assessment.\n\n'
         '- Before starting the assessment, please close all other applications and turn off '
@@ -253,17 +260,25 @@ def format_datetime(value):
     return f'{local.strftime(DATETIME_FORMAT)} {label}'
 
 
-def render_invitation_email(candidate, batch, link, sender=None):
+def render_invitation_email(candidate, batch, link, sender=None, seb_config_link=None):
     """Resolve the approved invitation copy into (subject, body) for one candidate.
 
     `sender` is the staff user actually sending this invite (Invitation.sent_by) - candidates
     contact THEM, not a shared inbox, since that's who actually knows this candidate's batch and
     can act on a problem. Falls back to the generic support_email() only when there's no sender
     to name (Invitation.sent_by is SET_NULL, so a deleted user account leaves this null).
+
+    `seb_config_link` is a plain https:// URL (not the seb:// launch scheme) deliberately - an
+    ordinary URL is what text_body_to_html's _linkify below already turns into a real clickable
+    link with zero extra work, whereas a custom URL scheme is not reliably clickable across mail
+    clients (Outlook's Safe Links rewriting in particular). That unreliability is exactly why the
+    seb:// link only ever appears on the in-app choice screen (ExamSebChoice.jsx), never in an
+    email - see api/services/seb.py.
     """
     return INVITATION_TEMPLATE['subject'], INVITATION_TEMPLATE['body'].format(
         name=candidate.full_name,
         link=link,
+        seb_config_link=seb_config_link,
         start=format_datetime(batch.link_valid_from),
         end=format_datetime(batch.link_valid_until),
         support_email=(sender.email if sender else None) or support_email(),

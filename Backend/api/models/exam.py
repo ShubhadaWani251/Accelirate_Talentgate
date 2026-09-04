@@ -61,6 +61,12 @@ class ExamAttempt(models.Model):
     # Metadata
     ip_address = models.CharField(max_length=45, null=True, blank=True)
     user_agent = models.CharField(max_length=255, null=True, blank=True)
+    # Set the first time a request for this attempt carries a verified SEB Browser Exam Key
+    # header (see services/seb.record_seb_usage) - never cleared once set, and never required:
+    # SEB is a strong default, not a gate, so a candidate who falls back to a regular browser
+    # simply leaves this null rather than being blocked. A timestamp, not a boolean, to match
+    # every other "did X happen" fact on this model (id_verified_at, started_at, and so on).
+    seb_verified_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = 'exam_attempts'

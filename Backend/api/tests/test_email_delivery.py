@@ -515,6 +515,39 @@ class TestInvitationEmailBody:
 
         assert 'shared-inbox@accelirate.com' in mail.outbox[0].body
 
+    def test_the_seb_config_link_is_a_real_clickable_anchor_in_the_html(
+        self, ta_user, make_batch, make_candidate, make_invitation
+    ):
+        """A plain https:// URL, not the seb:// launch scheme - see
+        render_invitation_email's own docstring for why only this one is safe to put in an
+        email. _linkify auto-links any bare https:// URL in the body, so this needs no special
+        cta_url-style handling to become clickable.
+        """
+        invitation = make_invitation(make_candidate(make_batch(ta_user), ta_user), ta_user)
+
+        invites.send_invite_and_record(invitation, 'https://exam.example.test')
+
+        expected_url = (
+            'https://exam.example.test/api/exam/token/%s/seb-config/'
+            % invitation.unique_link_token
+        )
+        html = mail.outbox[0].alternatives[0][0]
+        assert f'<a href="{expected_url}"' in html
+        assert 'seb://' not in html
+
+    def test_the_seb_config_link_survives_in_the_plain_text_part(
+        self, ta_user, make_batch, make_candidate, make_invitation
+    ):
+        invitation = make_invitation(make_candidate(make_batch(ta_user), ta_user), ta_user)
+
+        invites.send_invite_and_record(invitation, 'https://exam.example.test')
+
+        expected_url = (
+            'https://exam.example.test/api/exam/token/%s/seb-config/'
+            % invitation.unique_link_token
+        )
+        assert expected_url in mail.outbox[0].body
+
 
 class TestCtaButtonRendersInOutlook:
     """Outlook renders HTML with Word, which ignores much of what a browser accepts."""

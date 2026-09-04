@@ -495,7 +495,15 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
         attempt = _latest_attempt(candidate)
         if attempt:
             if attempt.started_at:
-                events.append({'timestamp': attempt.started_at, 'event': 'Started', 'details': None})
+                events.append({
+                    'timestamp': attempt.started_at,
+                    'event': 'Started',
+                    # Same idea as the Terminated row's label below - a TA-facing fact worth
+                    # surfacing, not something the candidate ever sees. Only ever set, never
+                    # cleared (services.seb.record_seb_usage), so this is safe to trust: it
+                    # never claims SEB when a fallback candidate is who actually started.
+                    'details': 'Via Safe Exam Browser' if attempt.seb_verified_at else None,
+                })
             if attempt.submitted_at:
                 events.append({'timestamp': attempt.submitted_at, 'event': 'Submitted', 'details': None})
             if attempt.terminated_at:

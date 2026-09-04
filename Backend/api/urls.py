@@ -84,6 +84,8 @@ urlpatterns = [
          name='exam-verify-email'),
     path('exam/token/<str:token>/identity/', views.ExamIdentityCaptureView.as_view(),
          name='exam-identity'),
+    path('exam/token/<str:token>/seb-config/', views.ExamSebConfigView.as_view(),
+         name='exam-seb-config'),
     path('exam/begin/', views.ExamBeginView.as_view(), name='exam-begin'),
     path('exam/session/', views.ExamSessionView.as_view(), name='exam-session'),
     path('exam/answers/<int:question_id>/', views.ExamAnswerView.as_view(), name='exam-answer'),

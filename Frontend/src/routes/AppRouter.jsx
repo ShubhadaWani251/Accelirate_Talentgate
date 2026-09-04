@@ -46,6 +46,7 @@ const ConfigureDefaultBatch = lazy(() => import('../pages/settings/ConfigureDefa
 
 // --- candidate exam portal ---
 const ExamVerify = lazy(() => import('../pages/exam/ExamVerify'));
+const ExamSebChoice = lazy(() => import('../pages/exam/ExamSebChoice'));
 const ExamFullscreenGate = lazy(() => import('../pages/exam/ExamFullscreenGate'));
 const ExamCameraPermission = lazy(() => import('../pages/exam/ExamCameraPermission'));
 const ExamInstructions = lazy(() => import('../pages/exam/ExamInstructions'));
@@ -119,6 +120,7 @@ export default function AppRouter() {
 
         <Route element={<ExamPortalLayout />}>
           <Route path="/t/:token" element={<ExamVerify />} />
+          <Route path="/t/:token/seb" element={<ExamSebChoice />} />
           <Route path="/t/:token/fullscreen" element={<ExamFullscreenGate />} />
           <Route path="/t/:token/camera" element={<ExamCameraPermission />} />
           <Route path="/t/:token/instructions" element={<ExamInstructions />} />

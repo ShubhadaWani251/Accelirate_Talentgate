@@ -66,10 +66,10 @@ export default function ExamVerify() {
         navigate(`/t/${token}/exam`);
       } else {
         setInstructions(data);
-        // Camera/mic permission comes BEFORE full-screen on purpose: browsers force-exit
-        // full-screen whenever a permission prompt appears, so asking first means full-screen is
-        // never interrupted once entered.
-        navigate(`/t/${token}/camera`);
+        // Safe Exam Browser choice comes first on a fresh start - camera/mic permission and
+        // full-screen still follow it exactly as before (see ExamSebChoice.jsx and
+        // ExamCameraPermission.jsx's own guard), whichever way the candidate answers.
+        navigate(`/t/${token}/seb`);
       }
     } catch (err) {
       // opens_at, when present, means the window closed between landing and this submit (or

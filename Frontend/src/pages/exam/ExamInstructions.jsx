@@ -50,6 +50,11 @@ export default function ExamInstructions() {
               <li>Your camera and microphone stay on for identity verification and continuous proctoring throughout the assessment. <b>Switching your camera off, or covering it, is treated the same as leaving the window</b> - one warning, then the attempt ends</li>
               <li>You're now in full-screen mode for the rest of this assessment</li>
               <li>Do not switch browser tabs, minimize, exit full-screen, or open other applications once the exam begins</li>
+              {/* Without this, a candidate who chose Safe Exam Browser could reasonably read the
+                  surrounding checks as a leftover bug ("isn't SEB supposed to handle this?") and
+                  start ignoring them - these guards run as a second layer on top of SEB's own
+                  lockdown, not instead of it, whichever browser choice a candidate made. */}
+              <li>These checks stay active and enforced even if you're using Safe Exam Browser - it adds a layer on top, it doesn't replace them</li>
               <li>Close other applications and turn off notifications before you begin — on Windows, turn on <b>Focus Assist</b> (search "Focus assist" in the Start menu, or Settings → System → Focus assist); on a Mac, turn on <b>Do Not Disturb / Focus</b> from Control Center. If a system popup or notification (email, chat, a call, an OS update prompt) still appears during the assessment, <b>do not click, interact with, or dismiss it</b> — leave it alone and stay on the assessment window; interacting with it can end your attempt the same way switching windows does</li>
               {/* Stated precisely, because a candidate who is told "one warning" for everything
                   would reasonably feel misled when a Print Screen ends the attempt outright.

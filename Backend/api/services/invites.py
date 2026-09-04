@@ -171,7 +171,18 @@ def send_invite_email(invitation, base_url):
     """
     candidate = invitation.candidate
     link = f"{base_url.rstrip('/')}/t/{invitation.unique_link_token}"
-    subject, body = render_invitation_email(candidate, invitation.batch, link, invitation.sent_by)
+    # Same origin as `link` above, not FRONTEND_ORIGIN reused blindly - this happens to be
+    # correct because the one real deployment serves the API and the frontend from the same
+    # App Service (see README's Deployment section), so base_url is right for both an SPA route
+    # and an /api/... route. Only diverges in local dev, where the two run as separate
+    # processes - a candidate clicking this link from a local test send needs FRONTEND_ORIGIN
+    # set to the backend's own port for it to resolve, same caveat as `link` itself already has.
+    seb_config_link = (
+        f"{base_url.rstrip('/')}/api/exam/token/{invitation.unique_link_token}/seb-config/"
+    )
+    subject, body = render_invitation_email(
+        candidate, invitation.batch, link, invitation.sent_by, seb_config_link,
+    )
     # cta_url turns the assessment link into a real button in the HTML part; the bare URL
     # is still printed beneath it and in the plain-text part.
     send_candidate_email(subject, body, candidate.email, cta_url=link,

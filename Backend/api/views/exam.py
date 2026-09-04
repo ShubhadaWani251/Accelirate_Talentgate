@@ -11,7 +11,7 @@ import logging
 
 from django.utils import timezone
 from django.utils.decorators import method_decorator
-from django.http import Http404
+from django.http import Http404, HttpResponse
 from django_ratelimit.decorators import ratelimit
 from rest_framework import status
 from rest_framework.parsers import MultiPartParser
@@ -22,7 +22,7 @@ from rest_framework.views import APIView
 from api.authentication import CandidateAttemptAuthentication
 from api.models import ExamAnswer, ExamAttempt, Invitation
 from api.serializers.exam import AnswerSerializer, EmailVerifySerializer, TerminateSerializer
-from api.services import blob_storage, exam_session
+from api.services import blob_storage, exam_session, seb
 from api.services.image_validation import InvalidImageUpload, validate_identity_photo
 from api.services.exam_session import TerminationReason
 from api.services.question_selection import SECTION_LABELS, SECTION_ORDER, InsufficientQuestionsError
@@ -322,10 +322,48 @@ class ExamIdentityCaptureView(APIView):
                 'aadhaar_capture_url', 'face_photo_url', 'id_verified_at', 'session_recording_url',
             ])
 
+        # Opportunistic - see services.seb.record_seb_usage. If the candidate chose Safe Exam
+        # Browser at the earlier choice screen, SEB has been the active browser since the very
+        # first landing hit, so this is often the earliest point that can credit it; if not,
+        # this is a silent no-op and identity capture proceeds exactly as it does today.
+        seb.record_seb_usage(attempt, request, invitation)
+
         return Response({
             'attempt_token': issue_attempt_token(attempt),
             **exam_session.build_session_state(attempt),
         })
+
+
+@method_decorator(ratelimit(key=ratelimit_token_key, rate='10/m', method='GET', block=False), name='get')
+class ExamSebConfigView(APIView):
+    """GET /api/exam/token/<token>/seb-config/ - the .seb file offered on the choice screen the
+    candidate sees right after email verification, before camera permission. Public and
+    unauthenticated for the same reason as the other token-scoped views above: a candidate
+    reaches this before they have anything else to authenticate with.
+
+    Deliberately GET, not POST: this is meant to be reachable both as a plain download link and
+    via a seb:// launch URL, and a browser/OS following a custom URL scheme only ever issues a
+    GET.
+    """
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request, token):
+        if getattr(request, 'limited', False):
+            return Response({'detail': 'Too many attempts. Please try again shortly.'},
+                             status=status.HTTP_429_TOO_MANY_REQUESTS)
+
+        invitation = _get_invitation(token)
+        if invitation is None or invitation.link_expired_at < timezone.now():
+            return Response({'detail': 'This assessment link is invalid or has expired.'},
+                             status=status.HTTP_400_BAD_REQUEST)
+
+        response = HttpResponse(seb.build_config(invitation), content_type='application/octet-stream')
+        # A fixed, generic filename rather than anything derived from the candidate/batch - the
+        # file's contents are what matters, and there's no benefit to personalizing a name that
+        # would need sanitizing.
+        response['Content-Disposition'] = 'attachment; filename="talentgate-assessment.seb"'
+        return response
 
 
 class ExamBeginView(APIView):
@@ -346,6 +384,11 @@ class ExamBeginView(APIView):
                  'opens_at': exc.opens_at.isoformat()},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        # Called on every mount of the exam screen, including a mid-exam reload (see
+        # ExamAttemptPage's begin-exam effect) - the more authoritative, repeated checkpoint to
+        # pair with identity capture's earlier, one-shot opportunity. See
+        # services.seb.record_seb_usage for why calling this from two places is safe.
+        seb.record_seb_usage(attempt, request, attempt.invitation)
         return Response(exam_session.build_session_state(attempt))
 
 

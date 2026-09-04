@@ -237,6 +237,16 @@ FRONTEND_ORIGIN = os.environ.get('FRONTEND_ORIGIN', 'http://localhost:5173')
 # deliberately provisions it; see .env.example.
 QUESTION_EXPORT_API_KEY = os.environ.get('QUESTION_EXPORT_API_KEY', '')
 
+# Signs the Browser Exam Key embedded in each candidate's generated Safe Exam Browser config
+# (see api/services/seb.py) - SEB echoes a hash derived from this key back on every request,
+# which is how the server confirms a candidate is genuinely using SEB. Unlike
+# QUESTION_EXPORT_API_KEY above, blank here does NOT fail closed: SEB is a strong default for
+# candidates, never a hard requirement (see api/services/seb.py's module docstring), so a blank
+# secret just means verification stays permanently inactive - config generation and the whole
+# exam flow keep working exactly as if SEB were never involved, for every candidate, with or
+# without this set.
+SEB_BROWSER_EXAM_KEY_SECRET = os.environ.get('SEB_BROWSER_EXAM_KEY_SECRET', '')
+
 # The link put in the new-user credentials email specifically. Deliberately a separate setting
 # from FRONTEND_ORIGIN above, not reused: FRONTEND_ORIGIN tracks wherever *this* backend's own
 # frontend is (localhost in dev), but staff only ever log in against the one real deployment -
