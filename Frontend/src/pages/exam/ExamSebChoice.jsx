@@ -10,11 +10,11 @@ import BrandFooter from '../../components/layout/BrandFooter';
 // in-progress attempt reopening its link) skips straight to /exam today and this screen is
 // never part of that path, same as camera/fullscreen/instructions/identity already aren't.
 //
-// "Continue without Safe Exam Browser" is always visible and never disabled: there is no
-// reliable way for JavaScript to know whether the seb:// link below actually launched an
-// installed application - that's a real browser limitation, not something to work around - so
-// the only honest choice is offering the fallback immediately rather than making a candidate
-// wait out a guess.
+// Safe Exam Browser is mandatory here - deliberately no "continue in a regular browser" escape
+// hatch. There is no reliable way for JavaScript to know whether the seb:// link below actually
+// launched an installed application (a real browser limitation, not something to work around),
+// so a candidate who can't get it running has no way past this screen - see the config-download
+// and "get it here" links below, which are the only two ways forward.
 export default function ExamSebChoice() {
   const { token } = useParams();
   const navigate = useNavigate();
@@ -32,10 +32,6 @@ export default function ExamSebChoice() {
     }
   }, [instructions, navigate, token]);
 
-  function onContinueInBrowser() {
-    navigate(`/t/${token}/camera`);
-  }
-
   if (!instructions) return null;
 
   return (
@@ -43,23 +39,22 @@ export default function ExamSebChoice() {
       <BrandHeader roleCode="candidate" />
       <div className="auth-shell">
         <div className="auth-card" style={{ textAlign: 'center' }}>
-          <h3>Use Safe Exam Browser</h3>
+          <h3>Safe Exam Browser Required</h3>
           <div className="auth-sub">
-            This assessment is best taken inside Safe Exam Browser — a free lockdown browser
+            This assessment must be taken inside Safe Exam Browser — a free lockdown browser
             that keeps other applications and notifications from reaching you for the duration
-            of the exam. If you're able to install it, we recommend doing so now.
+            of the exam. Please launch it to continue.
           </div>
 
           <a className="btn primary block" href={sebLaunchUrl(token)}>
             Launch Safe Exam Browser
           </a>
           <div className="auth-sub" style={{ fontSize: 11.5, margin: '8px 0 20px' }}>
-            If it doesn't open within a few seconds, use the option below instead. Already have
-            it installed but nothing happened?{' '}
+            Already have it installed but nothing happened?{' '}
             <a className="link-text" href={configUrl(token)}>
               Download the configuration file
             </a>{' '}
-            and open it manually.
+            and open it manually - it will take you straight into this assessment.
             <br />
             Don't have Safe Exam Browser yet?{' '}
             <a
@@ -70,12 +65,8 @@ export default function ExamSebChoice() {
             >
               Get it here
             </a>
-            , then come back to this page.
+            , install it, then come back to this page.
           </div>
-
-          <button className="btn block" type="button" onClick={onContinueInBrowser}>
-            Continue without Safe Exam Browser
-          </button>
         </div>
       </div>
       <BrandFooter roleCode="candidate" />

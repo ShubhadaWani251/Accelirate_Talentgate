@@ -1,14 +1,19 @@
 """Safe Exam Browser (SEB) integration for the candidate exam portal.
 
-SEB is a strong recommendation, never a requirement enforced by this backend. A candidate who
-can't install it - a locked-down lab machine with no install permission, for one - falls back to
-exactly today's plain-browser flow, unchanged. Nothing here ever rejects a request for lacking a
-SEB header; the only thing this module does with that header is *credit* an attempt as
-SEB-verified when one genuinely shows up, for a TA to see later (see
-serializers.candidates.CandidateDetailSerializer.get_timeline). See the "Lockdown & Detection
-Brief" this was planned against for why: real OS-level lockdown (blocking other apps and
-notifications) is something no browser tab can do on its own, and SEB is the only piece of this
-that gets past that - but only for candidates who can actually install it.
+SEB is required by the frontend (ExamSebChoice.jsx has no "continue without it" option), but
+this backend itself never enforces that - nothing here ever rejects a request for lacking a SEB
+header. The only thing this module does with that header is *credit* an attempt as SEB-verified
+when one genuinely shows up, for a TA to see later (see
+serializers.candidates.CandidateDetailSerializer.get_timeline). That split is deliberate: a
+frontend gate is all client-side JavaScript, trivially bypassed by anyone motivated enough
+(hitting the API directly, or an old cached build) - so it was never a real enforcement boundary
+to begin with, and turning it into a hard backend 400 would only break the one thing this design
+still gets right, which is that record_seb_usage can never itself become the reason a genuine
+SEB session fails partway through. See the "Lockdown & Detection Brief" this was planned against
+for why SEB matters at all: real OS-level lockdown (blocking other apps and notifications) is
+something no browser tab can do on its own, and SEB is the only piece of this that gets past
+that - but only for candidates who can actually install it, which is exactly why the frontend
+gate is a real (if bypassable) product decision, not a hard security control.
 
 Config generation and the Browser Exam Key are unrelated to whether verification later succeeds.
 Every candidate who is offered SEB gets a real, working .seb file regardless of whether
