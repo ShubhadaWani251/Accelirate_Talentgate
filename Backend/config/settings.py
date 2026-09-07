@@ -226,10 +226,16 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # The refresh token rides in an httpOnly cookie, so the frontend origin must be
 # explicitly allowed (not wildcarded) and credentials must be permitted.
 #
-# This also builds every candidate invite link, so it's deliberately whatever a developer's own
-# .env says (localhost while running locally) rather than a hardcoded remote default - an invite
-# link has to point at wherever this particular backend's frontend actually is.
-FRONTEND_ORIGIN = os.environ.get('FRONTEND_ORIGIN', 'http://localhost:5173')
+# This also builds every candidate invite link, so a developer's own .env should still set this
+# explicitly to localhost while running locally - os.environ.get here only supplies the DEFAULT,
+# used when nothing else set the variable at all, and a real .env value always wins over it.
+# The default itself deliberately points at the real staging deployment rather than localhost:
+# staging's own App Service setting for this was found unset, silently sending every candidate a
+# link that only ever worked on the machine that sent the email - a hardcoded, real, working
+# fallback here means that specific failure mode can never happen again even if the App Service
+# setting goes missing again, while an explicit .env override (local dev, or a genuinely different
+# deployment) still always takes precedence.
+FRONTEND_ORIGIN = os.environ.get('FRONTEND_ORIGIN', 'https://app-talentgate-staging.azurewebsites.net')
 
 # Service-to-service integration key for api.views.integrations.ActiveQuestionExportView - a
 # static shared secret, not a JWT, because the caller is another system with no api.User at
