@@ -7,7 +7,9 @@ the entire flow exactly as today - see TestARegularBrowserCandidateIsNeverBlocke
 direct, automated proof of that and deliberately the first class in this file.
 """
 import hashlib
+import io
 import plistlib
+import zipfile
 from datetime import timedelta
 
 import pytest
@@ -80,6 +82,37 @@ class TestBuildConfig:
         assert 'browserExamKey' not in parsed
         # The rest of the config is unaffected - a candidate can still be offered SEB.
         assert parsed['allowVideoCapture'] is True
+
+
+class TestBuildConfigZip:
+    """See services.seb.build_config_zip's own docstring for why this exists: a client-side
+    policy on some candidate machines hard-blocks a bare .seb download outright, and this is a
+    genuine, testable fallback for exactly that case - not a fix for anything wrong with the
+    plain .seb file itself, which these tests confirm is byte-for-byte the same content either
+    way.
+    """
+
+    def test_the_zip_contains_one_file_named_talentgate_assessment_seb(self, invitation, settings):
+        settings.SEB_BROWSER_EXAM_KEY_SECRET = 'test-secret'
+
+        archive = zipfile.ZipFile(io.BytesIO(seb.build_config_zip(invitation)))
+
+        assert archive.namelist() == ['talentgate-assessment.seb']
+
+    def test_the_zipped_file_is_byte_for_byte_the_same_as_build_config(self, invitation, settings):
+        settings.SEB_BROWSER_EXAM_KEY_SECRET = 'test-secret'
+
+        archive = zipfile.ZipFile(io.BytesIO(seb.build_config_zip(invitation)))
+
+        assert archive.read('talentgate-assessment.seb') == seb.build_config(invitation)
+
+    def test_the_zipped_file_still_parses_as_a_valid_seb_config(self, invitation, settings):
+        settings.SEB_BROWSER_EXAM_KEY_SECRET = 'test-secret'
+
+        archive = zipfile.ZipFile(io.BytesIO(seb.build_config_zip(invitation)))
+        parsed = plistlib.loads(archive.read('talentgate-assessment.seb'))
+
+        assert parsed['startURL'] == f"{settings.FRONTEND_ORIGIN}/t/{invitation.unique_link_token}/"
 
 
 class TestVerifySebRequest:
@@ -229,6 +262,41 @@ class TestExamSebConfigView:
 
         assert response.status_code == 200
         assert 'browserExamKey' not in plistlib.loads(response.content)
+
+
+class TestExamSebConfigZipView:
+    """HTTP-level: GET /api/exam/token/<token>/seb-config.zip/ - the fallback offered when a
+    candidate's own machine blocks a bare .seb download (see services.seb.build_config_zip).
+    """
+
+    def test_a_valid_invitation_gets_a_well_formed_zip(self, api_client, invitation, settings):
+        settings.SEB_BROWSER_EXAM_KEY_SECRET = 'test-secret'
+
+        response = api_client.get(f'/api/exam/token/{invitation.unique_link_token}/seb-config.zip/')
+
+        assert response.status_code == 200
+        assert response['Content-Type'] == 'application/zip'
+        assert response['Content-Disposition'] == 'attachment; filename="talentgate-assessment.zip"'
+        archive = zipfile.ZipFile(io.BytesIO(response.content))
+        parsed = plistlib.loads(archive.read('talentgate-assessment.seb'))
+        assert parsed['startURL'] == f"{settings.FRONTEND_ORIGIN}/t/{invitation.unique_link_token}/"
+
+    def test_an_unknown_token_is_a_400_not_a_404_or_500(self, api_client, db):
+        response = api_client.get('/api/exam/token/no-such-token/seb-config.zip/')
+
+        assert response.status_code == 400
+
+    def test_an_expired_invitation_is_a_400(
+        self, api_client, ta_user, make_batch, make_candidate, make_invitation
+    ):
+        candidate = make_candidate(make_batch(ta_user), ta_user)
+        invitation = make_invitation(
+            candidate, ta_user, link_expired_at=timezone.now() - timedelta(days=1),
+        )
+
+        response = api_client.get(f'/api/exam/token/{invitation.unique_link_token}/seb-config.zip/')
+
+        assert response.status_code == 400
 
 
 class TestExamSebConfigViewRateLimitIsPerCandidateNotPerIp:

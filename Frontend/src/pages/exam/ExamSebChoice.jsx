@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useExamSession } from '../../features/exam/examSessionContext';
 import { isRunningInSeb } from '../../features/exam/seb/sebDetection';
-import { configUrl, sebLaunchUrl } from '../../features/exam/seb/sebLaunch';
+import { configUrl, configZipUrl, sebLaunchUrl } from '../../features/exam/seb/sebLaunch';
 import BrandHeader from '../../components/layout/BrandHeader';
 import BrandFooter from '../../components/layout/BrandFooter';
 
@@ -96,6 +96,12 @@ export default function ExamSebChoice() {
               download the configuration file
             </a>{' '}
             instead and open it manually - it will take you straight into this assessment.
+            <br />
+            Downloaded file blocked by your browser or IT security software?{' '}
+            <a className="link-text" href={configZipUrl(token)}>
+              Download it as a zip file
+            </a>{' '}
+            instead, then extract and open the .seb file inside.
           </div>
 
           <button className="btn block" type="button" onClick={() => setStep('download')}>

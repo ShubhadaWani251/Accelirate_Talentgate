@@ -23,7 +23,9 @@ SEB_BROWSER_EXAM_KEY_SECRET happens to be configured; that setting only controls
 
 import hashlib
 import hmac
+import io
 import plistlib
+import zipfile
 
 from django.conf import settings
 from django.utils import timezone
@@ -76,6 +78,26 @@ def build_config(invitation):
     if key is not None:
         config['browserExamKey'] = key
     return plistlib.dumps(config, fmt=plistlib.FMT_XML)
+
+
+def build_config_zip(invitation):
+    """The same .seb file as build_config, wrapped in a plain zip archive.
+
+    Reported live: several candidate machines (Chrome Enterprise policies / corporate DLP tools)
+    hard-block downloads of uncommon extensions outright - .seb and .webm both observed blocked
+    with an identical "file type is prohibited" message, no override offered, specifically on
+    downloads from a real internet domain (the same file over localhost was unaffected on the
+    same machine) - see the "Lockdown & Detection Brief" notes and this feature's own commit
+    history for the live reports this responds to. .zip is about as universally unblocked as a
+    download gets, so offering the identical bytes wrapped in one is a real, testable way past a
+    policy like that - the candidate just has to extract it first rather than opening the .seb
+    directly. This is a mitigation for a client-side policy this app cannot see or control, not a
+    fix for anything actually wrong in the config file - build_config's own output is unchanged.
+    """
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr('talentgate-assessment.seb', build_config(invitation))
+    return buffer.getvalue()
 
 
 def verify_seb_request(request, invitation):

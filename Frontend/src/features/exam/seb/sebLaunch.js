@@ -18,3 +18,12 @@ export function sebLaunchUrl(token) {
   const url = configUrl(token);
   return url.startsWith('https:') ? url.replace('https:', 'sebs:') : url.replace('http:', 'seb:');
 }
+
+// A zipped alternative to configUrl - some candidate machines (Chrome Enterprise policy /
+// corporate DLP) hard-block a bare .seb download outright with no override offered, reported
+// live and reproduced with an identical block on .webm too (see services/seb.build_config_zip
+// on the backend). .zip is about the most universally-unblocked format there is, so this is a
+// genuine fallback for exactly that case - the candidate just has to extract it first.
+export function configZipUrl(token) {
+  return `${baseURL}/exam/token/${token}/seb-config.zip/`;
+}

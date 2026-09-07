@@ -366,6 +366,32 @@ class ExamSebConfigView(APIView):
         return response
 
 
+@method_decorator(ratelimit(key=ratelimit_token_key, rate='10/m', method='GET', block=False), name='get')
+class ExamSebConfigZipView(APIView):
+    """GET /api/exam/token/<token>/seb-config.zip/ - the same .seb file as ExamSebConfigView,
+    zipped - see services.seb.build_config_zip for why this exists: a client-side policy on some
+    candidates' machines hard-blocks the raw .seb download outright, and .zip is about the most
+    universally-unblocked download format there is. A plain alternative link, not a replacement -
+    ExamSebChoice.jsx offers both, since most candidates never need this one at all.
+    """
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request, token):
+        if getattr(request, 'limited', False):
+            return Response({'detail': 'Too many attempts. Please try again shortly.'},
+                             status=status.HTTP_429_TOO_MANY_REQUESTS)
+
+        invitation = _get_invitation(token)
+        if invitation is None or invitation.link_expired_at < timezone.now():
+            return Response({'detail': 'This assessment link is invalid or has expired.'},
+                             status=status.HTTP_400_BAD_REQUEST)
+
+        response = HttpResponse(seb.build_config_zip(invitation), content_type='application/zip')
+        response['Content-Disposition'] = 'attachment; filename="talentgate-assessment.zip"'
+        return response
+
+
 class ExamBeginView(APIView):
     """POST /api/exam/begin/ - starts the clock, called once the candidate is actually looking at
     the exam window (not at identity capture). Idempotent: a reload/resume keeps the original
