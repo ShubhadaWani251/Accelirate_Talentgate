@@ -15,7 +15,7 @@ from django.utils import timezone
 
 from api.models import Batch, Invitation
 from api.services import invites
-from api.services.email_templates import text_body_to_html
+from api.services.email_templates import format_datetime, text_body_to_html
 
 
 class TestErrorSummary:
@@ -483,6 +483,36 @@ class TestInvitationEmailBody:
 
         assert invitation.unique_link_token in mail.outbox[0].body
 
+    def test_a_re_invite_with_its_own_window_shows_that_window_not_the_batchs(
+        self, ta_user, make_batch, make_candidate, make_invitation
+    ):
+        """Reported: a candidate re-invited with an updated window still saw the batch's
+        original dates in the email. render_invitation_email used to read batch.link_valid_from/
+        link_valid_until directly, ignoring that a re-invite can override its own window (see
+        services.invites.create_single_reinvite) - it must show THIS invitation's effective
+        window (services.exam_session.invitation_opens_at / invitation.link_expired_at), the
+        same source of truth the exam portal itself enforces against.
+        """
+        batch = make_batch(
+            ta_user,
+            link_valid_from=timezone.now() + timedelta(days=10),
+            link_valid_until=timezone.now() + timedelta(days=11),
+        )
+        candidate = make_candidate(batch, ta_user)
+        new_start = timezone.now() + timedelta(days=1)
+        new_end = timezone.now() + timedelta(days=2)
+        invitation = make_invitation(
+            candidate, ta_user, link_valid_from=new_start, link_expired_at=new_end,
+        )
+
+        invites.send_invite_and_record(invitation, 'https://exam.example.test')
+
+        body = mail.outbox[0].body
+        assert format_datetime(new_start) in body
+        assert format_datetime(new_end) in body
+        assert format_datetime(batch.link_valid_from) not in body
+        assert format_datetime(batch.link_valid_until) not in body
+
     def test_the_contact_email_is_whoever_actually_sent_the_invite(
         self, ta_user, admin_user, make_batch, make_candidate, make_invitation, settings
     ):
@@ -547,6 +577,42 @@ class TestInvitationEmailBody:
             % invitation.unique_link_token
         )
         assert expected_url in mail.outbox[0].body
+
+    def test_important_instructions_are_highlighted_red_in_the_html(
+        self, ta_user, make_batch, make_candidate, make_invitation
+    ):
+        """The three **marked** instructions (SEB is required, camera/mic must stay on, the
+        three-warning rule) render as bold red text in the HTML part - see
+        email_templates._highlight_important. The plain-text part can't show color at all, so
+        this only checks the HTML alternative.
+        """
+        invitation = make_invitation(make_candidate(make_batch(ta_user), ta_user), ta_user)
+
+        invites.send_invite_and_record(invitation, 'https://exam.example.test')
+
+        html = mail.outbox[0].alternatives[0][0]
+        assert '<strong style="color:#db001e;">Required: this assessment must be taken' in html
+        assert '<strong style="color:#db001e;">Your camera and microphone must remain enabled' in html
+        assert '<strong style="color:#db001e;">You get up to three warnings' in html
+        assert '**' not in html
+
+
+class TestHighlightImportant:
+    """Unit-level: the **marker** -> red <strong> conversion itself, independent of any one
+    template's wording.
+    """
+
+    def test_a_marked_phrase_becomes_bold_red(self):
+        html = text_body_to_html('Please **do not skip this** step.')
+        assert '<strong style="color:#db001e;">do not skip this</strong>' in html
+
+    def test_unmarked_text_is_unaffected(self):
+        html = text_body_to_html('Nothing important here.')
+        assert '<strong' not in html
+
+    def test_multiple_marked_phrases_in_one_body_are_all_converted(self):
+        html = text_body_to_html('**First** thing. **Second** thing.')
+        assert html.count('<strong style="color:#db001e;">') == 2
 
 
 class TestCtaButtonRendersInOutlook:

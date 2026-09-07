@@ -29,6 +29,8 @@ from datetime import timezone as dt_timezone
 
 from django.conf import settings
 
+from api.services.exam_session import invitation_opens_at
+
 _SIGNATURE = (
     'Regards,\n'
     'Talent Acquisition Team\n'
@@ -181,9 +183,9 @@ INVITATION_TEMPLATE = {
         'Important Instructions\n\n'
         '- Before clicking the assessment link, please clear your browser cache to avoid any '
         'loading issues.\n\n'
-        '- Required: this assessment must be taken inside Safe Exam Browser (SEB) - a free '
-        'lockdown browser that keeps other applications and notifications from interrupting '
-        'you. If you do not already have it installed, get it from '
+        '- **Required: this assessment must be taken inside Safe Exam Browser (SEB).** It is '
+        'a free lockdown browser that keeps other applications and notifications from '
+        'interrupting you. If you do not already have it installed, get it from '
         'https://safeexambrowser.org/download_en.html before your assessment window opens. '
         'Once installed, click the link below to download your configuration file; opening it '
         'launches Safe Exam Browser directly into your assessment:\n'
@@ -202,13 +204,16 @@ INVITATION_TEMPLATE = {
         'candidate will be permitted to start the test.\n\n'
         '- Complete the assessment within the specified assessment window. Once the window '
         'expires, the assessment link will no longer be accessible.\n\n'
-        '- Ensure that your camera and microphone remain enabled throughout the assessment, '
-        'as they may be used for proctoring purposes.\n\n'
+        '- **Your camera and microphone must remain enabled for the entire assessment** - '
+        'they are used for continuous proctoring, and switching either off is treated as a '
+        'violation.\n\n'
         '- Use a laptop or desktop with a stable internet connection and complete the '
         'assessment in one uninterrupted session.\n\n'
         '- Do not switch browser tabs, minimize the browser window, or open other '
-        'applications during the assessment. Such activities may be detected and recorded by '
-        'the system and could impact your assessment.\n\n'
+        'applications during the assessment - each one is logged. '
+        '**You get up to three warnings; after the third, the next occurrence ends your '
+        'assessment immediately.** Each warning must also be acknowledged within 10 seconds, '
+        'or your assessment ends automatically even if you still have warnings left.\n\n'
         '- Submit your assessment before the allotted time expires. Once submitted, the '
         'assessment cannot be resumed or modified.\n\n'
         'Need Assistance?\n'
@@ -260,7 +265,7 @@ def format_datetime(value):
     return f'{local.strftime(DATETIME_FORMAT)} {label}'
 
 
-def render_invitation_email(candidate, batch, link, sender=None, seb_config_link=None):
+def render_invitation_email(candidate, invitation, link, sender=None, seb_config_link=None):
     """Resolve the approved invitation copy into (subject, body) for one candidate.
 
     `sender` is the staff user actually sending this invite (Invitation.sent_by) - candidates
@@ -274,13 +279,21 @@ def render_invitation_email(candidate, batch, link, sender=None, seb_config_link
     clients (Outlook's Safe Links rewriting in particular). That unreliability is exactly why the
     seb:// link only ever appears on the in-app choice screen (ExamSebChoice.jsx), never in an
     email - see api/services/seb.py.
+
+    Takes the whole `invitation`, not `invitation.batch`: a re-invite can carry its own window,
+    independent of the batch's (see services.invites.create_single_reinvite), and this must show
+    THAT window, not the batch's original one, or a candidate re-invited with a new window still
+    reads the email as if their old one still applied. invitation_opens_at is the same "effective
+    start" helper link_not_yet_open and the candidate-facing 'opens at' messages already use, so
+    this can never disagree with what the exam portal itself enforces; link_expired_at is read
+    directly since - unlike link_valid_from - it is never null on an Invitation.
     """
     return INVITATION_TEMPLATE['subject'], INVITATION_TEMPLATE['body'].format(
         name=candidate.full_name,
         link=link,
         seb_config_link=seb_config_link,
-        start=format_datetime(batch.link_valid_from),
-        end=format_datetime(batch.link_valid_until),
+        start=format_datetime(invitation_opens_at(invitation)),
+        end=format_datetime(invitation.link_expired_at),
         support_email=(sender.email if sender else None) or support_email(),
     )
 
@@ -323,6 +336,26 @@ def _linkify(escaped_text):
         return f'<a href="mailto:{address}" style="color:#0b5cab;">{address}</a>'
 
     return _EMAIL_RE.sub(email_repl, _URL_RE.sub(url_repl, escaped_text))
+
+
+# **...** in the plain-text source (see INVITATION_TEMPLATE) marks a phrase as important enough
+# to call out visually - matched last, against the already-escaped/linkified body, because plain
+# asterisks are untouched by both html.escape (not an HTML-special character) and _linkify
+# (its regexes only ever match URLs/emails), so this has nothing to interfere with either way.
+_IMPORTANT_RE = re.compile(r'\*\*(.+?)\*\*')
+
+
+def _highlight_important(escaped_linkified_body):
+    """Turns **marked** text into a bold, red inline span - the email's equivalent of the app's
+    own --brand-red (#db001e) styling for a warning-level instruction. Inlined rather than a CSS
+    class for the same reason _cta_button's colors are: Gmail strips <style> blocks and
+    recolors unstyled elements itself, so a class alone would not survive there.
+
+    The plain-text part is left with the bare `**...**` markers rather than stripped - text
+    can't render color, and `**bold**` reads as a familiar emphasis convention on its own (the
+    same shape Slack/markdown use) rather than as broken formatting.
+    """
+    return _IMPORTANT_RE.sub(r'<strong style="color:#db001e;">\1</strong>', escaped_linkified_body)
 
 
 def _cta_button(url, label):
@@ -376,7 +409,7 @@ def text_body_to_html(text, cta_url=None, cta_label='Start Your Assessment'):
 
     Styles are inline because email clients strip <style> blocks.
     """
-    body = _linkify(html_lib.escape(text))
+    body = _highlight_important(_linkify(html_lib.escape(text)))
 
     if cta_url:
         # Matched against the escaped-and-linkified form, since that is what `body` now holds.

@@ -47,7 +47,8 @@ export default function ExamInstructions() {
                 back to ("rule 5 said..."), and an ordered list gives each one a handle. */}
             <ol style={{ fontSize: 12.5, margin: 0, paddingLeft: 20, lineHeight: 1.8 }}>
               <li>Please be prepared with your government ID document before proceeding</li>
-              <li>Your camera and microphone stay on for identity verification and continuous proctoring throughout the assessment. <b>Switching your camera off, or covering it, is treated the same as leaving the window</b> - one warning, then the attempt ends</li>
+              <li><b style={{ color: 'var(--brand-red)' }}>This assessment must be taken inside Safe Exam Browser (SEB)</b> - see the next step to launch it</li>
+              <li><b style={{ color: 'var(--brand-red)' }}>Your camera and microphone must stay on for the entire assessment</b> for identity verification and continuous proctoring. Switching your camera off, or covering it, is treated the same as leaving the window - one warning, then the attempt ends</li>
               <li>You're now in full-screen mode for the rest of this assessment</li>
               <li>Do not switch browser tabs, minimize, exit full-screen, or open other applications once the exam begins</li>
               {/* Without this, a candidate who chose Safe Exam Browser could reasonably read the
@@ -59,7 +60,7 @@ export default function ExamInstructions() {
               {/* Stated precisely, because a candidate who is told "one warning" for everything
                   would reasonably feel misled when a Print Screen ends the attempt outright.
                   The split is defined server-side in exam_session.WARNABLE_REASONS. */}
-              <li><b>You get up to three warnings</b> for leaving the assessment window. After your third warning, the next occurrence ends your attempt immediately and your answers are submitted as they are. Each warning must also be acknowledged within <b>10 seconds</b> — if you do not click back into the assessment in time, your attempt ends automatically even if you still have warnings left</li>
+              <li><b style={{ color: 'var(--brand-red)' }}>You get up to three warnings</b> for leaving the assessment window. After your third warning, the next occurrence ends your attempt immediately and your answers are submitted as they are. Each warning must also be acknowledged within <b style={{ color: 'var(--brand-red)' }}>10 seconds</b> — if you do not click back into the assessment in time, your attempt ends automatically even if you still have warnings left</li>
               <li>Keyboard shortcuts like Print Screen, F12 or Ctrl+U end your attempt <b>immediately, with no warning</b></li>
               <li>Every such event is logged and shown to the Staffing team, with the specific reason shown to you too</li>
               {/* Stated explicitly because candidates routinely assume the opposite and leave

@@ -16,9 +16,22 @@ from api.services import blob_storage, video_transcode
 pytestmark = pytest.mark.django_db
 
 
-def _local_fallback(settings):
+def _local_fallback(settings, attempt_id):
+    """Points blob_storage at the local-disk fallback AND clears any file a previous run of
+    this same test left behind for this attempt_id.
+
+    Unlike the database (rolled back after every test), local-fallback evidence is written to
+    a real file under Backend/media/, which survives between test runs. start_recording_blob is
+    deliberately idempotent - it never truncates a file that already exists (that is exactly
+    right for the real candidate flow, where a retried identity-capture request must not lose
+    already-uploaded chunks) - so without this cleanup, re-running this test appends a second
+    WebM's bytes onto the first run's leftover file, corrupting it. That is not hypothetical:
+    it is exactly what made this suite intermittently fail after being run more than once
+    against the same attempt_id.
+    """
     settings.AZURE_STORAGE_CONNECTION_STRING = ''
     settings.DEBUG = True
+    blob_storage.delete_attempt_evidence(attempt_id)
 
 
 @pytest.fixture
@@ -47,8 +60,8 @@ class TestTranscodeToMp4Succeeds:
     def test_a_real_recording_converts_to_a_playable_mp4(
         self, settings, real_webm_bytes
     ):
-        _local_fallback(settings)
         attempt_id = 90001
+        _local_fallback(settings, attempt_id)
         blob_storage.start_recording_blob(attempt_id)
         blob_storage.append_recording_chunk(attempt_id, real_webm_bytes)
 
@@ -65,8 +78,8 @@ class TestTranscodeToMp4Succeeds:
         actually stored are a valid, decodable MP4, not just a renamed WebM (exactly the bug this
         feature exists to not repeat - see CandidateEvidenceZipView's old EVIDENCE_FILES entry).
         """
-        _local_fallback(settings)
         attempt_id = 90002
+        _local_fallback(settings, attempt_id)
         blob_storage.start_recording_blob(attempt_id)
         blob_storage.append_recording_chunk(attempt_id, real_webm_bytes)
 
@@ -89,7 +102,7 @@ class TestTranscodeToMp4Succeeds:
 
 class TestTranscodeToMp4HandlesFailureGracefully:
     def test_no_recording_at_all_returns_none(self, settings):
-        _local_fallback(settings)
+        _local_fallback(settings, 999999)
 
         assert video_transcode.transcode_to_mp4(999999) is None
 
@@ -98,8 +111,8 @@ class TestTranscodeToMp4HandlesFailureGracefully:
         chunk landed) must not crash the whole scheduled run over one bad file - see
         transcode_recordings' own module docstring.
         """
-        _local_fallback(settings)
         attempt_id = 90003
+        _local_fallback(settings, attempt_id)
         blob_storage.start_recording_blob(attempt_id)
         blob_storage.append_recording_chunk(attempt_id, b'not a real webm file at all')
 
@@ -108,8 +121,8 @@ class TestTranscodeToMp4HandlesFailureGracefully:
         assert result is None
 
     def test_an_empty_recording_fails_cleanly(self, settings):
-        _local_fallback(settings)
         attempt_id = 90004
+        _local_fallback(settings, attempt_id)
         blob_storage.start_recording_blob(attempt_id)
 
         result = video_transcode.transcode_to_mp4(attempt_id)

@@ -237,28 +237,27 @@ export default function CandidateDetail() {
             <div style={{ border: '1px dashed var(--line-soft)', borderRadius: 8, textAlign: 'center', padding: 20 }}>
               🎥<br /><span style={{ fontSize: 11, color: 'var(--muted)' }}>Session recording</span>
             </div>
-            {candidate.evidence.session_recording_url ? (
+            {/* Once the MP4 conversion (services/video_transcode.py) exists, it's the only
+                option shown - a TA-side simplification down to one clear link pair rather than
+                two doing the same job, and the only one that ever offers a Download (the WebM
+                can be hundreds of MB - see the size check that prompted this whole feature -
+                so downloading it is never offered, only played). Until the MP4 exists, Play
+                (not Download) against the WebM directly is shown instead of nothing: a TA
+                needing to review evidence right after a submission should not have to wait out
+                the conversion queue (see transcode_recordings) just to watch it once. */}
+            {candidate.evidence.session_recording_mp4_url ? (
+              <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 4 }}>
+                <a className="link-text" href={candidate.evidence.session_recording_mp4_url} target="_blank" rel="noopener noreferrer">▶ Play as MP4</a>
+                <a className="link-text" href={candidate.evidence.session_recording_mp4_download_url} download>⬇ Download MP4</a>
+              </div>
+            ) : candidate.evidence.session_recording_url ? (
               <>
-                <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 4 }}>
+                <div style={{ textAlign: 'center', marginTop: 4 }}>
                   <a className="link-text" href={candidate.evidence.session_recording_url} target="_blank" rel="noopener noreferrer">▶ Play Recording</a>
-                  <a className="link-text" href={candidate.evidence.session_recording_download_url} download>⬇ Download</a>
                 </div>
-                {/* WebM only plays reliably in Chrome/Edge/Firefox - this MP4 copy (converted
-                    server-side, see Backend/api/services/video_transcode.py) is for a TA whose
-                    browser or network doesn't handle WebM. It lands a little after the exam
-                    ends, not instantly, so show a "converting" hint rather than nothing while
-                    it's not there yet - a TA who lands here right after a submission shouldn't
-                    read a bare missing link as a broken recording. */}
-                {candidate.evidence.session_recording_mp4_url ? (
-                  <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 4 }}>
-                    <a className="link-text" href={candidate.evidence.session_recording_mp4_url} target="_blank" rel="noopener noreferrer">▶ Play as MP4</a>
-                    <a className="link-text" href={candidate.evidence.session_recording_mp4_download_url} download>⬇ Download MP4</a>
-                  </div>
-                ) : (
-                  <div style={{ textAlign: 'center', fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-                    MP4 copy not ready yet - converting shortly after the assessment ends
-                  </div>
-                )}
+                <div style={{ textAlign: 'center', fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+                  MP4 copy not ready yet - converting shortly
+                </div>
               </>
             ) : (
               <div style={{ textAlign: 'center', fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Not yet recorded</div>
