@@ -185,11 +185,19 @@ INVITATION_TEMPLATE = {
         'loading issues.\n\n'
         '- **Required: this assessment must be taken inside Safe Exam Browser (SEB).** It is '
         'a free lockdown browser that keeps other applications and notifications from '
-        'interrupting you. If you do not already have it installed, get it from '
-        'https://safeexambrowser.org/download_en.html before your assessment window opens. '
-        'Once installed, click the link below to download your configuration file; opening it '
-        'launches Safe Exam Browser directly into your assessment:\n'
-        '{seb_config_link}\n\n'
+        'interrupting you. Follow these steps before your assessment window opens:\n'
+        'Step 1: Click your Assessment Link above and follow the on-screen instructions to '
+        'launch Safe Exam Browser.\n'
+        'Step 2: If Safe Exam Browser does not open automatically, you likely do not have it '
+        'installed yet - download and install it from '
+        'https://safeexambrowser.org/download_en.html, then click your configuration link '
+        'below and open the downloaded file; it launches Safe Exam Browser directly into your '
+        'assessment:\n'
+        '{seb_config_link}\n'
+        'Step 3: If your browser or IT security software blocks that download (for example, '
+        '"file type is prohibited" or "Access to file has been blocked"), use the zip link '
+        'below instead, then extract it and open the .seb file found inside:\n'
+        '{seb_config_zip_link}\n\n'
         '- Please make sure your camera and microphone are working properly before you begin '
         'the assessment.\n\n'
         '- Before starting the assessment, please close all other applications and turn off '
@@ -265,7 +273,8 @@ def format_datetime(value):
     return f'{local.strftime(DATETIME_FORMAT)} {label}'
 
 
-def render_invitation_email(candidate, invitation, link, sender=None, seb_config_link=None):
+def render_invitation_email(candidate, invitation, link, sender=None, seb_config_link=None,
+                             seb_config_zip_link=None):
     """Resolve the approved invitation copy into (subject, body) for one candidate.
 
     `sender` is the staff user actually sending this invite (Invitation.sent_by) - candidates
@@ -273,12 +282,14 @@ def render_invitation_email(candidate, invitation, link, sender=None, seb_config
     can act on a problem. Falls back to the generic support_email() only when there's no sender
     to name (Invitation.sent_by is SET_NULL, so a deleted user account leaves this null).
 
-    `seb_config_link` is a plain https:// URL (not the seb:// launch scheme) deliberately - an
-    ordinary URL is what text_body_to_html's _linkify below already turns into a real clickable
-    link with zero extra work, whereas a custom URL scheme is not reliably clickable across mail
-    clients (Outlook's Safe Links rewriting in particular). That unreliability is exactly why the
-    seb:// link only ever appears on the in-app choice screen (ExamSebChoice.jsx), never in an
-    email - see api/services/seb.py.
+    `seb_config_link` and `seb_config_zip_link` are both plain https:// URLs (not the seb://
+    launch scheme) deliberately - an ordinary URL is what text_body_to_html's _linkify below
+    already turns into a real clickable link with zero extra work, whereas a custom URL scheme is
+    not reliably clickable across mail clients (Outlook's Safe Links rewriting in particular).
+    That unreliability is exactly why the seb:// link only ever appears on the in-app choice
+    screen (ExamSebChoice.jsx), never in an email - see api/services/seb.py. The zip link is the
+    step-3 fallback for a candidate whose browser/IT security software blocks the bare .seb
+    download outright (see services/seb.py's build_config_zip).
 
     Takes the whole `invitation`, not `invitation.batch`: a re-invite can carry its own window,
     independent of the batch's (see services.invites.create_single_reinvite), and this must show
@@ -292,6 +303,7 @@ def render_invitation_email(candidate, invitation, link, sender=None, seb_config
         name=candidate.full_name,
         link=link,
         seb_config_link=seb_config_link,
+        seb_config_zip_link=seb_config_zip_link,
         start=format_datetime(invitation_opens_at(invitation)),
         end=format_datetime(invitation.link_expired_at),
         support_email=(sender.email if sender else None) or support_email(),
@@ -375,8 +387,10 @@ def _cta_button(url, label):
     `target="_blank"` and `rel="noopener"` keep the assessment out of the mail client's own
     embedded viewer where possible - the exam needs a real browser for full-screen and camera.
 
-    The raw URL is still printed underneath by the caller. That redundancy is deliberate:
-    clients that block styling, and the plain-text part itself, both need the link readable.
+    The caller replaces the bare-URL anchor with this button rather than showing both - the
+    plain-text part still carries the raw URL on its own for a text-only client or a button a
+    mail gateway strips, so nothing is lost, but the HTML view showing a big button immediately
+    followed by the same link spelled out again read as redundant/cluttered.
     """
     return (
         '<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
@@ -402,9 +416,9 @@ def text_body_to_html(text, cta_url=None, cta_label='Start Your Assessment'):
     are Word-safe because Word lays out actual block and line elements rather than interpreting
     a CSS whitespace rule.
 
-    `cta_url`, when given and present in the text, gets a button rendered above the bare URL
-    at that spot - so the candidate has something obvious to click, and still has the link
-    itself if their client strips the styling. Callers that have no single primary action
+    `cta_url`, when given and present in the text, replaces the bare URL at that spot with a
+    styled button - so the candidate has one obvious thing to click instead of a button and the
+    same link spelled out again right below it. Callers that have no single primary action
     (notifications, certification) leave it None and get plain linkified text.
 
     Styles are inline because email clients strip <style> blocks.
@@ -419,7 +433,7 @@ def text_body_to_html(text, cta_url=None, cta_label='Start Your Assessment'):
         if anchor in body:
             body = body.replace(
                 anchor,
-                _cta_button(escaped_url, html_lib.escape(cta_label)) + anchor,
+                _cta_button(escaped_url, html_lib.escape(cta_label)),
                 1,
             )
 

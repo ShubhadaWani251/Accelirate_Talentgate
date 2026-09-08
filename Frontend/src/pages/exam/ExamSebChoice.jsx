@@ -84,25 +84,36 @@ export default function ExamSebChoice() {
         <div className="auth-card" style={{ textAlign: 'center' }}>
           <h3>Step 2: Launch Safe Exam Browser</h3>
           <div className="auth-sub">
-            Launch Safe Exam Browser to continue into your assessment.
+            Follow these steps in order - each one is a fallback for the step before it.
           </div>
 
-          <a className="btn primary block" href={sebLaunchUrl(token)}>
-            Launch Safe Exam Browser
-          </a>
-          <div className="auth-sub" style={{ fontSize: 11.5, margin: '8px 0 20px' }}>
-            If nothing happened,{' '}
-            <a className="link-text" href={configUrl(token)}>
-              download the configuration file
-            </a>{' '}
-            instead and open it manually - it will take you straight into this assessment.
-            <br />
-            Downloaded file blocked by your browser or IT security software?{' '}
-            <a className="link-text" href={configZipUrl(token)}>
-              Download it as a zip file
-            </a>{' '}
-            instead, then extract and open the .seb file inside.
-          </div>
+          <ol style={{
+            textAlign: 'left', fontSize: 12.5, margin: '16px 0 20px', paddingLeft: 20, lineHeight: 1.8,
+          }}>
+            <li style={{ marginBottom: 14 }}>
+              Click <b>Launch Safe Exam Browser</b> below. If it opens and takes you straight
+              into your assessment, you're done - skip the rest.
+              <a
+                className="btn primary block"
+                href={sebLaunchUrl(token)}
+                style={{ marginTop: 8 }}
+              >
+                Launch Safe Exam Browser
+              </a>
+            </li>
+            <li style={{ marginBottom: 14 }}>
+              If nothing happens after a few seconds,{' '}
+              <a className="link-text" href={configUrl(token)}>download the configuration file</a>{' '}
+              instead and open the downloaded file manually - it launches Safe Exam Browser
+              straight into your assessment.
+            </li>
+            <li>
+              If your browser or IT security software blocks that download (for example,
+              "file type is prohibited"),{' '}
+              <a className="link-text" href={configZipUrl(token)}>download it as a zip file</a>{' '}
+              instead, then extract it and open the .seb file found inside.
+            </li>
+          </ol>
 
           <button className="btn block" type="button" onClick={() => setStep('download')}>
             Back

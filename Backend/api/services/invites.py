@@ -180,8 +180,11 @@ def send_invite_email(invitation, base_url):
     seb_config_link = (
         f"{base_url.rstrip('/')}/api/exam/token/{invitation.unique_link_token}/seb-config/"
     )
+    seb_config_zip_link = (
+        f"{base_url.rstrip('/')}/api/exam/token/{invitation.unique_link_token}/seb-config.zip/"
+    )
     subject, body = render_invitation_email(
-        candidate, invitation, link, invitation.sent_by, seb_config_link,
+        candidate, invitation, link, invitation.sent_by, seb_config_link, seb_config_zip_link,
     )
     # cta_url turns the assessment link into a real button in the HTML part; the bare URL
     # is still printed beneath it and in the plain-text part.
