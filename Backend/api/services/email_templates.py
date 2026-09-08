@@ -183,6 +183,8 @@ INVITATION_TEMPLATE = {
         'Important Instructions\n\n'
         '- Before clicking the assessment link, please clear your browser cache to avoid any '
         'loading issues.\n\n'
+        '- Please start the assessment at least 30 minutes before your assessment window '
+        'closes, to allow sufficient time to complete it.\n\n'
         '- **Required: this assessment must be taken inside Safe Exam Browser (SEB).** It is '
         'a free lockdown browser that keeps other applications and notifications from '
         'interrupting you. Follow these steps before your assessment window opens:\n'

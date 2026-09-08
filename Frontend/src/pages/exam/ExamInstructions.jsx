@@ -47,6 +47,7 @@ export default function ExamInstructions() {
                 back to ("rule 5 said..."), and an ordered list gives each one a handle. */}
             <ol style={{ fontSize: 12.5, margin: 0, paddingLeft: 20, lineHeight: 1.8 }}>
               <li>Please be prepared with your government ID document before proceeding</li>
+              <li>Please start the assessment at least 30 minutes before your assessment window closes, to allow sufficient time to complete it</li>
               <li><b style={{ color: 'var(--brand-red)' }}>This assessment must be taken inside Safe Exam Browser (SEB)</b> - see the next step to launch it</li>
               <li><b style={{ color: 'var(--brand-red)' }}>Your camera and microphone must stay on for the entire assessment</b> for identity verification and continuous proctoring. Switching your camera off, or covering it, is treated the same as leaving the window - one warning, then the attempt ends</li>
               <li>You're now in full-screen mode for the rest of this assessment</li>
