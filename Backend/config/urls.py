@@ -30,7 +30,14 @@ urlpatterns = [
     path('api/', include('api.urls')),
 ]
 
-if settings.DEBUG:
+# Checked via INSTALLED_APPS, not settings.DEBUG directly: settings.py only appends
+# 'django.contrib.admin' to INSTALLED_APPS at IMPORT TIME, when DEBUG is whatever a real .env
+# says - a test overriding settings.DEBUG later (e.g. to force blob_storage's local-disk
+# fallback, see test_exam_seb.py) does not retroactively install the app, so re-deriving this
+# from DEBUG a second time here would try to import an app that was never actually installed and
+# crash the first request any test makes while that override is active. INSTALLED_APPS is the
+# fact that was actually decided; DEBUG here would just be re-asking a question already answered.
+if 'django.contrib.admin' in settings.INSTALLED_APPS:
     from django.contrib import admin
     # NOT /admin/ - the React app already owns that whole prefix for its own admin screens
     # (User Management, Question Bank, Audit Logs - see AppRouter.jsx), routed client-side via
@@ -40,6 +47,7 @@ if settings.DEBUG:
     # collision entirely.
     urlpatterns += [path('django-admin/', admin.site.urls)]
 
+if settings.DEBUG:
     # Serves the local-disk evidence fallback (api/services/blob_storage.py) when no Azure
     # connection string is configured - never active in production.
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
