@@ -55,6 +55,16 @@ azure-storage-blob==12.24.0
 # all to install one the traditional way.
 imageio-ffmpeg==0.6.0
 
+# --- Aadhaar identity verification (exam-time identity capture, services/aadhaar.py) ---
+# QR detection/decode of the candidate's photographed Aadhaar card. Ships as a self-contained
+# wheel with no system libzbar install needed - same "wheel over system package" reasoning as
+# imageio-ffmpeg above, since App Service's code-deploy has no apt-get access either.
+opencv-python-headless==5.0.0.93
+# RSA/X.509 signature verification for a UIDAI Secure QR. Already resolves into this tree
+# transitively via PyJWT[crypto] above; declared directly here for the same reason PyJWT[crypto]
+# itself is declared directly rather than relying on staying a transitive dependency.
+cryptography==50.0.1
+
 # --- Shared cache for rate-limit and login-lockout counters ---
 # Used via django.core.cache.backends.redis.RedisCache when REDIS_URL is set. Without it those
 # counters are per-process and every limit is effectively multiplied by the worker count.
@@ -71,3 +81,6 @@ tzdata==2026.3
 # --- Tests ---
 pytest==9.1.1
 pytest-django==4.12.0
+# Generates a real QR image at test time (test_aadhaar.py) to prove decode_qr_payload against
+# actual QR bytes rather than a mock - never imported outside tests.
+qrcode==8.2

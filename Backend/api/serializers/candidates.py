@@ -5,7 +5,7 @@ from rest_framework import serializers
 
 from api.models import AuditLog, Candidate, ExamAttempt, Invitation
 from api.serializers.common import format_aadhaar_last4
-from api.services import blob_storage
+from api.services import aadhaar, blob_storage
 from api.services.exam_session import termination_label
 
 SECTION_LABELS = {
@@ -305,6 +305,7 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
     email_last_attempt_at = serializers.SerializerMethodField()
     email_retry_count = serializers.SerializerMethodField()
     other_batches = serializers.SerializerMethodField()
+    aadhaar_hash_conflicts = serializers.SerializerMethodField()
 
     class Meta:
         model = Candidate
@@ -318,7 +319,7 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
             'email_status', 'email_status_display', 'email_error', 'email_sent_at',
             'email_last_attempt_at', 'email_retry_count',
             'link_valid_from', 'link_valid_until',
-            'other_batches',
+            'other_batches', 'aadhaar_hash_conflicts',
         ]
 
     def get_aadhaar_last4(self, candidate):
@@ -416,6 +417,14 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
             for other in others
         ]
 
+    def get_aadhaar_hash_conflicts(self, candidate):
+        """Other candidates whose decoded Aadhaar photo hashes to the same value as this one's -
+        see services.aadhaar.find_hash_conflicts for why this is a read-time, post-hoc signal,
+        never a gate, and unrelated to the pre-exam duplicate_check.py system.
+        """
+        attempt = _latest_attempt(candidate)
+        return aadhaar.find_hash_conflicts(attempt) if attempt else []
+
     def get_evidence(self, candidate):
         attempt = _latest_attempt(candidate)
         if not attempt:
@@ -424,6 +433,8 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
                 'face_photo_url': None, 'face_photo_download_url': None,
                 'session_recording_url': None, 'session_recording_download_url': None,
                 'session_recording_mp4_url': None, 'session_recording_mp4_download_url': None,
+                'aadhaar_verification_status': None, 'aadhaar_verification_status_display': None,
+                'aadhaar_decoded_last4': None,
             }
         # Signed here, at the moment they are handed to the browser, rather than read straight
         # off the row. The stored values are unsigned pointers and would 404 on their own; each
@@ -467,6 +478,9 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
                 attempt.session_recording_mp4_url,
                 download_filename=f'{candidate_slug}_session_recording.mp4',
             ),
+            'aadhaar_verification_status': attempt.aadhaar_verification_status,
+            'aadhaar_verification_status_display': attempt.get_aadhaar_verification_status_display(),
+            'aadhaar_decoded_last4': attempt.aadhaar_decoded_last4,
         }
 
     def get_timeline(self, candidate):

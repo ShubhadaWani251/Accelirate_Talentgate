@@ -68,6 +68,9 @@ schedule 30 terminate_stale_attempts &
 # No candidate is waiting on this one in real time (unlike process_email_queue) - a 10-minute
 # cadence just bounds how long after an exam ends before its MP4 copy is ready.
 schedule 600 transcode_recordings &
+# Same 10-minute cadence as transcode_recordings - no candidate is waiting on this one in real
+# time either, and it's a no-op every tick while AADHAAR_VERIFICATION_ENABLED stays off.
+schedule 600 verify_aadhaar_ocr_fallback &
 
 echo "==> Starting gunicorn"
 # --config picks up gunicorn.conf.py, which binds to $PORT. App Service sets PORT and expects the

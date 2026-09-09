@@ -253,6 +253,28 @@ QUESTION_EXPORT_API_KEY = os.environ.get('QUESTION_EXPORT_API_KEY', '')
 # without this set.
 SEB_BROWSER_EXAM_KEY_SECRET = os.environ.get('SEB_BROWSER_EXAM_KEY_SECRET', '')
 
+# Master switch for automated Aadhaar verification (see api/services/aadhaar.py). Off by default
+# and meant to STAY off until someone has verified the Secure QR parser against UIDAI's current
+# published spec and run a real UAT pass against actual (consented, disposable/test) Aadhaar
+# cards - the module docstring explains why guessing that format is worse than not shipping the
+# feature at all. Even when True, nothing here can ever block or delay a candidate's exam -
+# same guarantee api/services/seb.py already gives for SEB verification.
+AADHAAR_VERIFICATION_ENABLED = os.environ.get('AADHAAR_VERIFICATION_ENABLED', '') == 'True'
+
+# Keys the one-way HMAC-SHA256 hash of a decoded Aadhaar number (services.aadhaar._hash_full_number)
+# - the full number itself is never stored anywhere, only this hash, matching the same
+# never-store-the-full-number policy Candidate.aadhaar_last4's own docstring already states.
+# Blank means hashing simply cannot happen; verify_identity_photo treats that as "not
+# configured", not a crash - same "blank = graceful no-op" convention as
+# SEB_BROWSER_EXAM_KEY_SECRET above.
+AADHAAR_HASH_PEPPER = os.environ.get('AADHAAR_HASH_PEPPER', '')
+
+# Path to a PEM file holding UIDAI's current Secure QR signature-verification public key/
+# certificate - deliberately a file path read at call time, not a value baked into source, so it
+# can be rotated the moment UIDAI changes it without a code deploy. Blank means every Secure QR
+# is treated as signature_invalid rather than trusted or crashing.
+AADHAAR_UIDAI_PUBLIC_KEY_PATH = os.environ.get('AADHAAR_UIDAI_PUBLIC_KEY_PATH', '')
+
 # The link put in the new-user credentials email specifically. Deliberately a separate setting
 # from FRONTEND_ORIGIN above, not reused: FRONTEND_ORIGIN tracks wherever *this* backend's own
 # frontend is (localhost in dev), but staff only ever log in against the one real deployment -

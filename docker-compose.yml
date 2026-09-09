@@ -108,6 +108,12 @@ services:
             sleep 600
           done
         ) &
+        (
+          while true; do
+            python manage.py verify_aadhaar_ocr_fallback || echo "scheduler: verify_aadhaar_ocr_fallback FAILED"
+            sleep 600
+          done
+        ) &
         while true; do
           python manage.py finalize_expired_attempts || echo "scheduler: finalize_expired_attempts FAILED"
           sleep 600

@@ -15,6 +15,9 @@ import {
 import { extractErrorMessage } from '../../utils/passwordSchema';
 
 const RESULT_PILL = { pending: 'gray', pass: 'green', fail: 'red' };
+const AADHAAR_VERIFICATION_PILL = {
+  match: 'green', mismatch: 'red', signature_invalid: 'red', unreadable: 'gray', pending: 'gray',
+};
 
 export default function CandidateDetail() {
   const { id } = useParams();
@@ -218,6 +221,15 @@ export default function CandidateDetail() {
               </div>
             ) : (
               <div style={{ textAlign: 'center', fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Not yet captured</div>
+            )}
+            {/* Only present once AADHAAR_VERIFICATION_ENABLED is on and a verdict exists - see
+                services/aadhaar.py. Absent (not just "pending") means the feature is off. */}
+            {candidate.evidence.aadhaar_verification_status && (
+              <div style={{ textAlign: 'center', marginTop: 6 }}>
+                <span className={`pill ${AADHAAR_VERIFICATION_PILL[candidate.evidence.aadhaar_verification_status] || 'gray'}`}>
+                  {candidate.evidence.aadhaar_verification_status_display}
+                </span>
+              </div>
             )}
           </div>
           <div>

@@ -33,6 +33,48 @@ class ExamAttempt(models.Model):
     face_match_confidence = models.DecimalField(max_digits=5, decimal_places=2,
                                                 null=True, blank=True)
     id_verified_at = models.DateTimeField(null=True, blank=True)
+
+    class AadhaarVerificationStatus(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        MATCH = 'match', 'Matches Aadhaar Last 4'
+        MISMATCH = 'mismatch', 'Does Not Match Aadhaar Last 4'
+        UNREADABLE = 'unreadable', 'Could Not Be Read'
+        SIGNATURE_INVALID = 'signature_invalid', 'QR Signature Failed Verification'
+
+    class AadhaarVerificationMethod(models.TextChoices):
+        NONE = 'none', 'Not Processed'
+        QR_LEGACY = 'qr_legacy', 'Legacy Unsigned QR'
+        QR_SECURE = 'qr_secure', 'UIDAI Secure QR'
+        OCR = 'ocr', 'OCR Fallback'
+
+    # Automated reading of the id_photo captured above - see services/aadhaar.py. Gated
+    # end-to-end by settings.AADHAAR_VERIFICATION_ENABLED (default off); this never blocks or
+    # delays exam start regardless of outcome, same guarantee services.seb.record_seb_usage
+    # already gives for SEB verification.
+    aadhaar_verification_status = models.CharField(
+        max_length=17, choices=AadhaarVerificationStatus.choices,
+        default=AadhaarVerificationStatus.PENDING,
+    )
+    aadhaar_verification_method = models.CharField(
+        max_length=9, choices=AadhaarVerificationMethod.choices,
+        default=AadhaarVerificationMethod.NONE,
+    )
+    # Last 4 digits of whatever number was actually decoded off the photographed card - safe to
+    # store outright under the same policy already accepted for Candidate.aadhaar_last4 (see
+    # that field's own docstring). Lets a TA see "captured ...4321 vs on-file ...1234" without
+    # ever exposing more than that field itself already does.
+    aadhaar_decoded_last4 = models.CharField(max_length=4, null=True, blank=True)
+    # HMAC-SHA256(full decoded number, key=settings.AADHAAR_HASH_PEPPER) - one-way and
+    # non-reversible, NEVER the plain number. This is the cross-attempt uniqueness signal (see
+    # services.aadhaar.find_hash_conflicts) - a strictly stronger check than
+    # Candidate.aadhaar_last4 + date_of_birth, but a POST-HOC one: it only exists from mid-exam
+    # onward (once a photo has been decoded), so unlike services.duplicate_check (which runs
+    # pre-exam and stays exactly as it is) this can never be a preventive gate, only something a
+    # TA reviews after the fact.
+    aadhaar_number_hash = models.CharField(max_length=64, null=True, blank=True)
+    # Caps automatic OCR-fallback retries - same role as mp4_transcode_attempts.
+    aadhaar_verification_attempts = models.SmallIntegerField(default=0)
+    aadhaar_verified_at = models.DateTimeField(null=True, blank=True)
     session_recording_url = models.URLField(max_length=500, null=True, blank=True)
     # An MP4 copy of the same recording, produced by services.video_transcode once the attempt
     # is SUBMITTED/TERMINATED (never while IN_PROGRESS - the WebM append blob is still being
@@ -91,6 +133,7 @@ class ExamAttempt(models.Model):
         db_table = 'exam_attempts'
         indexes = [
             models.Index(fields=['candidate'], name='ix_attempts_candidate'),
+            models.Index(fields=['aadhaar_number_hash'], name='ix_attempts_aadhaar_hash'),
         ]
         constraints = [
             models.UniqueConstraint(fields=['invitation'],
