@@ -119,20 +119,25 @@ DATABASES = {
             # without TLS configured needs DB_SSLMODE=disable set explicitly in .env.
             'sslmode': os.environ.get('DB_SSLMODE', 'require'),
         },
-        # A nonzero default: with 0 (Django's own default) every single request opens a brand
-        # new TLS connection to a remote Postgres (sslmode=require above) and tears it down
-        # again, which is pure added latency under load for no benefit - gunicorn's threads
-        # already bound how many connections one worker can hold open at once, so reusing them
-        # for a minute doesn't risk accumulating unbounded idle connections. 60s is the commonly
-        # recommended starting point for exactly this deployment shape (a handful of app-server
-        # processes against one managed Postgres instance) - long enough to amortize the
-        # handshake across a request burst, short enough that a recycled/idle worker's
-        # connections age out quickly rather than piling up. Revisit this (towards a real pooler
-        # like PgBouncer, which Azure Postgres Flexible Server can front for you) before ever
-        # running more than one App Service instance - CONN_MAX_AGE keeps connections open per
-        # (worker x thread), and that count multiplies by instance count under autoscale, against
-        # a Postgres server whose own max_connections doesn't grow with it.
-        'CONN_MAX_AGE': int(os.environ.get('DB_CONN_MAX_AGE', 60)),
+        # Back to 0 (Django's own default) as a STOPGAP, not a reversal of the reasoning that
+        # used to justify 60 here. That reasoning assumed CONN_MAX_AGE closes a connection after
+        # N seconds; it does not - it only closes the NEXT time that worker gets a request after
+        # N seconds have passed, so a worker sitting idle holds its connection open indefinitely
+        # in the meantime. Confirmed live against the real shared server: connections observed
+        # idling up to 47 minutes, against a max_connections of 50 shared with local dev too -
+        # a much tighter, harder ceiling than "60s" ever suggested. 0 trades the reconnect
+        # handshake on every request for the one guarantee that actually matters here: a
+        # connection is never held open longer than the request that opened it, so the count in
+        # pg_stat_activity can never exceed concurrently-in-flight requests, no matter how long a
+        # worker sits idle or how many instances autoscale adds.
+        #
+        # This is still a stopgap, not the destination - see the same concern properly solved:
+        # a real pooler (PgBouncer, which Azure Postgres Flexible Server can front for you)
+        # decouples "connections Django holds" from "connections Postgres actually serves",
+        # which is what actually removes the tradeoff instead of picking a side of it. Move to
+        # that before ever running more than one App Service instance, and raise this back up
+        # once a pooler is fronting it.
+        'CONN_MAX_AGE': int(os.environ.get('DB_CONN_MAX_AGE', 0)),
     }
 }
 # Password validation
