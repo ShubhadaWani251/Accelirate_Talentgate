@@ -11,6 +11,11 @@ class TerminateSerializer(serializers.Serializer):
     # Omitted/unrecognized falls back to TAB_SWITCH in the view - the most common real cause -
     # rather than rejecting the request outright, since the exam still needs to end either way.
     reason = serializers.ChoiceField(choices=list(TERMINATION_MESSAGES), required=False)
+    # Only ever sent alongside forbidden_object_detected. Explicitly typed rather than a raw
+    # JSONField so a candidate's browser can't smuggle arbitrary keys into ProctoringEvent's
+    # stored event_details.
+    detected_object = serializers.CharField(required=False, max_length=40)
+    confidence = serializers.FloatField(required=False, min_value=0, max_value=1)
 
 
 class AnswerSerializer(serializers.Serializer):

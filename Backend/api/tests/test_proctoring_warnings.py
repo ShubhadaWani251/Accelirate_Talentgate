@@ -31,6 +31,10 @@ class TestWhichCausesAreWarnable:
         TerminationReason.WINDOW_BLUR,
         TerminationReason.FULLSCREEN_EXIT,
         TerminationReason.CAMERA_OFF,
+        TerminationReason.FACE_NOT_VISIBLE,
+        TerminationReason.EXTRA_PERSON_DETECTED,
+        TerminationReason.FORBIDDEN_OBJECT_DETECTED,
+        TerminationReason.VOICE_DETECTED,
     ])
     def test_recoverable_causes_get_a_warning(self, reason):
         assert reason in exam_session.WARNABLE_REASONS
@@ -143,6 +147,16 @@ class TestTheWarningBudgetIsShared:
     def test_three_warnings_are_allowed(self):
         assert exam_session.MAX_WARNINGS == 3
 
+    def test_the_budget_is_shared_with_ai_detected_causes_too(self, attempt):
+        """Same pool, not a separate allowance for AI-detected reasons vs. browser-event ones."""
+        first = exam_session.record_violation(attempt, TerminationReason.TAB_SWITCH)
+        second = exam_session.record_violation(attempt, TerminationReason.FACE_NOT_VISIBLE)
+        third = exam_session.record_violation(attempt, TerminationReason.VOICE_DETECTED)
+        fourth = exam_session.record_violation(attempt, TerminationReason.FORBIDDEN_OBJECT_DETECTED)
+
+        assert [first['action'], second['action'], third['action']] == ['warned'] * 3
+        assert fourth['action'] == 'terminated'
+
 
 class TestWarningMessageCountsDownAccurately:
     """The candidate is only ever shown this text once per warning - it has to say the true
@@ -191,6 +205,100 @@ class TestWarningNotAcknowledged:
 
     def test_it_is_recorded_as_a_violation(self):
         assert exam_session.is_violation_reason(TerminationReason.WARNING_NOT_ACKNOWLEDGED) is True
+
+
+class TestAiDetectedReasons:
+    """The four client-side AI signals (face count, forbidden objects, voice activity) - each
+    gets the same warn-then-terminate treatment as camera_off, for the same reason: a live
+    ML/CV detection is a best-guess, not a deterministic browser event.
+    """
+
+    @pytest.mark.parametrize('reason', [
+        TerminationReason.FACE_NOT_VISIBLE,
+        TerminationReason.EXTRA_PERSON_DETECTED,
+        TerminationReason.FORBIDDEN_OBJECT_DETECTED,
+        TerminationReason.VOICE_DETECTED,
+    ])
+    def test_the_first_occurrence_is_a_warning_not_a_termination(self, attempt, reason):
+        result = exam_session.record_violation(attempt, reason)
+
+        assert result['action'] == 'warned'
+        attempt.refresh_from_db()
+        assert attempt.status == ExamAttempt.Status.IN_PROGRESS
+
+    @pytest.mark.parametrize('reason', [
+        TerminationReason.FACE_NOT_VISIBLE,
+        TerminationReason.EXTRA_PERSON_DETECTED,
+        TerminationReason.FORBIDDEN_OBJECT_DETECTED,
+        TerminationReason.VOICE_DETECTED,
+    ])
+    def test_three_occurrences_warn_the_fourth_ends_the_attempt(self, attempt, reason):
+        for _ in range(exam_session.MAX_WARNINGS):
+            result = exam_session.record_violation(attempt, reason)
+            assert result['action'] == 'warned'
+
+        result = exam_session.record_violation(attempt, reason)
+
+        assert result['action'] == 'terminated'
+        attempt.refresh_from_db()
+        assert attempt.status == ExamAttempt.Status.TERMINATED
+        assert attempt.termination_reason == reason
+
+    @pytest.mark.parametrize('reason', [
+        TerminationReason.FACE_NOT_VISIBLE,
+        TerminationReason.EXTRA_PERSON_DETECTED,
+        TerminationReason.FORBIDDEN_OBJECT_DETECTED,
+        TerminationReason.VOICE_DETECTED,
+    ])
+    def test_it_is_recorded_as_a_violation_on_their_record(self, reason):
+        assert exam_session.is_violation_reason(reason) is True
+
+    @pytest.mark.parametrize('reason', [
+        TerminationReason.FACE_NOT_VISIBLE,
+        TerminationReason.EXTRA_PERSON_DETECTED,
+        TerminationReason.FORBIDDEN_OBJECT_DETECTED,
+        TerminationReason.VOICE_DETECTED,
+    ])
+    def test_staff_see_a_readable_label_not_the_raw_code(self, reason):
+        label = exam_session.termination_label(reason)
+        assert label != reason
+        assert reason not in label
+
+
+class TestForbiddenObjectEvidence:
+    """forbidden_object_detected is the one reason that carries extra evidence (which object,
+    what confidence) - record_violation's extra_details parameter exists for exactly this.
+    """
+
+    def test_the_detected_object_and_confidence_are_stored(self, attempt):
+        exam_session.record_violation(
+            attempt, TerminationReason.FORBIDDEN_OBJECT_DETECTED,
+            extra_details={'detected_object': 'cell phone', 'confidence': 0.82},
+        )
+
+        event = ProctoringEvent.objects.get(attempt=attempt)
+        assert event.event_details['detected_object'] == 'cell phone'
+        assert event.event_details['confidence'] == 0.82
+
+    def test_a_spoofed_outcome_cannot_override_the_real_one(self, attempt):
+        """extra_details is caller-supplied (ultimately from the candidate's own browser via the
+        view) - it must never be able to overwrite record_violation's own bookkeeping keys.
+        """
+        result = exam_session.record_violation(
+            attempt, TerminationReason.FORBIDDEN_OBJECT_DETECTED,
+            extra_details={'outcome': 'terminated', 'warning_number': 999},
+        )
+
+        assert result['action'] == 'warned'
+        event = ProctoringEvent.objects.get(attempt=attempt)
+        assert event.event_details['outcome'] == 'warned'
+        assert event.event_details['warning_number'] == 1
+
+    def test_other_reasons_store_no_extra_details(self, attempt):
+        exam_session.record_violation(attempt, TerminationReason.TAB_SWITCH)
+
+        event = ProctoringEvent.objects.get(attempt=attempt)
+        assert set(event.event_details) == {'outcome', 'warning_number'}
 
 
 class TestFirstStrikeCausesStillTerminateImmediately:

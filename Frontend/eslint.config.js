@@ -5,7 +5,10 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  // public/models holds vendored, self-hosted MediaPipe/onnxruntime binaries and their generated
+  // Emscripten JS glue (see visionModels.js/useVoiceActivityGuard.js for why they're self-hosted
+  // rather than CDN-loaded) - not authored source, same category as dist.
+  globalIgnores(['dist', 'public/models']),
   {
     files: ['**/*.{js,jsx}'],
     extends: [

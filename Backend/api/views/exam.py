@@ -22,7 +22,7 @@ from rest_framework.views import APIView
 from api.authentication import CandidateAttemptAuthentication
 from api.models import ExamAnswer, ExamAttempt, Invitation
 from api.serializers.exam import AnswerSerializer, EmailVerifySerializer, TerminateSerializer
-from api.services import blob_storage, exam_session, seb
+from api.services import aadhaar, blob_storage, exam_session, seb
 from api.services.image_validation import InvalidImageUpload, validate_identity_photo
 from api.services.exam_session import TerminationReason
 from api.services.question_selection import SECTION_LABELS, SECTION_ORDER, InsufficientQuestionsError
@@ -296,9 +296,12 @@ class ExamIdentityCaptureView(APIView):
                              status=status.HTTP_400_BAD_REQUEST)
 
         if not attempt.id_verified_at:
+            # Captured once and reused below for Aadhaar QR/OCR verification - id_photo is an
+            # uploaded file stream, and a second .read() after the first would return nothing.
+            id_photo_bytes = id_photo.read()
             try:
                 attempt.aadhaar_capture_url = blob_storage.upload_photo(
-                    attempt.attempt_id, 'id_photo', id_photo.read(), id_photo.content_type,
+                    attempt.attempt_id, 'id_photo', id_photo_bytes, id_photo.content_type,
                 )
                 attempt.face_photo_url = blob_storage.upload_photo(
                     attempt.attempt_id, 'face_photo', face_photo.read(), face_photo.content_type,
@@ -321,6 +324,10 @@ class ExamIdentityCaptureView(APIView):
             attempt.save(update_fields=[
                 'aadhaar_capture_url', 'face_photo_url', 'id_verified_at', 'session_recording_url',
             ])
+            # Fast path only (QR + Verhoeff) - see services.aadhaar module docstring for the OCR
+            # fallback's own, separately-scheduled path. Never raises, never blocks exam start;
+            # does its own save() for just the aadhaar_* fields.
+            aadhaar.verify_identity_photo(attempt, id_photo_bytes)
 
         # Opportunistic - see services.seb.record_seb_usage. If the candidate chose Safe Exam
         # Browser at the earlier choice screen, SEB has been the active browser since the very
@@ -500,7 +507,12 @@ class ExamViolationView(APIView):
         serializer = TerminateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         reason_code = serializer.validated_data.get('reason', TerminationReason.TAB_SWITCH)
-        return Response(exam_session.record_violation(request.user, reason_code))
+        extra_details = {
+            key: serializer.validated_data[key]
+            for key in ('detected_object', 'confidence')
+            if key in serializer.validated_data
+        }
+        return Response(exam_session.record_violation(request.user, reason_code, extra_details or None))
 
 
 class ExamSubmitView(APIView):

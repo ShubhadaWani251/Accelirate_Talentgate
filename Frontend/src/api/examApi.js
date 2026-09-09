@@ -45,7 +45,11 @@ export const uploadRecordingChunk = (chunkBlob) =>
 // leaving the exam window earns one warning first, a devtools/screenshot key or a lost camera
 // does not. Resolves to { action: 'warned' | 'terminated' | 'already_closed', detail, reason,
 // warnings_used, warnings_allowed }. Never assume termination from the fact that this was called.
-export const reportViolation = (reason) =>
-  examAxiosClient.post('/exam/violation/', reason ? { reason } : {}).then((r) => r.data);
+// `extra` carries reason-specific evidence (currently only forbidden_object_detected sends
+// detected_object/confidence) - spread alongside reason rather than nested, matching how
+// TerminateSerializer reads them as top-level fields.
+export const reportViolation = (reason, extra) =>
+  examAxiosClient.post('/exam/violation/', { ...(reason ? { reason } : {}), ...(extra || {}) })
+    .then((r) => r.data);
 
 export const submitExam = () => examAxiosClient.post('/exam/submit/').then((r) => r.data);

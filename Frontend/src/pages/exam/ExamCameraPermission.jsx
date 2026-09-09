@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useExamSession } from '../../features/exam/examSessionContext';
 import useCameraStream from '../../features/exam/webcam/useCameraStream';
 import { checkCameraNotBlocked } from '../../features/exam/webcam/frameCheck';
+import { getVisionModels } from '../../features/exam/proctoring/visionModels';
 import BrandHeader from '../../components/layout/BrandHeader';
 import BrandFooter from '../../components/layout/BrandFooter';
 
@@ -42,6 +43,11 @@ export default function ExamCameraPermission() {
 
       mediaStreamRef.current = stream;
       setNoVideo(noVideo);
+      // Fire-and-forget: the self-hosted vision payload is genuinely large (MediaPipe's wasm
+      // bundle alone is ~35MB), so starting the download now - during the fullscreen-gate/
+      // instructions screens that follow - means it's already cached by the time the exam
+      // itself starts, instead of stalling ExamAttemptPage's first check.
+      if (!noVideo) getVisionModels().catch(() => {});
       // This step deliberately runs BEFORE full-screen is ever entered. Browsers force-exit
       // full-screen whenever a permission prompt appears (security behavior - a full-screen page
       // must not be able to spoof that trusted UI), so doing it in this order means full-screen is

@@ -67,6 +67,10 @@ class TerminationReason:
     FULLSCREEN_NOT_ENTERED = 'fullscreen_not_entered'
     WARNING_NOT_ACKNOWLEDGED = 'warning_not_acknowledged'
     WINDOW_CLOSED = 'window_closed'
+    FACE_NOT_VISIBLE = 'face_not_visible'
+    EXTRA_PERSON_DETECTED = 'extra_person_detected'
+    FORBIDDEN_OBJECT_DETECTED = 'forbidden_object_detected'
+    VOICE_DETECTED = 'voice_detected'
 
 
 TERMINATION_MESSAGES = {
@@ -102,6 +106,18 @@ TERMINATION_MESSAGES = {
     TerminationReason.WINDOW_CLOSED:
         'Your assessment was ended because Safe Exam Browser (or the assessment window) was '
         'closed before you submitted.',
+    TerminationReason.FACE_NOT_VISIBLE:
+        'Your assessment was ended because your face was not visible to the camera for an '
+        'extended period. You must stay clearly visible on camera for the whole assessment.',
+    TerminationReason.EXTRA_PERSON_DETECTED:
+        'Your assessment was ended because more than one face was detected in the camera '
+        'frame. Only you may be visible on camera during the assessment.',
+    TerminationReason.FORBIDDEN_OBJECT_DETECTED:
+        'Your assessment was ended because a phone, laptop, book, or other unauthorized item '
+        'was detected in view of the camera.',
+    TerminationReason.VOICE_DETECTED:
+        'Your assessment was ended because sustained talking was detected during the '
+        'assessment. The room must remain quiet other than brief background noise.',
 }
 
 # Short staff-facing labels for the same codes, used wherever a TA/Admin reads a candidate's
@@ -120,6 +136,11 @@ TERMINATION_LABELS = {
     TerminationReason.FULLSCREEN_NOT_ENTERED: 'Did not enter full-screen within 30 seconds',
     TerminationReason.WARNING_NOT_ACKNOWLEDGED: 'Did not return within 10 seconds of a warning',
     TerminationReason.WINDOW_CLOSED: 'Safe Exam Browser / assessment window closed mid-exam',
+    TerminationReason.FACE_NOT_VISIBLE: 'Face not visible to camera for an extended period',
+    TerminationReason.EXTRA_PERSON_DETECTED: 'More than one face detected in camera frame',
+    TerminationReason.FORBIDDEN_OBJECT_DETECTED:
+        'Unauthorized object detected in camera frame (phone/laptop/book/etc.)',
+    TerminationReason.VOICE_DETECTED: 'Sustained talking detected during assessment',
 }
 
 
@@ -180,6 +201,19 @@ WARNABLE_REASONS = {
     # separate and non-violation for the case where the whole feed dies, which is not
     # recoverable and not something a warning can help with.
     TerminationReason.CAMERA_OFF,
+    # The four AI-detected reasons below are warnable for the same reason as camera_off, not the
+    # window-focus reasons above: each one is a best-guess from a live video/audio feed, not a
+    # deterministic browser event. A face briefly out of frame while stretching, a family member
+    # walking past in the background, a phone glimpsed on the desk without being picked up, or a
+    # single loud word - all look identical to the real thing for a few seconds, and the honest
+    # response to an ambiguous ML signal is the same one already used for camera_off: say so and
+    # give the candidate a chance to correct it. Sustained/debounced detection (see the frontend
+    # guards) already filters the genuinely momentary cases before this is ever called; this is
+    # the second, independent layer of leniency on top of that, not a substitute for it.
+    TerminationReason.FACE_NOT_VISIBLE,
+    TerminationReason.EXTRA_PERSON_DETECTED,
+    TerminationReason.FORBIDDEN_OBJECT_DETECTED,
+    TerminationReason.VOICE_DETECTED,
 }
 
 # Three warnings, then out on the fourth. Counted server-side (see record_violation) rather than
@@ -204,6 +238,14 @@ _WARNING_CAUSES = {
     TerminationReason.CAMERA_OFF:
         'your camera stopped sending video - it may be switched off, covered, blocked by a '
         'privacy shutter, or in use by another application',
+    TerminationReason.FACE_NOT_VISIBLE:
+        'your face was not visible to the camera for several seconds',
+    TerminationReason.EXTRA_PERSON_DETECTED:
+        'more than one face was detected in your camera frame',
+    TerminationReason.FORBIDDEN_OBJECT_DETECTED:
+        'a phone, laptop, book, or other unauthorized item was detected in view of your camera',
+    TerminationReason.VOICE_DETECTED:
+        'sustained talking was detected in the room',
 }
 
 
@@ -213,6 +255,14 @@ _WARNING_CAUSES = {
 _WARNING_REMEDIES = {
     TerminationReason.CAMERA_OFF:
         'Turn your camera back on now and leave it on until you submit',
+    TerminationReason.FACE_NOT_VISIBLE:
+        'Position yourself so your face is clearly visible to the camera',
+    TerminationReason.EXTRA_PERSON_DETECTED:
+        'Make sure no one else is visible in your camera frame',
+    TerminationReason.FORBIDDEN_OBJECT_DETECTED:
+        'Remove the item from view and keep your desk clear for the rest of the assessment',
+    TerminationReason.VOICE_DETECTED:
+        'Remain quiet - brief background noise is fine, but do not talk during the assessment',
 }
 _DEFAULT_WARNING_REMEDY = 'Stay in the assessment window until you submit'
 
@@ -262,7 +312,7 @@ def warnings_used(attempt):
     ).count()
 
 
-def record_violation(attempt, reason_code):
+def record_violation(attempt, reason_code, extra_details=None):
     """Decide what a proctoring violation does: warn once, or end the attempt.
 
     Returns {'action', 'detail', 'reason', 'warnings_used', 'warnings_allowed'} where action is
@@ -272,6 +322,11 @@ def record_violation(attempt, reason_code):
     can't both read "0 warnings used" and both let the candidate off. The browser collapses
     simultaneous triggers into one call already (see the frontend's settle window), but that is
     a convenience, not a guarantee - this is the check that actually holds.
+
+    `extra_details`, when given, is merged into the stored ProctoringEvent.event_details - e.g.
+    forbidden_object_detected sends {'detected_object': 'cell phone', 'confidence': 0.82}.
+    Spread FIRST so nothing caller-supplied can ever overwrite this function's own 'outcome'/
+    'warning_number'/'warnings_used' bookkeeping keys below.
     """
     from api.models import ProctoringEvent
 
@@ -299,7 +354,7 @@ def record_violation(attempt, reason_code):
         if reason_code in WARNABLE_REASONS and used < MAX_WARNINGS:
             ProctoringEvent.objects.create(
                 attempt=locked, event_type=reason_code,
-                event_details={'outcome': 'warned', 'warning_number': used + 1},
+                event_details={**(extra_details or {}), 'outcome': 'warned', 'warning_number': used + 1},
                 is_violation=True,
                 severity=ProctoringEvent.Severity.WARNING,
             )
@@ -313,7 +368,7 @@ def record_violation(attempt, reason_code):
 
         ProctoringEvent.objects.create(
             attempt=locked, event_type=reason_code,
-            event_details={'outcome': 'terminated', 'warnings_used': used},
+            event_details={**(extra_details or {}), 'outcome': 'terminated', 'warnings_used': used},
             is_violation=is_violation_reason(reason_code),
             severity=ProctoringEvent.Severity.CRITICAL,
         )
@@ -477,6 +532,10 @@ def build_session_state(attempt):
     return {
         'remaining_seconds': remaining_seconds(attempt),
         'sections': [sections[key] for key in SECTION_ORDER if sections[key]['questions']],
+        # Single choke point this flag rides from Batch to the frontend guards - see
+        # ExamAttemptPage.jsx, which ANDs this into useVisionProctoringGuard/
+        # useVoiceActivityGuard's own `active` argument.
+        'ai_proctoring_enabled': attempt.invitation.batch.ai_proctoring_enabled,
     }
 
 

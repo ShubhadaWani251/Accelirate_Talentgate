@@ -8,6 +8,8 @@ import useFullscreenGuard from '../../features/exam/proctoring/useFullscreenGuar
 import useExamLockdown from '../../features/exam/proctoring/useExamLockdown';
 import useDisplayGuard from '../../features/exam/proctoring/useDisplayGuard';
 import useCameraGuard from '../../features/exam/proctoring/useCameraGuard';
+import useVisionProctoringGuard from '../../features/exam/proctoring/useVisionProctoringGuard';
+import useVoiceActivityGuard from '../../features/exam/proctoring/useVoiceActivityGuard';
 import useSessionRecorder from '../../features/exam/webcam/useSessionRecorder';
 import useCameraStream from '../../features/exam/webcam/useCameraStream';
 import { checkCameraNotBlocked } from '../../features/exam/webcam/frameCheck';
@@ -165,21 +167,25 @@ export default function ExamAttemptPage() {
   // enough on its own: one real action commonly trips two different guards (F12 fires the key
   // handler AND blurs the window), which previously sent two terminate calls - the second hitting
   // a 401 "already closed" and overwriting the correct message with a false camera/mic error.
-  const violationRef = useRef({ fired: false, reason: null, timer: null });
+  const violationRef = useRef({ fired: false, reason: null, extra: null, timer: null });
 
-  const onViolation = useCallback((reason) => {
+  const onViolation = useCallback((reason, extra) => {
     const state = violationRef.current;
     if (state.fired) return;
 
     // Keep the most specific reason seen during the settle window rather than whichever arrived
-    // first - see violationReasons.js for why the vaguest cause tends to arrive first.
-    state.reason = moreSpecificReason(state.reason, reason);
+    // first - see violationReasons.js for why the vaguest cause tends to arrive first. extra
+    // (currently only forbidden_object_detected's detected_object/confidence) travels with
+    // whichever reason actually wins, so evidence is never attributed to the wrong one.
+    const nextReason = moreSpecificReason(state.reason, reason);
+    if (nextReason === reason) state.extra = extra;
+    state.reason = nextReason;
     if (state.timer) return;
 
     state.timer = setTimeout(() => {
       state.fired = true;
       examApi
-        .reportViolation(state.reason)
+        .reportViolation(state.reason, state.extra)
         .then((data) => {
           // The SERVER decides warn-vs-terminate; this only renders the outcome. Leaving the
           // exam window earns one warning, counted in the database so a reload can't earn
@@ -195,6 +201,7 @@ export default function ExamAttemptPage() {
             // the very state the warning was just given for.
             state.fired = false;
             state.reason = null;
+            state.extra = null;
             state.timer = null;
             setWindowGuardGen((g) => g + 1);
             return;
@@ -343,6 +350,22 @@ export default function ExamAttemptPage() {
   // because the signals differ - see useCameraGuard for why watching only `ended` missed this
   // entirely.
   const { cameraOff } = useCameraGuard(mediaStreamRef, examActive, onViolation);
+
+  // Client-side AI proctoring: face count and forbidden objects from the same shared video feed
+  // useCameraGuard already watches, plus sustained voice activity on the shared mic - all three
+  // warnable for the same reason camera_off is (see exam_session.WARNABLE_REASONS), never a
+  // second getUserMedia call.
+  //
+  // Defaults to true when absent (a session-state payload built before this field existed, or a
+  // transient load gap) - the model's own default is on, and "silently skip proctoring" should
+  // never be the fallback for a value that simply hasn't arrived yet.
+  const aiProctoringEnabled = sessionState?.ai_proctoring_enabled ?? true;
+  const {
+    faceNotVisible, extraPersonDetected, forbiddenObjectDetected, forbiddenObjectType,
+  } = useVisionProctoringGuard(mediaStreamRef, examActive && aiProctoringEnabled, onViolation);
+  const { voiceDetected } = useVoiceActivityGuard(
+    mediaStreamRef, examActive && aiProctoringEnabled, onViolation,
+  );
 
   // "System issue" - the MICROPHONE feed the recorder depends on disappearing mid-exam. Not the
   // candidate's fault, so finalize_attempt/is_violation_reason on the backend keeps this out of
@@ -731,6 +754,33 @@ export default function ExamAttemptPage() {
               <b>Your camera is not sending video.</b> Turn it back on now - check for a privacy
               shutter, your camera switch, or another app (Teams, Zoom) using the camera. If it
               goes off again your assessment will be ended.
+            </div>
+          )}
+
+          {faceNotVisible && (
+            <div className="alert error" style={{ marginBottom: 10 }}>
+              <b>Your face is not visible to the camera.</b> Position yourself so your face is
+              clearly visible now.
+            </div>
+          )}
+
+          {extraPersonDetected && (
+            <div className="alert error" style={{ marginBottom: 10 }}>
+              <b>More than one face detected.</b> Make sure no one else is visible in your camera
+              frame.
+            </div>
+          )}
+
+          {forbiddenObjectDetected && (
+            <div className="alert error" style={{ marginBottom: 10 }}>
+              <b>Unauthorized item detected{forbiddenObjectType ? ` (${forbiddenObjectType})` : ''}.</b>{' '}
+              Remove it from view now.
+            </div>
+          )}
+
+          {voiceDetected && (
+            <div className="alert error" style={{ marginBottom: 10 }}>
+              <b>Talking detected.</b> Please remain quiet for the rest of the assessment.
             </div>
           )}
 
