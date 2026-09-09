@@ -119,6 +119,7 @@ export default function ReviewStep({ batch, onFinalized, onSavedAsDraft }) {
       quantitative_cutoff: batch.quantitative_cutoff,
       verbal_cutoff: batch.verbal_cutoff,
       programming_cutoff: batch.programming_cutoff,
+      ai_proctoring_enabled: batch.ai_proctoring_enabled,
       selected_candidate_ids: selectedIds,
       selected_count: selectedIds.length,
       skipped_count: candidates.length - selectedIds.length,

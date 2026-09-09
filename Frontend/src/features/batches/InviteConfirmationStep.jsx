@@ -7,6 +7,7 @@ import * as batchApi from '../../api/batchApi';
 import { fromDatetimeLocalValue, toDatetimeLocalValue } from '../../utils/datetime';
 import { extractErrorMessage } from '../../utils/passwordSchema';
 import { ButtonSpinner } from '../../components/loading/Spinner';
+import ToggleSwitch from '../../components/common/ToggleSwitch';
 
 // Same four sections, same order, as ConfigureDefaultBatch.jsx and ConfigureBatchStep.jsx - the
 // grid below is deliberately built to look like those screens, since this is showing exactly
@@ -58,6 +59,11 @@ export default function InviteConfirmationStep({ summary, onBack, onSent }) {
   // Set only once the form has passed validation - the confirm popup below sends exactly these
   // values, so there's no second read of the (possibly since-changed) form state at send time.
   const [pendingValues, setPendingValues] = useState(null);
+  // Not part of the yup-validated form below (a plain boolean, nothing to validate) - its own
+  // state, read at send time the same way pendingValues already is.
+  const [aiProctoringEnabled, setAiProctoringEnabled] = useState(
+    summary.ai_proctoring_enabled ?? true,
+  );
   const {
     register,
     handleSubmit,
@@ -90,6 +96,7 @@ export default function InviteConfirmationStep({ summary, onBack, onSent }) {
       await batchApi.updateBatch(summary.batch_id, {
         link_valid_from: fromDatetimeLocalValue(values.link_valid_from),
         link_valid_until: fromDatetimeLocalValue(values.link_valid_until),
+        ai_proctoring_enabled: aiProctoringEnabled,
       });
       // Skipped when the batch has already left Draft (re-inviting more candidates from Batch
       // Details), where there's nothing left to finalize.
@@ -180,6 +187,23 @@ export default function InviteConfirmationStep({ summary, onBack, onSent }) {
             {errors.link_valid_until && (
               <div className="field-error">{errors.link_valid_until.message}</div>
             )}
+          </div>
+        </div>
+
+        <div className="field" style={{ marginTop: 14 }}>
+          <label>AI-Based Proctoring</label>
+          <div style={{ marginTop: 4 }}>
+            <ToggleSwitch
+              checked={aiProctoringEnabled}
+              onChange={setAiProctoringEnabled}
+              activeLabel="On"
+              inactiveLabel="Off"
+            />
+          </div>
+          <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 4 }}>
+            {aiProctoringEnabled
+              ? 'Face count, forbidden-object, and voice-activity detection run during the exam for this batch.'
+              : 'These candidates will skip AI proctoring detection entirely - existing checks (tab switch, full-screen, camera feed) still apply.'}
           </div>
         </div>
 

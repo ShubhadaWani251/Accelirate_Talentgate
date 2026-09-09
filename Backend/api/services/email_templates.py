@@ -217,6 +217,8 @@ INVITATION_TEMPLATE = {
         '- **Your camera and microphone must remain enabled for the entire assessment** - '
         'they are used for continuous proctoring, and switching either off is treated as a '
         'violation.\n\n'
+        '- Do not read questions aloud or talk during the assessment - sustained talking is '
+        'detected and treated as a violation. Brief background noise is fine.\n\n'
         '- Use a laptop or desktop with a stable internet connection and complete the '
         'assessment in one uninterrupted session.\n\n'
         '- Do not switch browser tabs, minimize the browser window, or open other '

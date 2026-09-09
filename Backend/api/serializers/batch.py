@@ -68,6 +68,7 @@ class BatchSerializer(serializers.ModelSerializer):
             'status', 'status_display', 'total_candidates',
             'primary_ta_user', 'primary_ta_user_name', 'created_at',
             'pass_count', 'fail_count', 'borderline_count',
+            'ai_proctoring_enabled',
         ]
         read_only_fields = [
             'batch_id', 'status', 'status_display', 'total_candidates',

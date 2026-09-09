@@ -46,10 +46,11 @@ export default function ExamInstructions() {
             {/* Numbered rather than bulleted: these are rules a candidate may need to refer
                 back to ("rule 5 said..."), and an ordered list gives each one a handle. */}
             <ol style={{ fontSize: 12.5, margin: 0, paddingLeft: 20, lineHeight: 1.8 }}>
-              <li>Please be prepared with your government ID document before proceeding</li>
+              <li>Please be prepared with your Aadhaar Card before proceeding</li>
               <li>Please start the assessment at least 30 minutes before your assessment window closes, to allow sufficient time to complete it</li>
               <li><b style={{ color: 'var(--brand-red)' }}>This assessment must be taken inside Safe Exam Browser (SEB)</b> - see the next step to launch it</li>
               <li><b style={{ color: 'var(--brand-red)' }}>Your camera and microphone must stay on for the entire assessment</b> for identity verification and continuous proctoring. Switching your camera off, or covering it, is treated the same as leaving the window - one warning, then the attempt ends</li>
+              <li>Do not read questions aloud or talk during the assessment - sustained talking is detected and treated as a violation. Brief background noise is fine</li>
               <li>You're now in full-screen mode for the rest of this assessment</li>
               <li>Do not switch browser tabs, minimize, exit full-screen, or open other applications once the exam begins</li>
               {/* Without this, a candidate who chose Safe Exam Browser could reasonably read the

@@ -42,7 +42,7 @@ export default function PrivacyPolicy() {
               percentage, graduating year, and location - as submitted by the organization
               inviting you to assess.
               <br /><br />
-              <b>During the assessment only:</b> a photo of a government ID, a live photo of your
+              <b>During the assessment only:</b> a photo of your Aadhaar Card, a live photo of your
               face for identity verification, and continuous audio and video recording for the
               full duration of the assessment. Your assessment answers and score are also
               recorded.

@@ -55,7 +55,7 @@ export default function ExamIdVerify() {
     }
     if (noVideo) {
       Promise.all([
-        createPlaceholderPhotoBlob('Government ID'),
+        createPlaceholderPhotoBlob('Aadhaar Card'),
         createPlaceholderPhotoBlob('Live Face Photo'),
       ]).then(([idBlob, faceBlob]) => {
         setIdPhoto(idBlob);
@@ -90,7 +90,7 @@ export default function ExamIdVerify() {
       <div className="auth-shell">
         <div className="auth-card" style={{ maxWidth: 640 }}>
           <h3>Identity Verification</h3>
-          <div className="auth-sub">Capture your government ID, then a live photo of your face.</div>
+          <div className="auth-sub">Capture your Aadhaar Card, then a live photo of your face.</div>
 
           {submitError && <div className="alert error">{submitError}</div>}
 
@@ -108,8 +108,8 @@ export default function ExamIdVerify() {
             <div style={{ display: 'grid', gap: 14 }}>
               <PhotoCapture
                 stream={stream}
-                label="Government ID"
-                hint="Aadhaar / PAN / Passport / Driving Licence"
+                label="Aadhaar Card"
+                hint="Front side, showing your Aadhaar number clearly"
                 captured={idPhoto}
                 onCapture={setIdPhoto}
               />

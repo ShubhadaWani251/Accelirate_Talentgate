@@ -36,6 +36,11 @@ class Batch(models.Model):
 
     exam_duration_minutes = models.SmallIntegerField(default=45)
     status = models.CharField(max_length=15, choices=Status.choices, default=Status.DRAFT)
+    # Client-side AI proctoring (face count, forbidden-object detection, voice activity - see
+    # exam_session.WARNABLE_REASONS) is on by default. Off means the two guard hooks never
+    # activate for this batch's candidates at all, not just that violations are ignored -
+    # see ExamAttemptPage.jsx, which ANDs this into the hooks' own `active` argument.
+    ai_proctoring_enabled = models.BooleanField(default=True)
 
     primary_ta_user = models.ForeignKey(User, on_delete=models.PROTECT,
                                         db_column='primary_ta_user_id',
