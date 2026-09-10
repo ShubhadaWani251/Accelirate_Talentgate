@@ -13,10 +13,14 @@ import os
 bind = f"0.0.0.0:{os.environ.get('PORT', '8000')}"
 
 # Sync workers, sized from the CPU count. The app is ordinary blocking Django - no async views,
-# no long-polling - so the usual (2 * cores) + 1 applies. Overridable because the formula
-# assumes the container actually gets the cores it can see, which is not true on a CPU-limited
-# platform plan.
-workers = int(os.environ.get('WEB_CONCURRENCY', multiprocessing.cpu_count() * 2 + 1))
+# no long-polling - so the usual (2 * cores) + 1 applies. Capped at 3 unless WEB_CONCURRENCY
+# is set explicitly: on App Service B1 (1 vCPU) the formula yields 3 workers × 4 threads,
+# which is up to 12 concurrent request threads against a Postgres max_connections budget that
+# can be as low as 50 and is shared with local dev too. ReleaseDbConnectionMiddleware keeps
+# idle workers from hoarding slots, but the cap still bounds burst concurrency.
+_cpu_count = multiprocessing.cpu_count()
+_default_workers = min(_cpu_count * 2 + 1, 3)
+workers = int(os.environ.get('WEB_CONCURRENCY', _default_workers))
 
 # NOTE this is why REDIS_URL matters (see api/checks.py, api.W001): with more than one worker,
 # the default per-process cache makes every rate limit count independently per worker.
@@ -24,7 +28,7 @@ workers = int(os.environ.get('WEB_CONCURRENCY', multiprocessing.cpu_count() * 2 
 # Threads per worker. Kept >1 because several endpoints spend their time waiting on outbound
 # HTTP - Microsoft Graph for email, Azure Blob for evidence upload - and a thread parked on a
 # socket shouldn't occupy a whole worker.
-threads = int(os.environ.get('WEB_THREADS', '4'))
+threads = int(os.environ.get('WEB_THREADS', '2'))
 
 # Longer than the default 30s: the candidate spreadsheet upload validates and imports up to a
 # few thousand rows in one request, and evidence upload pushes photos to Azure inline. Still
