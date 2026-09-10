@@ -306,6 +306,7 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
     email_retry_count = serializers.SerializerMethodField()
     other_batches = serializers.SerializerMethodField()
     aadhaar_hash_conflicts = serializers.SerializerMethodField()
+    aadhaar_needs_manual_review = serializers.SerializerMethodField()
 
     class Meta:
         model = Candidate
@@ -319,7 +320,7 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
             'email_status', 'email_status_display', 'email_error', 'email_sent_at',
             'email_last_attempt_at', 'email_retry_count',
             'link_valid_from', 'link_valid_until',
-            'other_batches', 'aadhaar_hash_conflicts',
+            'other_batches', 'aadhaar_hash_conflicts', 'aadhaar_needs_manual_review',
         ]
 
     def get_aadhaar_last4(self, candidate):
@@ -424,6 +425,14 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
         """
         attempt = _latest_attempt(candidate)
         return aadhaar.find_hash_conflicts(attempt) if attempt else []
+
+    def get_aadhaar_needs_manual_review(self, candidate):
+        """True once the candidate's own capture-time retries are exhausted without a clean
+        match - see aadhaar.needs_manual_review. Derived, not stored: a later successful deferred
+        OCR pass clears this automatically the moment status becomes MATCH.
+        """
+        attempt = _latest_attempt(candidate)
+        return aadhaar.needs_manual_review(attempt) if attempt else False
 
     def get_evidence(self, candidate):
         attempt = _latest_attempt(candidate)

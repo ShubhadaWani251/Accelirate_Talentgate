@@ -82,6 +82,8 @@ urlpatterns = [
     path('exam/token/<str:token>/', views.ExamTokenLandingView.as_view(), name='exam-token-landing'),
     path('exam/token/<str:token>/verify-email/', views.ExamVerifyEmailView.as_view(),
          name='exam-verify-email'),
+    path('exam/token/<str:token>/identity/aadhaar/', views.ExamIdentityAadhaarCaptureView.as_view(),
+         name='exam-identity-aadhaar'),
     path('exam/token/<str:token>/identity/', views.ExamIdentityCaptureView.as_view(),
          name='exam-identity'),
     path('exam/token/<str:token>/seb-config/', views.ExamSebConfigView.as_view(),

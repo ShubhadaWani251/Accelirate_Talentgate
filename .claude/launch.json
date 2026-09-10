@@ -18,6 +18,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "5500", "--directory", "../Accelirate_TalentGate_AI_Sandbox"],
       "port": 5500
+    },
+    {
+      "name": "aadhaar-sandbox",
+      "runtimeExecutable": "Backend/venv/Scripts/python.exe",
+      "runtimeArgs": ["../Accelirate_TalentGate_Aadhaar_Sandbox/sandbox_server.py"],
+      "port": 5056
     }
   ]
 }

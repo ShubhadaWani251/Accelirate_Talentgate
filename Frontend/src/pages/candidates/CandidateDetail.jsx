@@ -231,6 +231,14 @@ export default function CandidateDetail() {
                 </span>
               </div>
             )}
+            {/* Additive to the status pill above, not a replacement - the status pill says WHAT
+                the last verdict was, this says whether a TA still needs to look at it (settled
+                after the candidate's own retries ran out, per aadhaar.needs_manual_review). */}
+            {candidate.aadhaar_needs_manual_review && (
+              <div style={{ textAlign: 'center', marginTop: 4 }}>
+                <span className="pill amber">Needs Manual Review</span>
+              </div>
+            )}
           </div>
           <div>
             <div style={{ border: '1px dashed var(--line-soft)', borderRadius: 8, textAlign: 'center', padding: 20 }}>

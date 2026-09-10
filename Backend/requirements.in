@@ -64,6 +64,26 @@ opencv-python-headless==5.0.0.93
 # transitively via PyJWT[crypto] above; declared directly here for the same reason PyJWT[crypto]
 # itself is declared directly rather than relying on staying a transitive dependency.
 cryptography==50.0.1
+# OCR fallback for a card whose QR can't be decoded (no QR at all, or the newer Secure QR format
+# this module doesn't parse). Free and fully local (pure pip install, ONNX models bundled in the
+# wheel/first-run cache) - no cloud account, no per-call cost, unlike the Azure AI Vision
+# integration this replaces, which was never actually provisioned in any environment.
+#
+# IMPORTANT: rapidocr-onnxruntime declares a hard dependency on the `opencv-python` PyPI package
+# (not just "a cv2"), which pip cannot see is already satisfied by opencv-python-headless above -
+# both packages install overlapping files under the same cv2/ directory, and having both present
+# actively breaks cv2 (confirmed - installing both, or later removing just one, corrupts the
+# other). Install this with `pip install --no-deps rapidocr-onnxruntime==1.2.3`, never a plain
+# `pip install`, and never install opencv-python (non-headless) in this project. Its other real
+# runtime dependencies (onnxruntime, Pillow, pyclipper, PyYAML, Shapely, six - confirmed via
+# `pip show rapidocr-onnxruntime`) are declared explicitly below instead.
+rapidocr-onnxruntime==1.2.3
+onnxruntime==1.29.0
+pillow==12.3.0
+pyclipper==1.4.0
+PyYAML==6.0.3
+shapely==2.1.2
+six==1.17.0
 
 # --- Shared cache for rate-limit and login-lockout counters ---
 # Used via django.core.cache.backends.redis.RedisCache when REDIS_URL is set. Without it those
