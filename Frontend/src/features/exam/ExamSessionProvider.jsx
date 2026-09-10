@@ -15,11 +15,6 @@ export function ExamSessionProvider({ children }) {
   // exam starts. noVideo marks the dev-only audio-fallback path (see useCameraStream.js).
   const mediaStreamRef = useRef(null);
   const [noVideo, setNoVideo] = useState(false);
-  // The candidate's face embedding, captured once at identity-verification time (see
-  // ExamIdVerify.jsx) and compared against the live feed throughout the exam
-  // (useFaceIdentityGuard.js). Wiped by a page reload exactly like mediaStreamRef is - that guard
-  // has its own narrow fallback for that case, see its own docstring.
-  const faceEmbeddingRef = useRef(null);
 
   const applyAttemptToken = useCallback((token, forLinkToken) => {
     setAxiosAttemptToken(token);
@@ -41,7 +36,6 @@ export function ExamSessionProvider({ children }) {
     sessionState, setSessionState,
     applyAttemptToken, restoreAttemptToken,
     mediaStreamRef, noVideo, setNoVideo,
-    faceEmbeddingRef,
   };
 
   return <ExamSessionContext.Provider value={value}>{children}</ExamSessionContext.Provider>;

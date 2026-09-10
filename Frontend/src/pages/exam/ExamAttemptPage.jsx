@@ -10,7 +10,6 @@ import useDisplayGuard from '../../features/exam/proctoring/useDisplayGuard';
 import useCameraGuard from '../../features/exam/proctoring/useCameraGuard';
 import useVisionProctoringGuard from '../../features/exam/proctoring/useVisionProctoringGuard';
 import useVoiceActivityGuard from '../../features/exam/proctoring/useVoiceActivityGuard';
-import useFaceIdentityGuard from '../../features/exam/proctoring/useFaceIdentityGuard';
 import useSessionRecorder from '../../features/exam/webcam/useSessionRecorder';
 import useCameraStream from '../../features/exam/webcam/useCameraStream';
 import { checkCameraNotBlocked } from '../../features/exam/webcam/frameCheck';
@@ -56,9 +55,7 @@ function flattenMarks(sections) {
 export default function ExamAttemptPage() {
   const { token } = useParams();
   const navigate = useNavigate();
-  const {
-    sessionState, setSessionState, restoreAttemptToken, mediaStreamRef, faceEmbeddingRef,
-  } = useExamSession();
+  const { sessionState, setSessionState, restoreAttemptToken, mediaStreamRef } = useExamSession();
 
   const [view, setView] = useState('loading'); // loading | exam | result | terminated
   const [answers, setAnswers] = useState({});
@@ -368,9 +365,6 @@ export default function ExamAttemptPage() {
   } = useVisionProctoringGuard(mediaStreamRef, examActive && aiProctoringEnabled, onViolation);
   const { voiceDetected } = useVoiceActivityGuard(
     mediaStreamRef, examActive && aiProctoringEnabled, onViolation,
-  );
-  const { identityMismatch } = useFaceIdentityGuard(
-    mediaStreamRef, faceEmbeddingRef, examActive && aiProctoringEnabled, onViolation,
   );
 
   // "System issue" - the MICROPHONE feed the recorder depends on disappearing mid-exam. Not the
@@ -774,13 +768,6 @@ export default function ExamAttemptPage() {
             <div className="alert error" style={{ marginBottom: 10 }}>
               <b>More than one face detected.</b> Make sure no one else is visible in your camera
               frame.
-            </div>
-          )}
-
-          {identityMismatch && (
-            <div className="alert error" style={{ marginBottom: 10 }}>
-              <b>Face does not match the verified candidate.</b> Make sure you are clearly visible
-              and well-lit, with no one else in your seat.
             </div>
           )}
 

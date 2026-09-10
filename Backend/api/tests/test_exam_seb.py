@@ -347,18 +347,10 @@ class TestFullFlowNeverBlocksAFallbackCandidate:
 
     def _identity_files(self):
         body = b'\xff\xd8\xff\xe0fake-jpeg-bytes'
-        return {'face_photo': SimpleUploadedFile('face.jpg', body, content_type='image/jpeg')}
-
-    def _capture_aadhaar_photo(self, api_client, token):
-        # Identity capture's first step - see ExamIdentityAadhaarCaptureView. Must happen before
-        # the face-photo endpoint below, which now 400s without it.
-        body = b'\xff\xd8\xff\xe0fake-jpeg-bytes'
-        response = api_client.post(
-            f'/api/exam/token/{token}/identity/aadhaar/',
-            {'id_photo': SimpleUploadedFile('id.jpg', body, content_type='image/jpeg')},
-            format='multipart',
-        )
-        assert response.status_code == 200
+        return {
+            'id_photo': SimpleUploadedFile('id.jpg', body, content_type='image/jpeg'),
+            'face_photo': SimpleUploadedFile('face.jpg', body, content_type='image/jpeg'),
+        }
 
     def test_a_plain_browser_candidate_completes_the_entire_flow_with_2xx_throughout(
         self, api_client, small_invitation, settings
@@ -378,7 +370,6 @@ class TestFullFlowNeverBlocksAFallbackCandidate:
         assert verify.status_code == 200
         assert verify.data['resume'] is False
 
-        self._capture_aadhaar_photo(api_client, token)
         identity = api_client.post(
             f'/api/exam/token/{token}/identity/', self._identity_files(), format='multipart',
         )

@@ -9,7 +9,6 @@ authenticates via CandidateAttemptAuthentication (api/authentication.py) instead
 
 import logging
 
-from django.conf import settings
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.http import Http404, HttpResponse
@@ -38,29 +37,6 @@ def _get_invitation(token):
         return Invitation.objects.select_related('batch', 'candidate').get(unique_link_token=token)
     except Invitation.DoesNotExist:
         return None
-
-
-def _open_invitation_or_error(token):
-    """The identical 3-check preamble both identity-capture views need (valid, unexpired
-    invitation whose assessment window has opened). Returns (invitation, None) on success or
-    (None, error_response) on failure - identity capture always happens before the clock starts
-    (begin_exam is the exam screen's own first move, after this), so unlike the landing/
-    verify-email checks there's no in-progress-with-started_at case to carve out here.
-    """
-    invitation = _get_invitation(token)
-    if invitation is None or invitation.link_expired_at < timezone.now():
-        return None, Response({'detail': 'This assessment link is invalid or has expired.'},
-                               status=status.HTTP_400_BAD_REQUEST)
-
-    if exam_session.link_not_yet_open(invitation):
-        opens_at = exam_session.invitation_opens_at(invitation).isoformat()
-        return None, Response(
-            {'detail': f'This assessment is not open yet. It becomes available at '
-                        f'{opens_at}.',
-             'opens_at': opens_at},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-    return invitation, None
 
 
 def _instructions_payload(invitation):
@@ -151,10 +127,7 @@ class ExamTokenLandingView(APIView):
                 'opens_at': exam_session.invitation_opens_at(invitation).isoformat(),
             })
 
-        # An attempt can now exist from an Aadhaar-only capture the candidate never finished (see
-        # identity_capture_complete's own docstring) - treat that exactly like no attempt at all,
-        # not something to resume into.
-        if attempt is None or not exam_session.identity_capture_complete(attempt):
+        if attempt is None:
             return Response({'reason': 'ok', 'resume': False})
 
         if attempt.status == ExamAttempt.Status.IN_PROGRESS and exam_session.is_expired(attempt):
@@ -242,17 +215,12 @@ class ExamVerifyEmailView(APIView):
                 exam_session.record_violation(attempt, TerminationReason.LINK_REOPENED)
                 return Response({'detail': 'This assessment has already been completed.'},
                                  status=status.HTTP_400_BAD_REQUEST)
-            if exam_session.identity_capture_complete(attempt):
-                return Response({
-                    'resume': True,
-                    'attempt_token': issue_attempt_token(attempt),
-                    **exam_session.build_session_state(attempt),
-                })
-            # Else: an Aadhaar-only capture was abandoned before ever reaching face-photo capture
-            # - fall through to the fresh-start response below. start_or_resume_attempt (hit next
-            # via the Aadhaar capture endpoint) finds and reuses this same row, so their
-            # aadhaar_verification_attempts count is preserved, not reset.
-        elif attempt:  # SUBMITTED or TERMINATED
+            return Response({
+                'resume': True,
+                'attempt_token': issue_attempt_token(attempt),
+                **exam_session.build_session_state(attempt),
+            })
+        if attempt:  # SUBMITTED or TERMINATED
             return Response({'detail': 'This assessment has already been completed.'},
                              status=status.HTTP_400_BAD_REQUEST)
 
@@ -260,15 +228,11 @@ class ExamVerifyEmailView(APIView):
 
 
 @method_decorator(ratelimit(key=ratelimit_token_key, rate='5/m', method='POST', block=False), name='post')
-class ExamIdentityAadhaarCaptureView(APIView):
-    """POST /api/exam/token/<token>/identity/aadhaar/ - screen c-idverify's FIRST step, the
-    Aadhaar Card photo. Split out from what is now ExamIdentityCaptureView (face photo, below) so
-    a candidate can get a real, synchronous verification verdict and retry a limited number of
-    times BEFORE ever reaching face-photo capture or starting the exam - the old one-shot combined
-    endpoint had no way to support that. Reusable: a resubmit after
-    aadhaar.AADHAAR_CAPTURE_MAX_ATTEMPTS is used up, or after a MATCH, just returns the frozen
-    verdict rather than re-verifying or re-counting anything (see aadhaar.can_retry) - this is
-    what actually enforces the cap.
+class ExamIdentityCaptureView(APIView):
+    """POST /api/exam/token/<token>/identity/ - screen c-idverify. Creates the ExamAttempt (or
+    fetches the one already created by a retried submit) and its randomized question set, then
+    uploads both captured photos. v1 stub: no automated face-match, see plan's escalated
+    decision - photos are stored for the TA's manual review only.
     """
     authentication_classes = []
     permission_classes = [AllowAny]
@@ -279,101 +243,27 @@ class ExamIdentityAadhaarCaptureView(APIView):
             return Response({'detail': 'Too many attempts. Please try again shortly.'},
                              status=status.HTTP_429_TOO_MANY_REQUESTS)
 
-        invitation, error = _open_invitation_or_error(token)
-        if error:
-            return error
+        invitation = _get_invitation(token)
+        if invitation is None or invitation.link_expired_at < timezone.now():
+            return Response({'detail': 'This assessment link is invalid or has expired.'},
+                             status=status.HTTP_400_BAD_REQUEST)
+
+        # Identity capture always happens before the clock starts (begin_exam is the exam
+        # screen's own first move, after this), so - unlike the landing/verify-email checks -
+        # there's no in-progress-with-started_at case to carve out here.
+        if exam_session.link_not_yet_open(invitation):
+            opens_at = exam_session.invitation_opens_at(invitation).isoformat()
+            return Response(
+                {'detail': f'This assessment is not open yet. It becomes available at '
+                            f'{opens_at}.',
+                 'opens_at': opens_at},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         id_photo = request.FILES.get('id_photo')
-        if not id_photo:
-            return Response({'detail': 'An Aadhaar Card photo is required.'},
-                             status=status.HTTP_400_BAD_REQUEST)
-        try:
-            validate_identity_photo(id_photo, 'Aadhaar Card photo')
-        except InvalidImageUpload as exc:
-            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            attempt, _created = exam_session.start_or_resume_attempt(
-                invitation.pk, get_client_ip(request), request.META.get('HTTP_USER_AGENT', ''),
-            )
-        except InsufficientQuestionsError as exc:
-            logger.error('Cannot start attempt for invitation_id=%s: %s', invitation.pk, exc)
-            return Response(
-                {'detail': 'This assessment cannot be started right now. Please contact support.'},
-                status=status.HTTP_409_CONFLICT,
-            )
-
-        if attempt.status != ExamAttempt.Status.IN_PROGRESS:
-            return Response({'detail': 'This assessment has already been completed.'},
-                             status=status.HTTP_400_BAD_REQUEST)
-
-        if not aadhaar.can_retry(attempt):
-            return Response(aadhaar.capture_response(attempt))
-
-        # Read once and reused below for QR/OCR verification - id_photo is an uploaded file
-        # stream, and a second .read() after the first would return nothing. Same content-type
-        # caveat as the face photo (see ExamIdentityCaptureView) - validate_identity_photo is what
-        # actually guards against a malicious declared type.
-        id_photo_bytes = id_photo.read()
-        try:
-            attempt.aadhaar_capture_url = blob_storage.upload_photo(
-                attempt.attempt_id, 'id_photo', id_photo_bytes, id_photo.content_type,
-            )
-        except Exception:
-            logger.exception(
-                'Aadhaar photo upload failed for attempt_id=%s (invitation_id=%s)',
-                attempt.attempt_id, invitation.pk,
-            )
-            return Response(
-                {'detail': 'Photo upload failed - evidence storage is unavailable right now. '
-                           'Please try again in a moment.'},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
-
-        update_fields = ['aadhaar_capture_url']
-        # Only counted while the feature is actually on, so today's default (off) leaves this
-        # endpoint's retry behaviour exactly as unlimited as the old combined endpoint's was.
-        if settings.AADHAAR_VERIFICATION_ENABLED:
-            attempt.aadhaar_verification_attempts += 1
-            update_fields.append('aadhaar_verification_attempts')
-        attempt.save(update_fields=update_fields)
-
-        # Fast path (QR + Verhoeff) first; only tries OCR if that left the attempt PENDING - most
-        # current cards use the newer Secure QR format this doesn't decode, so this is the common
-        # case, not a rare fallback. Neither call raises, blocks, or forces a verdict - both
-        # degrade to leaving the attempt PENDING on any failure.
-        aadhaar.verify_identity_photo(attempt, id_photo_bytes)
-        if attempt.aadhaar_verification_status == ExamAttempt.AadhaarVerificationStatus.PENDING:
-            aadhaar.try_ocr_inline(attempt, id_photo_bytes)
-
-        return Response(aadhaar.capture_response(attempt))
-
-
-@method_decorator(ratelimit(key=ratelimit_token_key, rate='5/m', method='POST', block=False), name='post')
-class ExamIdentityCaptureView(APIView):
-    """POST /api/exam/token/<token>/identity/ - screen c-idverify's SECOND step, the face photo.
-    The Aadhaar photo is captured separately first (ExamIdentityAadhaarCaptureView above), since
-    it needs its own real-time verify-and-retry loop before this point. Requires only that Aadhaar
-    capture was ATTEMPTED, never that it succeeded - a mismatch, or an exhausted and flagged
-    verdict, must still reach here and let the candidate continue into the exam, per this
-    module's never-block guarantee.
-    """
-    authentication_classes = []
-    permission_classes = [AllowAny]
-    parser_classes = [MultiPartParser]
-
-    def post(self, request, token):
-        if getattr(request, 'limited', False):
-            return Response({'detail': 'Too many attempts. Please try again shortly.'},
-                             status=status.HTTP_429_TOO_MANY_REQUESTS)
-
-        invitation, error = _open_invitation_or_error(token)
-        if error:
-            return error
-
         face_photo = request.FILES.get('face_photo')
-        if not face_photo:
-            return Response({'detail': 'A face photo is required.'},
+        if not id_photo or not face_photo:
+            return Response({'detail': 'Both an ID photo and a face photo are required.'},
                              status=status.HTTP_400_BAD_REQUEST)
 
         # The declared content type on a multipart file is whatever the CLIENT asserts, not a
@@ -385,6 +275,7 @@ class ExamIdentityCaptureView(APIView):
         # necessity (a candidate hasn't started their exam yet), so the only gate is a valid
         # invitation token - not a meaningful barrier to a candidate targeting their own link.
         try:
+            validate_identity_photo(id_photo, 'ID photo')
             validate_identity_photo(face_photo, 'Face photo')
         except InvalidImageUpload as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
@@ -404,12 +295,14 @@ class ExamIdentityCaptureView(APIView):
             return Response({'detail': 'This assessment has already been completed.'},
                              status=status.HTTP_400_BAD_REQUEST)
 
-        if not attempt.aadhaar_capture_url:
-            return Response({'detail': 'Please capture your Aadhaar Card photo first.'},
-                             status=status.HTTP_400_BAD_REQUEST)
-
         if not attempt.id_verified_at:
+            # Captured once and reused below for Aadhaar QR/OCR verification - id_photo is an
+            # uploaded file stream, and a second .read() after the first would return nothing.
+            id_photo_bytes = id_photo.read()
             try:
+                attempt.aadhaar_capture_url = blob_storage.upload_photo(
+                    attempt.attempt_id, 'id_photo', id_photo_bytes, id_photo.content_type,
+                )
                 attempt.face_photo_url = blob_storage.upload_photo(
                     attempt.attempt_id, 'face_photo', face_photo.read(), face_photo.content_type,
                 )
@@ -429,8 +322,12 @@ class ExamIdentityCaptureView(APIView):
                     status=status.HTTP_503_SERVICE_UNAVAILABLE,
                 )
             attempt.save(update_fields=[
-                'face_photo_url', 'id_verified_at', 'session_recording_url',
+                'aadhaar_capture_url', 'face_photo_url', 'id_verified_at', 'session_recording_url',
             ])
+            # Fast path only (QR + Verhoeff) - see services.aadhaar module docstring for the OCR
+            # fallback's own, separately-scheduled path. Never raises, never blocks exam start;
+            # does its own save() for just the aadhaar_* fields.
+            aadhaar.verify_identity_photo(attempt, id_photo_bytes)
 
         # Opportunistic - see services.seb.record_seb_usage. If the candidate chose Safe Exam
         # Browser at the earlier choice screen, SEB has been the active browser since the very
@@ -612,7 +509,7 @@ class ExamViolationView(APIView):
         reason_code = serializer.validated_data.get('reason', TerminationReason.TAB_SWITCH)
         extra_details = {
             key: serializer.validated_data[key]
-            for key in ('detected_object', 'confidence', 'similarity')
+            for key in ('detected_object', 'confidence')
             if key in serializer.validated_data
         }
         return Response(exam_session.record_violation(request.user, reason_code, extra_details or None))

@@ -15,17 +15,15 @@ const PRIORITY = {
   // cause was the camera.
   camera_off: 4,
   system_issue: 4,      // device-level, not a candidate choice
-  // Same tier as camera_off: by the time any of these five fires, the owning hook has already
+  // Same tier as camera_off: by the time any of these four fires, the owning hook has already
   // spent several seconds confirming a sustained condition (see useVisionProctoringGuard /
-  // useVoiceActivityGuard / useFaceIdentityGuard), unlike window_blur/tab_switch which fire
-  // instantly on the first raw browser event - so they deserve at least that same precedence, not
-  // the default of 0 that would let an unrelated window_blur silently win the race and hide the
-  // AI-specific message.
+  // useVoiceActivityGuard), unlike window_blur/tab_switch which fire instantly on the first raw
+  // browser event - so they deserve at least that same precedence, not the default of 0 that
+  // would let an unrelated window_blur silently win the race and hide the AI-specific message.
   face_not_visible: 4,
   extra_person_detected: 4,
   forbidden_object_detected: 4,
   voice_detected: 4,
-  face_mismatch: 4,
   view_source_attempt: 5,
   devtools_attempt: 5,
   screenshot_attempt: 5, // deliberate keypresses - the most precise signal available

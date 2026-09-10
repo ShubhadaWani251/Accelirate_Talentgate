@@ -38,7 +38,7 @@ import hashlib
 import hmac
 import logging
 import re
-import threading
+import time
 import xml.etree.ElementTree as ET
 
 import cv2
@@ -52,16 +52,6 @@ from api.models import ExamAttempt
 logger = logging.getLogger(__name__)
 
 _AADHAAR_RE = re.compile(r'\d{12}')
-
-# How many times a candidate may (re)capture the Aadhaar photo through the exam-time capture
-# endpoint before that flow stops offering a retry and lets them continue regardless, flagged for
-# a TA (see can_retry/needs_manual_review below) - never a hard block, per this module's own
-# guarantee. Deliberately small: a candidate-driven retake costs THEM real time in front of a
-# webcam before their exam has even started. One careful retake fixes a blurry photo or bad
-# glare; a photo that still fails on a second try is a genuine mismatch or an unreadable card,
-# which a third attempt does not fix - it only delays exam start for no better odds. Reuses the
-# existing aadhaar_verification_attempts field - no new model field, no migration.
-AADHAAR_CAPTURE_MAX_ATTEMPTS = 2
 
 
 def verhoeff_is_valid(digits):
@@ -221,65 +211,11 @@ def verify_identity_photo(attempt, id_photo_bytes):
         logger.exception('Aadhaar fast-path verification failed for attempt %s', attempt.pk)
 
 
-_ocr_engine = None
-_ocr_engine_lock = threading.Lock()
-
-
-def _get_ocr_engine():
-    """Lazily constructs the RapidOCR engine once per worker process (~0.65s measured) - deferred
-    to first real use, not module import time, so a deployment that never turns
-    AADHAAR_VERIFICATION_ENABLED on (today's actual default) never pays even the import cost in
-    every worker. RapidOCR is free and fully local (no cloud account, no per-call cost) - the
-    replacement for an earlier Azure AI Vision integration that was never actually provisioned.
-    """
-    global _ocr_engine
-    if _ocr_engine is None:
-        with _ocr_engine_lock:
-            if _ocr_engine is None:
-                from rapidocr_onnxruntime import RapidOCR
-                _ocr_engine = RapidOCR()
-    return _ocr_engine
-
-
-# Bounds concurrent RapidOCR calls PER GUNICORN WORKER PROCESS - see AADHAAR_OCR_MAX_CONCURRENT's
-# own comment in settings.py. run_ocr_fallback below runs as a wholly separate OS process (see
-# startup.sh's scheduler loop) and needs no guard of its own; this only protects the
-# request-handling path try_ocr_inline runs on.
-_ocr_semaphore = threading.BoundedSemaphore(settings.AADHAAR_OCR_MAX_CONCURRENT)
-
-
-def try_ocr_inline(attempt, id_photo_bytes):
-    """Synchronous OCR, called from the exam-time Aadhaar capture endpoint only when the fast QR
-    path (verify_identity_photo) left the attempt PENDING - this is what makes a real-time verdict
-    possible for the many current cards that use the newer Secure QR format this module doesn't
-    decode. Never blocks waiting for a slot: if none is free right now, this is skipped outright
-    and the attempt simply stays PENDING, a normal outcome the candidate's own retry (or the
-    deferred run_ocr_fallback command below) already covers. Returns True if a verdict was applied
-    to `attempt`, False otherwise - never raises.
-    """
-    if not _ocr_semaphore.acquire(blocking=False):
-        return False
-    try:
-        number = _extract_verhoeff_valid_number(_ocr_text(id_photo_bytes))
-        if number is None:
-            return False
-        _apply_verdict(attempt, ExamAttempt.AadhaarVerificationMethod.OCR, number)
-        return True
-    except Exception:
-        logger.exception('Inline Aadhaar OCR failed for attempt %s', attempt.pk)
-        return False
-    finally:
-        _ocr_semaphore.release()
-
-
 def run_ocr_fallback(attempt):
-    """Slow path, called only by management/commands/verify_aadhaar_ocr_fallback.py - kept as a
-    last-resort safety net now that try_ocr_inline exists, for the one case that can't cover:
-    its concurrency guard skipped a candidate's own capture-time attempt outright (server was busy
-    with a batch start) rather than actually reading their possibly-perfectly-readable photo.
-    Downloads the already-uploaded id_photo, OCRs it, and hunts the text for exactly one
-    Verhoeff-valid 12-digit run - not "the first 12 digits found", since a candidate's date of
-    birth or other printed numbers on the card could otherwise be mistaken for the Aadhaar number.
+    """Slow path, called only by management/commands/verify_aadhaar_ocr_fallback.py. Downloads
+    the already-uploaded id_photo, OCRs it, and hunts the text for exactly one Verhoeff-valid
+    12-digit run - not "the first 12 digits found", since a candidate's date of birth or other
+    printed numbers on the card could otherwise be mistaken for the Aadhaar number.
 
     Returns 'verified' | 'still_unreadable' | 'skipped' - mirroring
     services.video_transcode.transcode_to_mp4's None-on-failure convention, just as a status
@@ -289,12 +225,8 @@ def run_ocr_fallback(attempt):
     if not settings.AADHAAR_VERIFICATION_ENABLED or not attempt.aadhaar_capture_url:
         return 'skipped'
     try:
-        from api.services import blob_storage
-
-        read_url = blob_storage.fresh_read_url(attempt.aadhaar_capture_url)
-        image_bytes = requests.get(read_url, timeout=15).content
-
-        number = _extract_verhoeff_valid_number(_ocr_text(image_bytes))
+        text = _ocr_text(attempt)
+        number = _extract_verhoeff_valid_number(text)
         if number is None:
             return 'still_unreadable'
         _apply_verdict(attempt, ExamAttempt.AadhaarVerificationMethod.OCR, number)
@@ -304,17 +236,48 @@ def run_ocr_fallback(attempt):
         return 'still_unreadable'
 
 
-def _ocr_text(image_bytes):
-    """Runs `image_bytes` through RapidOCR and joins every detected text line into one string.
-    Shared by both try_ocr_inline and run_ocr_fallback - each already has the relevant bytes in
-    hand by the time it calls this, so this function itself does no I/O of its own.
+def _ocr_text(attempt):
+    """Fetches the stored id_photo and runs it through Azure AI Vision's Read API.
+
+    Requires a real, provisioned Azure AI Vision resource (AZURE_VISION_ENDPOINT/
+    AZURE_VISION_KEY) - unset raises, which run_ocr_fallback's own try/except turns into
+    'still_unreadable' rather than a crash, same as any other misconfiguration on this path.
     """
-    array = np.frombuffer(image_bytes, dtype=np.uint8)
-    image = cv2.imdecode(array, cv2.IMREAD_COLOR)
-    if image is None:
-        return ''
-    result, _elapsed = _get_ocr_engine()(image)
-    return ' '.join(line[1] for line in result) if result else ''
+    from api.services import blob_storage
+
+    endpoint = getattr(settings, 'AZURE_VISION_ENDPOINT', '')
+    key = getattr(settings, 'AZURE_VISION_KEY', '')
+    if not endpoint or not key:
+        raise RuntimeError('AZURE_VISION_ENDPOINT/AZURE_VISION_KEY not configured')
+
+    read_url = blob_storage.fresh_read_url(attempt.aadhaar_capture_url)
+    image_bytes = requests.get(read_url, timeout=15).content
+
+    response = requests.post(
+        f'{endpoint}/vision/v3.2/read/analyze',
+        headers={'Ocp-Apim-Subscription-Key': key, 'Content-Type': 'application/octet-stream'},
+        data=image_bytes, timeout=15,
+    )
+    response.raise_for_status()
+    operation_url = response.headers['Operation-Location']
+
+    # Read is async on Azure's side - poll until the operation reports done. Bounded (10 tries,
+    # 1s apart) so a stuck operation degrades to 'still_unreadable' rather than hanging the
+    # command run.
+    for _ in range(10):
+        time.sleep(1)
+        result = requests.get(
+            operation_url, headers={'Ocp-Apim-Subscription-Key': key}, timeout=15,
+        ).json()
+        if result.get('status') == 'succeeded':
+            return ' '.join(
+                line['text']
+                for block in result['analyzeResult']['readResults']
+                for line in block['lines']
+            )
+        if result.get('status') == 'failed':
+            break
+    return ''
 
 
 def _extract_verhoeff_valid_number(text):
@@ -356,48 +319,3 @@ def find_hash_conflicts(attempt):
         }
         for other in others
     ]
-
-
-def can_retry(attempt):
-    """Whether the exam-time Aadhaar capture endpoint should still accept another (re)capture
-    from this candidate. False once matched (nothing left to fix) or once
-    AADHAAR_CAPTURE_MAX_ATTEMPTS has been used - at which point the endpoint returns the frozen
-    verdict instead of re-verifying, and the candidate proceeds regardless (see
-    needs_manual_review) rather than being blocked.
-    """
-    return (
-        attempt.aadhaar_verification_status != ExamAttempt.AadhaarVerificationStatus.MATCH
-        and attempt.aadhaar_verification_attempts < AADHAAR_CAPTURE_MAX_ATTEMPTS
-    )
-
-
-def needs_manual_review(attempt):
-    """Whether this attempt's Aadhaar verification is a settled non-match a TA should look at.
-
-    Deliberately derived from already-persisted fields, not a stored flag: if the deferred
-    run_ocr_fallback command later succeeds on a photo the candidate's own attempts couldn't
-    resolve, aadhaar_verification_status flips to MATCH and this clears itself automatically -
-    nothing to remember to unset.
-    """
-    return (
-        attempt.aadhaar_verification_status != ExamAttempt.AadhaarVerificationStatus.MATCH
-        and attempt.aadhaar_verification_attempts >= AADHAAR_CAPTURE_MAX_ATTEMPTS
-    )
-
-
-def capture_response(attempt):
-    """The verdict payload returned by the exam-time Aadhaar capture endpoint on every call (fresh
-    capture or retry alike) - also the single source of truth can_retry/needs_manual_review-shaped
-    data should be read from, so the API response and any TA-facing serializer never drift apart.
-    """
-    return {
-        'aadhaar_verification_status': attempt.aadhaar_verification_status,
-        'aadhaar_verification_status_display': attempt.get_aadhaar_verification_status_display(),
-        'aadhaar_verification_method': attempt.aadhaar_verification_method,
-        'aadhaar_decoded_last4': attempt.aadhaar_decoded_last4,
-        'aadhaar_attempts_used': attempt.aadhaar_verification_attempts,
-        'aadhaar_attempts_allowed': AADHAAR_CAPTURE_MAX_ATTEMPTS,
-        'aadhaar_can_retry': can_retry(attempt),
-        'aadhaar_needs_manual_review': needs_manual_review(attempt),
-        'aadhaar_verification_enabled': settings.AADHAAR_VERIFICATION_ENABLED,
-    }

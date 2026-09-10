@@ -52,7 +52,6 @@ from .integrations import ActiveQuestionExportView
 from .exam import (
     ExamTokenLandingView,
     ExamVerifyEmailView,
-    ExamIdentityAadhaarCaptureView,
     ExamIdentityCaptureView,
     ExamSebConfigView,
     ExamSebConfigZipView,
@@ -86,8 +85,7 @@ __all__ = [
     'QuestionTemplateDownloadView', 'QuestionBulkUploadView', 'QuestionRowValidationView',
     'UserListCreateView', 'UserDetailView',
     'ActiveQuestionExportView',
-    'ExamTokenLandingView', 'ExamVerifyEmailView', 'ExamIdentityAadhaarCaptureView',
-    'ExamIdentityCaptureView', 'ExamSebConfigView',
+    'ExamTokenLandingView', 'ExamVerifyEmailView', 'ExamIdentityCaptureView', 'ExamSebConfigView',
     'ExamSebConfigZipView',
     'ExamBeginView', 'ExamSessionView', 'ExamAnswerView', 'ExamRecordingChunkView',
     'ExamViolationView', 'ExamSubmitView',

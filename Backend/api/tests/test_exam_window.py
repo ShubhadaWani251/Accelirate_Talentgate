@@ -154,7 +154,10 @@ class TestExamIdentityCaptureRefusesBeforeTheWindowOpens:
     def _files(self):
         from django.core.files.uploadedfile import SimpleUploadedFile
         body = b'\xff\xd8\xff\xe0fake-jpeg-bytes'
-        return {'face_photo': SimpleUploadedFile('face.jpg', body, content_type='image/jpeg')}
+        return {
+            'id_photo': SimpleUploadedFile('id.jpg', body, content_type='image/jpeg'),
+            'face_photo': SimpleUploadedFile('face.jpg', body, content_type='image/jpeg'),
+        }
 
     def test_identity_capture_is_rejected(
         self, api_client, ta_user, make_batch, make_candidate, make_invitation

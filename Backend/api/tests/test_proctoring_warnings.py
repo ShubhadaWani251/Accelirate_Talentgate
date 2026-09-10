@@ -35,7 +35,6 @@ class TestWhichCausesAreWarnable:
         TerminationReason.EXTRA_PERSON_DETECTED,
         TerminationReason.FORBIDDEN_OBJECT_DETECTED,
         TerminationReason.VOICE_DETECTED,
-        TerminationReason.FACE_MISMATCH,
     ])
     def test_recoverable_causes_get_a_warning(self, reason):
         assert reason in exam_session.WARNABLE_REASONS
@@ -209,9 +208,9 @@ class TestWarningNotAcknowledged:
 
 
 class TestAiDetectedReasons:
-    """The five client-side AI signals (face count, forbidden objects, voice activity, face
-    identity match) - each gets the same warn-then-terminate treatment as camera_off, for the
-    same reason: a live ML/CV detection is a best-guess, not a deterministic browser event.
+    """The four client-side AI signals (face count, forbidden objects, voice activity) - each
+    gets the same warn-then-terminate treatment as camera_off, for the same reason: a live
+    ML/CV detection is a best-guess, not a deterministic browser event.
     """
 
     @pytest.mark.parametrize('reason', [
@@ -219,7 +218,6 @@ class TestAiDetectedReasons:
         TerminationReason.EXTRA_PERSON_DETECTED,
         TerminationReason.FORBIDDEN_OBJECT_DETECTED,
         TerminationReason.VOICE_DETECTED,
-        TerminationReason.FACE_MISMATCH,
     ])
     def test_the_first_occurrence_is_a_warning_not_a_termination(self, attempt, reason):
         result = exam_session.record_violation(attempt, reason)
@@ -233,7 +231,6 @@ class TestAiDetectedReasons:
         TerminationReason.EXTRA_PERSON_DETECTED,
         TerminationReason.FORBIDDEN_OBJECT_DETECTED,
         TerminationReason.VOICE_DETECTED,
-        TerminationReason.FACE_MISMATCH,
     ])
     def test_three_occurrences_warn_the_fourth_ends_the_attempt(self, attempt, reason):
         for _ in range(exam_session.MAX_WARNINGS):
@@ -252,7 +249,6 @@ class TestAiDetectedReasons:
         TerminationReason.EXTRA_PERSON_DETECTED,
         TerminationReason.FORBIDDEN_OBJECT_DETECTED,
         TerminationReason.VOICE_DETECTED,
-        TerminationReason.FACE_MISMATCH,
     ])
     def test_it_is_recorded_as_a_violation_on_their_record(self, reason):
         assert exam_session.is_violation_reason(reason) is True
@@ -262,7 +258,6 @@ class TestAiDetectedReasons:
         TerminationReason.EXTRA_PERSON_DETECTED,
         TerminationReason.FORBIDDEN_OBJECT_DETECTED,
         TerminationReason.VOICE_DETECTED,
-        TerminationReason.FACE_MISMATCH,
     ])
     def test_staff_see_a_readable_label_not_the_raw_code(self, reason):
         label = exam_session.termination_label(reason)

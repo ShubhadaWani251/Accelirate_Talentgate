@@ -241,19 +241,14 @@ class TestIdentityCaptureNeverBlocksOnAadhaar:
             f'/api/exam/token/{token}/verify-email/', {'email': small_invitation.candidate.email},
         )
         photo = _legacy_qr_photo(VALID_TEST_NUMBER)
-        aadhaar_response = api_client.post(
-            f'/api/exam/token/{token}/identity/aadhaar/',
-            {'id_photo': SimpleUploadedFile('id.png', photo, content_type='image/png')},
-            format='multipart',
-        )
-        assert aadhaar_response.status_code == 200
-        assert aadhaar_response.data['aadhaar_verification_status'] == 'match'
-
         response = api_client.post(
             f'/api/exam/token/{token}/identity/',
-            {'face_photo': SimpleUploadedFile(
-                'face.jpg', b'\xff\xd8\xff\xe0fake-jpeg-bytes', content_type='image/jpeg',
-            )},
+            {
+                'id_photo': SimpleUploadedFile('id.png', photo, content_type='image/png'),
+                'face_photo': SimpleUploadedFile(
+                    'face.jpg', b'\xff\xd8\xff\xe0fake-jpeg-bytes', content_type='image/jpeg',
+                ),
+            },
             format='multipart',
         )
         assert response.status_code == 200
@@ -276,218 +271,16 @@ class TestIdentityCaptureNeverBlocksOnAadhaar:
         api_client.post(
             f'/api/exam/token/{token}/verify-email/', {'email': small_invitation.candidate.email},
         )
-        aadhaar_response = api_client.post(
-            f'/api/exam/token/{token}/identity/aadhaar/',
-            {'id_photo': SimpleUploadedFile(
-                'id.jpg', b'\xff\xd8\xff\xe0fake-jpeg-bytes', content_type='image/jpeg',
-            )},
-            format='multipart',
-        )
-        assert aadhaar_response.status_code == 200
-
         response = api_client.post(
             f'/api/exam/token/{token}/identity/',
-            {'face_photo': SimpleUploadedFile(
-                'face.jpg', b'\xff\xd8\xff\xe0fake-jpeg-bytes', content_type='image/jpeg',
-            )},
+            {
+                'id_photo': SimpleUploadedFile(
+                    'id.jpg', b'\xff\xd8\xff\xe0fake-jpeg-bytes', content_type='image/jpeg',
+                ),
+                'face_photo': SimpleUploadedFile(
+                    'face.jpg', b'\xff\xd8\xff\xe0fake-jpeg-bytes', content_type='image/jpeg',
+                ),
+            },
             format='multipart',
         )
         assert response.status_code == 200
-
-
-class TestCanRetryAndNeedsManualReview:
-    """Pure arithmetic on aadhaar_verification_status/_attempts - see can_retry/
-    needs_manual_review's own docstrings for why these are derived, not stored.
-    """
-
-    def test_can_retry_while_attempts_remain_and_not_matched(self, attempt):
-        attempt.aadhaar_verification_attempts = 1
-        assert aadhaar.can_retry(attempt) is True
-        assert aadhaar.needs_manual_review(attempt) is False
-
-    def test_cannot_retry_once_matched_even_with_attempts_left(self, attempt):
-        attempt.aadhaar_verification_status = ExamAttempt.AadhaarVerificationStatus.MATCH
-        attempt.aadhaar_verification_attempts = 1
-        assert aadhaar.can_retry(attempt) is False
-        assert aadhaar.needs_manual_review(attempt) is False
-
-    def test_cannot_retry_once_attempts_are_exhausted(self, attempt):
-        attempt.aadhaar_verification_status = ExamAttempt.AadhaarVerificationStatus.MISMATCH
-        attempt.aadhaar_verification_attempts = aadhaar.AADHAAR_CAPTURE_MAX_ATTEMPTS
-        assert aadhaar.can_retry(attempt) is False
-        assert aadhaar.needs_manual_review(attempt) is True
-
-    def test_a_later_match_clears_needs_manual_review_automatically(self, attempt):
-        # Simulates the deferred OCR fallback command succeeding after the candidate's own
-        # retries already ran out - nothing to remember to unset.
-        attempt.aadhaar_verification_attempts = aadhaar.AADHAAR_CAPTURE_MAX_ATTEMPTS
-        attempt.aadhaar_verification_status = ExamAttempt.AadhaarVerificationStatus.MATCH
-        assert aadhaar.needs_manual_review(attempt) is False
-
-
-class TestTryOcrInline:
-    """The RapidOCR-backed synchronous fallback, only ever reached when the fast QR path leaves
-    an attempt PENDING.
-    """
-
-    def _printed_number_photo(self, number):
-        image = np.full((80, 340, 3), 255, dtype=np.uint8)
-        cv2.putText(image, number, (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.1, (0, 0, 0), 2)
-        ok, buf = cv2.imencode('.png', image)
-        assert ok
-        return buf.tobytes()
-
-    def test_a_readable_photo_with_no_qr_gets_a_verdict(self, attempt, settings):
-        settings.AADHAAR_VERIFICATION_ENABLED = True
-        assert aadhaar.try_ocr_inline(attempt, self._printed_number_photo(VALID_TEST_NUMBER)) is True
-        attempt.refresh_from_db()
-        assert attempt.aadhaar_verification_status == ExamAttempt.AadhaarVerificationStatus.MATCH
-        assert attempt.aadhaar_verification_method == ExamAttempt.AadhaarVerificationMethod.OCR
-
-    def test_garbage_bytes_return_false_not_raise(self, attempt, settings):
-        settings.AADHAAR_VERIFICATION_ENABLED = True
-        assert aadhaar.try_ocr_inline(attempt, b'garbage, not an image') is False
-
-    def test_skipped_outright_when_no_concurrency_slot_is_free(self, attempt, settings):
-        settings.AADHAAR_VERIFICATION_ENABLED = True
-        # A photo that DOES resolve when a slot is free (proven by the sibling test above) - held
-        # unreadable here only because the semaphore is occupied, exactly like a concurrent
-        # request would leave it. Confirms the guard actually skips work, not just coincidentally
-        # returns False.
-        photo = self._printed_number_photo(VALID_TEST_NUMBER)
-        assert aadhaar._ocr_semaphore.acquire(blocking=False) is True
-        try:
-            assert aadhaar.try_ocr_inline(attempt, photo) is False
-            attempt.refresh_from_db()
-            assert attempt.aadhaar_verification_status == ExamAttempt.AadhaarVerificationStatus.PENDING
-        finally:
-            aadhaar._ocr_semaphore.release()
-
-
-class TestAadhaarCaptureRetryFlow:
-    """HTTP-level: the two-step capture flow (Aadhaar photo with retries, then face photo)."""
-
-    @pytest.fixture
-    def small_invitation(self, ta_user, make_batch, make_candidate, make_invitation):
-        section = QuestionBankSection.objects.create(
-            section_name='Logical & Analytical Reasoning', section_key='logical',
-        )
-        Question.objects.create(
-            question_code='Q-AADHAAR-RETRY-1', section=section, question_text='2 + 2 = ?',
-            option_a='3', option_b='4', option_c='5', option_d='6', correct_option='B',
-            difficulty=Question.Difficulty.EASY,
-        )
-        batch = make_batch(ta_user, logical_questions=1, quantitative_questions=0,
-                           verbal_questions=0, programming_questions=0)
-        candidate = make_candidate(batch, ta_user, aadhaar_last4='2346')
-        return make_invitation(candidate, ta_user)
-
-    def _capture(self, api_client, token, photo_bytes):
-        return api_client.post(
-            f'/api/exam/token/{token}/identity/aadhaar/',
-            {'id_photo': SimpleUploadedFile('id.png', photo_bytes, content_type='image/png')},
-            format='multipart',
-        )
-
-    def test_a_match_on_first_try_needs_no_retry(self, api_client, small_invitation, settings):
-        settings.AZURE_STORAGE_CONNECTION_STRING = ''
-        settings.DEBUG = True
-        settings.AADHAAR_VERIFICATION_ENABLED = True
-        token = small_invitation.unique_link_token
-        api_client.post(f'/api/exam/token/{token}/verify-email/',
-                         {'email': small_invitation.candidate.email})
-
-        response = self._capture(api_client, token, _legacy_qr_photo(VALID_TEST_NUMBER))
-        assert response.status_code == 200
-        assert response.data['aadhaar_verification_status'] == 'match'
-        assert response.data['aadhaar_can_retry'] is False
-        assert response.data['aadhaar_needs_manual_review'] is False
-        assert response.data['aadhaar_attempts_used'] == 1
-
-    def test_unreadable_twice_exhausts_retries_and_flags_for_review_but_still_proceeds(
-        self, api_client, small_invitation, settings,
-    ):
-        settings.AZURE_STORAGE_CONNECTION_STRING = ''
-        settings.DEBUG = True
-        settings.AADHAAR_VERIFICATION_ENABLED = True
-        token = small_invitation.unique_link_token
-        api_client.post(f'/api/exam/token/{token}/verify-email/',
-                         {'email': small_invitation.candidate.email})
-
-        blank = np.full((200, 200), 255, dtype=np.uint8)
-        ok, buf = cv2.imencode('.png', blank)
-        assert ok
-        unreadable_photo = buf.tobytes()
-
-        first = self._capture(api_client, token, unreadable_photo)
-        assert first.status_code == 200
-        assert first.data['aadhaar_verification_status'] == 'pending'
-        assert first.data['aadhaar_can_retry'] is True
-        assert first.data['aadhaar_needs_manual_review'] is False
-        assert first.data['aadhaar_attempts_used'] == 1
-
-        second = self._capture(api_client, token, unreadable_photo)
-        assert second.status_code == 200
-        assert second.data['aadhaar_can_retry'] is False
-        assert second.data['aadhaar_needs_manual_review'] is True
-        assert second.data['aadhaar_attempts_used'] == 2
-
-        # A third submission after exhaustion is answered from the frozen verdict - never
-        # re-verified or re-counted. This is what actually enforces the cap.
-        third = self._capture(api_client, token, unreadable_photo)
-        assert third.status_code == 200
-        assert third.data['aadhaar_attempts_used'] == 2
-
-        # Never a hard block - the candidate can still finish identity capture and reach the exam.
-        face_response = api_client.post(
-            f'/api/exam/token/{token}/identity/',
-            {'face_photo': SimpleUploadedFile(
-                'face.jpg', b'\xff\xd8\xff\xe0fake-jpeg-bytes', content_type='image/jpeg',
-            )},
-            format='multipart',
-        )
-        assert face_response.status_code == 200
-
-    def test_face_photo_endpoint_requires_aadhaar_capture_first(
-        self, api_client, small_invitation, settings,
-    ):
-        settings.AZURE_STORAGE_CONNECTION_STRING = ''
-        settings.DEBUG = True
-        token = small_invitation.unique_link_token
-        api_client.post(f'/api/exam/token/{token}/verify-email/',
-                         {'email': small_invitation.candidate.email})
-
-        response = api_client.post(
-            f'/api/exam/token/{token}/identity/',
-            {'face_photo': SimpleUploadedFile(
-                'face.jpg', b'\xff\xd8\xff\xe0fake-jpeg-bytes', content_type='image/jpeg',
-            )},
-            format='multipart',
-        )
-        assert response.status_code == 400
-
-    def test_unlimited_retries_while_the_feature_is_disabled(
-        self, api_client, small_invitation, settings,
-    ):
-        """AADHAAR_VERIFICATION_ENABLED defaults to False in every real deployment today - this
-        endpoint's retry behaviour must stay exactly as unlimited as the old combined endpoint's
-        was until someone deliberately turns the feature on.
-        """
-        settings.AZURE_STORAGE_CONNECTION_STRING = ''
-        settings.DEBUG = True
-        settings.AADHAAR_VERIFICATION_ENABLED = False
-        token = small_invitation.unique_link_token
-        api_client.post(f'/api/exam/token/{token}/verify-email/',
-                         {'email': small_invitation.candidate.email})
-
-        photo = SimpleUploadedFile(
-            'id.jpg', b'\xff\xd8\xff\xe0fake-jpeg-bytes', content_type='image/jpeg',
-        )
-        for _ in range(5):
-            response = api_client.post(
-                f'/api/exam/token/{token}/identity/aadhaar/', {'id_photo': photo},
-                format='multipart',
-            )
-            assert response.status_code == 200
-            assert response.data['aadhaar_can_retry'] is True
-            assert response.data['aadhaar_attempts_used'] == 0
