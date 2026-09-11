@@ -45,8 +45,26 @@ stages:
               set -e
               python -m pip install --upgrade pip
               pip install -r requirements.txt
+              # rapidocr-onnxruntime is deliberately not in requirements.txt - see that file's own
+              # comment. --no-deps here mirrors exactly what Backend/startup.sh does in
+              # production, so CI's dependency set matches what App Service actually runs instead
+              # of masking the opencv-python conflict that caused the 2026-09-10 outage.
+              pip install --no-deps rapidocr-onnxruntime==1.2.3
             workingDirectory: Backend
             displayName: Install backend dependencies
+
+          - script: |
+              set -e
+              if pip show opencv-python >/dev/null 2>&1; then
+                echo "##vso[task.logissue type=error]opencv-python (the GUI build) got installed \
+              alongside opencv-python-headless. This is what took down the whole App Service on \
+              2026-09-10 (cv2 ends up needing libGL.so.1, which the Linux runtime doesn't have). \
+              Whatever dependency change pulled this in needs --no-deps or an equivalent fix - see \
+              Backend/requirements.in's comment on rapidocr-onnxruntime for the full story."
+                exit 1
+              fi
+            workingDirectory: Backend
+            displayName: Guard against opencv-python (non-headless) sneaking back in
 
           - script: |
               set -e

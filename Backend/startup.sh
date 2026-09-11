@@ -11,6 +11,21 @@
 # requests are drained instead of killed.
 set -e
 
+echo "==> Installing rapidocr-onnxruntime (--no-deps)"
+# Oryx's own `pip install -r requirements.txt` (which runs before this script, during deployment)
+# never installs rapidocr-onnxruntime - it is deliberately absent from requirements.txt, because
+# its metadata hard-depends on `opencv-python` (the GUI build), which pip would otherwise install
+# alongside opencv-python-headless, corrupting the shared cv2/ install with a build that needs
+# libGL.so.1 - a library this App Service Linux runtime does not have and has no apt-get access to
+# install. cv2 is imported at module scope in services/aadhaar.py (for QR decoding), so that
+# ImportError previously crashed the entire app at Django startup, not just Aadhaar-related
+# requests - see requirements.in's comment for the full incident. --no-deps here installs
+# rapidocr's own code only, with every other real dependency it needs already satisfied by
+# requirements.txt. Guarded so a plain restart (not a fresh deploy) never re-hits PyPI - the
+# package is already present in the persisted venv from the last deploy that ran this.
+python -c "import rapidocr_onnxruntime" 2>/dev/null \
+    || pip install --no-deps rapidocr-onnxruntime==1.2.3
+
 echo "==> Applying database migrations"
 # At runtime, not build time: migrations need the real database, which only exists here. On a
 # scaled-out plan several instances may start at once; Django locks per migration, so the losers

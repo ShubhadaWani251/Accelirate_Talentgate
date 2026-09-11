@@ -30,6 +30,11 @@ def _started_attempt(ta_user, make_batch, make_candidate, make_invitation):
         candidate, ta_user, link_expired_at=timezone.now() + timedelta(days=3),
     )
     attempt, _ = exam_session.start_or_resume_attempt(invitation.pk, '127.0.0.1', 'pytest')
+    # begin_exam is only reachable in reality once identity capture (both photos) has actually
+    # completed and issued an attempt token - mark that here rather than going through the real
+    # upload endpoints, which this test has no need to exercise.
+    attempt.id_verified_at = timezone.now()
+    attempt.save(update_fields=['id_verified_at'])
     exam_session.begin_exam(attempt)
     return invitation, attempt
 
@@ -78,6 +83,10 @@ class TestTokenLandingEndsAReopenedInProgressAttempt:
         )
         attempt, _ = exam_session.start_or_resume_attempt(invitation.pk, '127.0.0.1', 'pytest')
         assert attempt.started_at is None
+        # Identity capture (both photos) already completed - a real candidate can only reach
+        # this landing-page-reload scenario after that, since it's what issues the attempt token.
+        attempt.id_verified_at = timezone.now()
+        attempt.save(update_fields=['id_verified_at'])
 
         response = api_client.get(f'/api/exam/token/{invitation.unique_link_token}/')
 
@@ -118,6 +127,10 @@ class TestVerifyEmailEndsAReopenedInProgressAttempt:
             candidate, ta_user, link_expired_at=timezone.now() + timedelta(days=3),
         )
         attempt, _ = exam_session.start_or_resume_attempt(invitation.pk, '127.0.0.1', 'pytest')
+        # Identity capture (both photos) already completed - a real candidate can only reach
+        # this verify-email-reload scenario after that, since it's what issues the attempt token.
+        attempt.id_verified_at = timezone.now()
+        attempt.save(update_fields=['id_verified_at'])
 
         response = api_client.post(
             f'/api/exam/token/{invitation.unique_link_token}/verify-email/',

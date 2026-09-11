@@ -280,6 +280,14 @@ AADHAAR_HASH_PEPPER = os.environ.get('AADHAAR_HASH_PEPPER', '')
 # is treated as signature_invalid rather than trusted or crashing.
 AADHAAR_UIDAI_PUBLIC_KEY_PATH = os.environ.get('AADHAAR_UIDAI_PUBLIC_KEY_PATH', '')
 
+# How many RapidOCR inferences (services.aadhaar.try_ocr_inline) may run at once, PER WORKER
+# PROCESS - each one is ~2-3s of CPU time, and a batch of candidates starting together could
+# otherwise tie up a request-handling thread per candidate for that whole window. Deliberately
+# small and conservative; raise only after real batch-start telemetry shows headroom -
+# under-provisioning costs one client-side retry, over-provisioning risks repeating the
+# connection/capacity incidents already seen under concurrent load this session.
+AADHAAR_OCR_MAX_CONCURRENT = int(os.environ.get('AADHAAR_OCR_MAX_CONCURRENT', '1'))
+
 # The link put in the new-user credentials email specifically. Deliberately a separate setting
 # from FRONTEND_ORIGIN above, not reused: FRONTEND_ORIGIN tracks wherever *this* backend's own
 # frontend is (localhost in dev), but staff only ever log in against the one real deployment -

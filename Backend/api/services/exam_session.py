@@ -71,6 +71,7 @@ class TerminationReason:
     EXTRA_PERSON_DETECTED = 'extra_person_detected'
     FORBIDDEN_OBJECT_DETECTED = 'forbidden_object_detected'
     VOICE_DETECTED = 'voice_detected'
+    FACE_MISMATCH = 'face_mismatch'
 
 
 TERMINATION_MESSAGES = {
@@ -118,6 +119,10 @@ TERMINATION_MESSAGES = {
     TerminationReason.VOICE_DETECTED:
         'Your assessment was ended because sustained talking was detected during the '
         'assessment. The room must remain quiet other than brief background noise.',
+    TerminationReason.FACE_MISMATCH:
+        'Your assessment was ended because the face visible to the camera no longer matched '
+        'the person verified at the start of the assessment. The same person must remain in '
+        'view for the whole assessment.',
 }
 
 # Short staff-facing labels for the same codes, used wherever a TA/Admin reads a candidate's
@@ -141,6 +146,7 @@ TERMINATION_LABELS = {
     TerminationReason.FORBIDDEN_OBJECT_DETECTED:
         'Unauthorized object detected in camera frame (phone/laptop/book/etc.)',
     TerminationReason.VOICE_DETECTED: 'Sustained talking detected during assessment',
+    TerminationReason.FACE_MISMATCH: 'Face no longer matched the verified candidate',
 }
 
 
@@ -201,7 +207,7 @@ WARNABLE_REASONS = {
     # separate and non-violation for the case where the whole feed dies, which is not
     # recoverable and not something a warning can help with.
     TerminationReason.CAMERA_OFF,
-    # The four AI-detected reasons below are warnable for the same reason as camera_off, not the
+    # The five AI-detected reasons below are warnable for the same reason as camera_off, not the
     # window-focus reasons above: each one is a best-guess from a live video/audio feed, not a
     # deterministic browser event. A face briefly out of frame while stretching, a family member
     # walking past in the background, a phone glimpsed on the desk without being picked up, or a
@@ -210,10 +216,17 @@ WARNABLE_REASONS = {
     # give the candidate a chance to correct it. Sustained/debounced detection (see the frontend
     # guards) already filters the genuinely momentary cases before this is ever called; this is
     # the second, independent layer of leniency on top of that, not a substitute for it.
+    #
+    # face_mismatch especially so: it is a brand-new face-matching model with no production
+    # track record, expected to have a HIGHER false-positive rate than the other four at launch
+    # (lighting changes, glasses on/off, camera angle drift over an hour) - exactly the scenario
+    # this warn-first tier exists to absorb, rather than wrongly ending an honest candidate's
+    # exam on the new signal's first bad day.
     TerminationReason.FACE_NOT_VISIBLE,
     TerminationReason.EXTRA_PERSON_DETECTED,
     TerminationReason.FORBIDDEN_OBJECT_DETECTED,
     TerminationReason.VOICE_DETECTED,
+    TerminationReason.FACE_MISMATCH,
 }
 
 # Three warnings, then out on the fourth. Counted server-side (see record_violation) rather than
@@ -246,6 +259,9 @@ _WARNING_CAUSES = {
         'a phone, laptop, book, or other unauthorized item was detected in view of your camera',
     TerminationReason.VOICE_DETECTED:
         'sustained talking was detected in the room',
+    TerminationReason.FACE_MISMATCH:
+        'the face visible to the camera did not match the person verified at the start of the '
+        'assessment',
 }
 
 
@@ -263,6 +279,8 @@ _WARNING_REMEDIES = {
         'Remove the item from view and keep your desk clear for the rest of the assessment',
     TerminationReason.VOICE_DETECTED:
         'Remain quiet - brief background noise is fine, but do not talk during the assessment',
+    TerminationReason.FACE_MISMATCH:
+        'Make sure your own face is clearly visible and well-lit, with no one else in your seat',
 }
 _DEFAULT_WARNING_REMEDY = 'Stay in the assessment window until you submit'
 
@@ -401,6 +419,19 @@ def remaining_seconds(attempt):
 def is_expired(attempt):
     """An attempt that hasn't begun can never be expired - its clock hasn't started."""
     return attempt.started_at is not None and remaining_seconds(attempt) <= 0
+
+
+def identity_capture_complete(attempt):
+    """Whether this attempt has been through the FULL identity-capture flow (Aadhaar photo, then
+    face photo), not just started it.
+
+    Needed because an ExamAttempt row can now exist from an Aadhaar-only capture the candidate
+    never finished (closed the tab before ever reaching face-photo capture, which is what actually
+    sets id_verified_at) - without this check, reopening the link would resume straight into the
+    exam with no face photo, no SEB setup, no camera permission. The resume branches in
+    ExamVerifyEmailView and ExamTokenLandingView gate on this rather than on `attempt is not None`.
+    """
+    return attempt.id_verified_at is not None
 
 
 def begin_exam(attempt):
