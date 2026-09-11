@@ -1,9 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
-import { useDispatch, useSelector } from 'react-redux';
+import { useSelector } from 'react-redux';
 import { selectUser } from '../../features/auth/authSlice';
-import { sessionCleared } from '../../features/auth/authSlice';
-import * as authApi from '../../api/authApi';
+import useLogout from '../../features/auth/useLogout';
 
 const NAV_LINKS = {
   admin: [
@@ -29,8 +28,8 @@ function initials(user) {
 
 export default function AppNav() {
   const user = useSelector(selectUser);
-  const dispatch = useDispatch();
   const navigate = useNavigate();
+  const logout = useLogout();
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   // Mobile only: the nav links collapse behind a toggle below 768px (see theme.css). On desktop
@@ -59,17 +58,8 @@ export default function AppNav() {
     else navigate(-1);
   }
 
-  async function handleLogout() {
-    try {
-      await authApi.logout();
-    } catch {
-      // proceed to clear client-side session regardless
-    }
-    // Capture the role before the store is cleared so the Signed Out screen can name the
-    // console the user just left, per the wireframe.
-    const roleCode = user?.role_code;
-    dispatch(sessionCleared());
-    navigate('/logged-out', { replace: true, state: { roleCode } });
+  function handleLogout() {
+    logout();
   }
 
   return (
