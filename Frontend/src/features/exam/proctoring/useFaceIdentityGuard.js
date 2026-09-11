@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react';
 import { computeFaceEmbedding, cosineSimilarity } from './faceEmbedding';
 
 // Heavier per-sample cost than useVisionProctoringGuard's checks (a similarity-transform
-// alignment warp plus a CNN forward pass, not one already-optimized MediaPipe call) - and unlike
-// a face vanishing from frame for a second, a genuine person-swap is an inherently multi-second
-// real-world event (someone has to get up, someone else has to sit down), so nothing is gained by
-// sampling faster than this.
-const SAMPLE_MS = 5000;
+// alignment warp plus a CNN forward pass, not one already-optimized MediaPipe call), but not so
+// heavy that a real handoff should take the better part of a minute to notice - an earlier, more
+// conservative 5000ms/4-in-a-row (~20s total) read as broken during live testing (a deliberate
+// swap-and-wait wasn't flagged in any reasonable time to sit and watch for it). Tightened to this
+// instead: still requires multiple independent samples to agree, so one bad-angle/glare frame
+// can't false-fire alone, but resolves in seconds rather than the better part of a minute.
+const SAMPLE_MS = 2000;
 
 // OpenCV's own published operating point for this exact model: cosine similarity >= 0.363 is
 // "same identity" at 99.60% pair accuracy on LFW. Set deliberately BELOW that calibrated boundary:
@@ -17,13 +19,13 @@ const SAMPLE_MS = 5000;
 // absorbing exactly the webcam-condition gap this model has never been validated against here.
 const SIMILARITY_THRESHOLD = 0.30;
 
-// Four straight misses (>=20s of continuously low similarity, at the 5s cadence above) before
+// Three straight misses (~6s of continuously low similarity, at the 2s cadence above) before
 // this fires. Long enough that a single bad sample - a hard head turn losing alignment quality for
 // one frame, a glare crossing the face for a moment - never counts alone, since those resolve
 // within a sample or two once the candidate settles back. Short enough that a real handoff to a
 // different person - which, unlike those causes, never self-corrects back to a high score - is
-// still caught well inside one exam section, not discovered only at grading time.
-const CONSECUTIVE_LOW_SIMILARITY = 4;
+// caught within seconds rather than discovered only at grading time.
+const CONSECUTIVE_LOW_SIMILARITY = 3;
 
 /**
  * @param {React.MutableRefObject<MediaStream|null>} streamRef the exam's camera/mic stream

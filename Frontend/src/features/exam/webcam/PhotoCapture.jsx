@@ -17,10 +17,12 @@ import { isBlockedFrame, statsFromVideo } from './frameCheck';
 //                    outcome to report, i.e. the face-photo card, and the Aadhaar card whenever
 //                    AADHAAR_VERIFICATION_ENABLED is off)
 //   retakeDisabled - hides the Retake button once matched or retries are exhausted
-//   liveHint       - { tone: 'green'|'gray', text } | null - shown above the LIVE preview only,
-//                    purely advisory, never blocks capture
+//   liveHint       - { tone: 'green'|'gray', text } | null - shown above the LIVE preview only
+//   captureBlocked - true disables the Capture button entirely (e.g. no face detected yet) -
+//                    unlike liveHint (informational), this actually prevents the click
 export default function PhotoCapture({
   stream, label, hint, onCapture, captured, verifying, feedback, retakeDisabled, liveHint,
+  captureBlocked,
 }) {
   const videoRef = useRef(null);
   const [blankError, setBlankError] = useState('');
@@ -46,7 +48,7 @@ export default function PhotoCapture({
 
   function capture() {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || captureBlocked) return;
 
     // Re-checked at capture time, not just once on the permission screen: otherwise a candidate
     // could open the shutter to pass that check and close it again before capturing, leaving the
@@ -131,8 +133,8 @@ export default function PhotoCapture({
             </button>
           )
         ) : (
-          <button type="button" className="btn primary" onClick={capture}>
-            Capture {label}
+          <button type="button" className="btn primary" onClick={capture} disabled={captureBlocked}>
+            {captureBlocked ? `Waiting — ${liveHint?.text ?? 'position yourself in frame'}` : `Capture ${label}`}
           </button>
         )}
       </div>

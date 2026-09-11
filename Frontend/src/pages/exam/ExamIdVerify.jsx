@@ -119,14 +119,21 @@ export default function ExamIdVerify() {
     }
   }, [instructions, navigate, token, stream, noVideo]);
 
-  // Baseline face embedding for useFaceIdentityGuard's continuous in-exam matching, captured once
-  // at the exact moment the live face photo is taken - functionally identical to embedding the
-  // captured photo itself (same instant, same pose, same lighting), but grabbed from the live
-  // stream rather than the saved blob so the shared FaceLandmarker singleton (visionModels.js,
-  // built in VIDEO mode for the always-running proctoring guard) never has its running mode
-  // toggled for a still-image call it isn't configured for. Never fatal - a failure here just
-  // leaves useFaceIdentityGuard to compute a fallback baseline later, matching this feature's
-  // never-block-the-exam guarantee.
+  // Baseline face embedding for useFaceIdentityGuard's continuous in-exam matching, captured at
+  // the moment the live face photo is taken - functionally identical to embedding the captured
+  // photo itself (same instant, same pose, same lighting), but grabbed from the live stream
+  // rather than the saved blob so the shared FaceLandmarker singleton (visionModels.js, built in
+  // VIDEO mode for the always-running proctoring guard) never has its running mode toggled for a
+  // still-image call it isn't configured for.
+  //
+  // Retried, not one-shot: a single detectForVideo call can miss (a mid-blink frame, a frame
+  // still settling right after capture) even though a face was genuinely confirmed present a
+  // moment earlier by PhotoCapture's own capture-blocked gate above - retrying for a couple of
+  // seconds turns that transient miss into a real baseline instead of silently leaving
+  // useFaceIdentityGuard to fall back to whoever happens to be in frame whenever it next runs
+  // (which defeats the point of a baseline entirely - see that hook's own fallback comment).
+  // Still never fatal to the exam itself if every attempt fails - matches this feature's
+  // never-block guarantee - but this makes that outcome genuinely rare rather than routine.
   useEffect(() => {
     if (!facePhoto || noVideo || !stream) return undefined;
     let cancelled = false;
@@ -135,15 +142,26 @@ export default function ExamIdVerify() {
     video.playsInline = true;
     video.srcObject = stream;
     video.play().catch(() => {});
-    const ready = video.readyState >= 2
-      ? Promise.resolve()
-      : new Promise((resolve) => { video.onloadeddata = resolve; });
-    ready
-      .then(() => computeFaceEmbedding(video))
-      .then((embedding) => {
-        if (!cancelled && embedding) faceEmbeddingRef.current = embedding;
-      })
-      .catch(() => {});
+
+    async function captureBaselineWithRetries() {
+      if (video.readyState < 2) {
+        await new Promise((resolve) => { video.onloadeddata = resolve; });
+      }
+      for (let attempt = 0; attempt < 8 && !cancelled; attempt += 1) {
+        try {
+          const embedding = await computeFaceEmbedding(video);
+          if (embedding) {
+            faceEmbeddingRef.current = embedding;
+            return;
+          }
+        } catch {
+          // Try again below - a load hiccup on one attempt doesn't mean the next will fail too.
+        }
+        await new Promise((resolve) => setTimeout(resolve, 350));
+      }
+    }
+
+    captureBaselineWithRetries();
     return () => {
       cancelled = true;
       video.srcObject = null;
@@ -227,6 +245,7 @@ export default function ExamIdVerify() {
                   captured={facePhoto}
                   onCapture={setFacePhoto}
                   liveHint={liveHint}
+                  captureBlocked={faceCount !== 1}
                 />
               )}
             </div>
