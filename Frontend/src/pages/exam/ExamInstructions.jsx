@@ -46,7 +46,7 @@ export default function ExamInstructions() {
             {/* Numbered rather than bulleted: these are rules a candidate may need to refer
                 back to ("rule 5 said..."), and an ordered list gives each one a handle. */}
             <ol style={{ fontSize: 12.5, margin: 0, paddingLeft: 20, lineHeight: 1.8 }}>
-              <li>Please keep your physical Aadhaar Card ready and within reach before proceeding — you'll be asked to photograph it, and the assessment cannot start until it is successfully verified. If it isn't read correctly, you can retake the photo as many times as needed</li>
+              <li>Please keep your physical Aadhaar Card ready and within reach before proceeding — you'll be asked to photograph it, and the assessment cannot start until it is successfully verified. Show the <b>front side</b>, with your <b>Aadhaar number and date of birth</b> clearly visible and no glare. If it isn't read correctly, you can retake the photo as many times as needed</li>
               <li>Please start the assessment at least 30 minutes before your assessment window closes, to allow sufficient time to complete it</li>
               <li><b style={{ color: 'var(--brand-red)' }}>This assessment must be taken inside Safe Exam Browser (SEB)</b> - see the next step to launch it</li>
               <li><b style={{ color: 'var(--brand-red)' }}>Your camera and microphone must stay on for the entire assessment</b> for identity verification and continuous proctoring. Switching your camera off, or covering it, is treated the same as leaving the window - one warning, then the attempt ends</li>

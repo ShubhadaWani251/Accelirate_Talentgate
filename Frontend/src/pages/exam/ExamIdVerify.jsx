@@ -37,6 +37,13 @@ function createPlaceholderPhotoBlob(label) {
 // right now. By policy there is no "proceed anyway" state any more (see aadhaar.py's module
 // docstring) - a non-match keeps returning red, retake enabled, for as many attempts as it takes;
 // `resolved` only ever becomes true on an actual MATCH (or with the feature off entirely).
+//
+// 'pending' and 'mismatch' are deliberately given different wording, not collapsed into one
+// generic "didn't work" message - confirmed live against a real candidate's card that this
+// distinction matters: "mismatch" means the photo WAS read but the details don't match records
+// (wrong card, or a data-entry error worth a TA checking), while "pending" means nothing usable
+// could be read at all yet (wrong side of the card, no card in frame, heavy glare/blur) - a
+// completely different problem that needs completely different instructions to fix.
 function aadhaarFeedback(verdict) {
   if (!verdict || !verdict.aadhaar_verification_enabled) {
     // Feature off (today's actual default) - null keeps PhotoCapture's original, always-green
@@ -50,11 +57,23 @@ function aadhaarFeedback(verdict) {
       resolved: true,
     };
   }
+  if (verdict.aadhaar_verification_status === 'mismatch') {
+    return {
+      feedback: {
+        tone: 'red',
+        text: "This doesn't match your registered Aadhaar details — please retake the photo. "
+          + 'Make sure it is your own Aadhaar Card, the number is clearly visible, and there is no '
+          + 'glare. The assessment cannot start until this is verified.',
+      },
+      retakeDisabled: false,
+      resolved: false,
+    };
+  }
   return {
     feedback: {
       tone: 'red',
-      text: "This doesn't match your registered Aadhaar details — please retake the photo. "
-        + 'Make sure it is your own Aadhaar Card, the number is clearly visible, and there is no '
+      text: 'Your Aadhaar Card is not clearly visible — please retake the photo showing the '
+        + 'FRONT side, with your Aadhaar number and date of birth both clearly visible, and no '
         + 'glare. The assessment cannot start until this is verified.',
     },
     retakeDisabled: false,
@@ -230,7 +249,7 @@ export default function ExamIdVerify() {
               <PhotoCapture
                 stream={stream}
                 label="Aadhaar Card"
-                hint="Front side, showing your Aadhaar number clearly"
+                hint="Front side only — your Aadhaar number and date of birth must both be clearly visible"
                 captured={idPhoto}
                 onCapture={onCaptureAadhaar}
                 verifying={aadhaarVerifying}
