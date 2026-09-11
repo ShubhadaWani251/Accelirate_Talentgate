@@ -20,9 +20,11 @@ import { getVisionModels } from './visionModels';
 // main thread.
 const SAMPLE_MS = 1000;
 
-// Longest of the three: looking down at the keyboard, leaning back to think, or a moment of
-// tracking loss while turning the head are all common and entirely benign.
-const CONSECUTIVE_FACE_ABSENT = 5;
+// Longest of the three, and deliberately a full minute (at the 1s cadence above): looking down
+// at the keyboard or notes, leaning back to think, or a moment of tracking loss while turning the
+// head are all common and entirely benign, and candidates were being warned over ordinary
+// looking-down well before a minute had passed at the previous, much shorter tolerance.
+const CONSECUTIVE_FACE_ABSENT = 60;
 // A positively-identified second face is more specific evidence than "no face", but a passerby
 // crossing the background for a couple of seconds still deserves the same patience.
 const CONSECUTIVE_FACE_EXTRA = 4;
