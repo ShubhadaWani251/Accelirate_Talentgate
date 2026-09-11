@@ -365,6 +365,11 @@ class TestFullFlowNeverBlocksAFallbackCandidate:
     ):
         settings.AZURE_STORAGE_CONNECTION_STRING = ''
         settings.DEBUG = True  # forces blob_storage's local-disk fallback, never reaches real Azure
+        # This test is about SEB fallback behaviour, not Aadhaar - the placeholder JPEG
+        # _capture_aadhaar_photo sends has no real QR/OCR-readable content, so it would never
+        # reach MATCH and the identity/ call below would 400 if the (now on-by-default) hard
+        # block were active here. Explicitly off, same as before Aadhaar defaulted to on.
+        settings.AADHAAR_VERIFICATION_ENABLED = False
         token = small_invitation.unique_link_token
 
         landing = api_client.get(f'/api/exam/token/{token}/')

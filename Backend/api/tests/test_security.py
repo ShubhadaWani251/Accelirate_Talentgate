@@ -189,6 +189,11 @@ class TestIdentityPhotoUploadCannotStoreExecutableContent:
         """
         settings.AZURE_STORAGE_CONNECTION_STRING = ''
         settings.DEBUG = True
+        # This test is about upload content-type validation, not Aadhaar verification - the
+        # placeholder JPEG below has no real QR/OCR-readable content, so it would never reach
+        # MATCH and the identity/ call below would 400 if the (now on-by-default) hard block
+        # were active here. Explicitly off, same as before Aadhaar defaulted to on.
+        settings.AADHAAR_VERIFICATION_ENABLED = False
         invitation = self._invitation(ta_user, make_batch, make_candidate, make_invitation)
         token = invitation.unique_link_token
 

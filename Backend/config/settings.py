@@ -252,13 +252,18 @@ QUESTION_EXPORT_API_KEY = os.environ.get('QUESTION_EXPORT_API_KEY', '')
 # without this set.
 SEB_BROWSER_EXAM_KEY_SECRET = os.environ.get('SEB_BROWSER_EXAM_KEY_SECRET', '')
 
-# Master switch for automated Aadhaar verification (see api/services/aadhaar.py). Off by default
-# and meant to STAY off until someone has verified the Secure QR parser against UIDAI's current
-# published spec and run a real UAT pass against actual (consented, disposable/test) Aadhaar
-# cards - the module docstring explains why guessing that format is worse than not shipping the
-# feature at all. Even when True, nothing here can ever block or delay a candidate's exam -
-# same guarantee api/services/seb.py already gives for SEB verification.
-AADHAAR_VERIFICATION_ENABLED = os.environ.get('AADHAAR_VERIFICATION_ENABLED', '') == 'True'
+# Master switch for automated Aadhaar verification (see api/services/aadhaar.py). Defaults to ON
+# in every environment, including a fresh deploy that sets no environment variables at all - a
+# deliberate decision, not an oversight: the product intends this feature to always run, and there
+# is no expected case for turning it off. The env var is still read (rather than hardcoding True
+# outright) purely as an emergency-only override - if it ever genuinely needs to be disabled in a
+# hurry, setting AADHAAR_VERIFICATION_ENABLED=False as an App Service setting takes effect in
+# seconds, with no code change or deploy needed, which matters given this flag gates a real
+# hard-block on a candidate's exam start (see views.exam.ExamIdentityCaptureView). Independent of
+# this flag, the Secure QR format (most current physical Aadhaar cards) is still deliberately not
+# parsed - see parse_secure_qr's own docstring for why guessing that format would be worse than
+# falling through to OCR, which this module already does correctly either way.
+AADHAAR_VERIFICATION_ENABLED = os.environ.get('AADHAAR_VERIFICATION_ENABLED', 'True') == 'True'
 
 # Keys the one-way HMAC-SHA256 hash of a decoded Aadhaar number (services.aadhaar._hash_full_number)
 # - the full number itself is never stored anywhere, only this hash, matching the same
