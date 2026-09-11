@@ -74,6 +74,11 @@ _AADHAAR_RE = re.compile(r'\d{12}')
 # birth, or a QR's dob attribute, actually uses.
 _DOB_RE = re.compile(r'(\d{2})[-/.](\d{2})[-/.](\d{4})')
 
+# A date immediately labelled "DOB" (UIDAI's own standard print label, "DOB : DD/MM/YYYY" or
+# "DOB:DD/MM/YYYY" with no space once OCR collapses it) - see _extract_dob's own docstring for why
+# this has to be tried before the older "exactly one date-shaped run in the whole text" rule.
+_LABELLED_DOB_RE = re.compile(r'DOB\s*:?\s*(\d{2})[-/.](\d{2})[-/.](\d{4})', re.IGNORECASE)
+
 # A conservative, English-only marker set for "this document is actually an Aadhaar card," not
 # some other ID - used only by the OCR fallback path below. The QR path needs no equivalent check:
 # a <PrintLetterBarcodeData> XML element (or a UIDAI Secure QR's binary payload) isn't something
@@ -423,13 +428,26 @@ def _looks_like_aadhaar_card(text):
 
 
 def _extract_dob(text):
-    """Exactly one unambiguous DD-MM-YYYY-shaped date in `text`, as a date, or None.
+    """The cardholder's date of birth from OCR'd `text`, as a date, or None.
 
-    Same "ambiguity means don't guess" posture as _extract_verhoeff_valid_number - a card often
-    has more than one date-shaped or digit-group-shaped run on it (an issue date, part of the QR
-    code's own text bleeding into the OCR pass), so this requires exactly one candidate that both
-    matches the shape AND parses as a real calendar date, never just the first one found.
+    Tries a date explicitly labelled "DOB" first (UIDAI's own standard print label on every real
+    Aadhaar card) - confirmed necessary, not a defensive guess: every genuine Aadhaar card ALSO
+    prints a separate "Aadhaar no. issued: DD/MM/YYYY" date in the exact same DD/MM/YYYY shape, so
+    an earlier version of this function (requiring exactly one date-shaped run in the whole text)
+    found two equally-plausible candidates on every single real card tested and returned None
+    every time - confirmed against real production OCR text ('...issued:01/04/2012...
+    DOB:13/10/2003...'), not a hypothetical. Falls back to the old "exactly one, else ambiguous"
+    rule only if no labelled DOB is found, in case OCR mangled the word "DOB" itself but still
+    read the digits cleanly.
     """
+    labelled = _LABELLED_DOB_RE.search(text)
+    if labelled:
+        day, month, year = labelled.groups()
+        try:
+            return date(int(year), int(month), int(day))
+        except ValueError:
+            pass  # fall through - the label matched but the digits don't form a real date
+
     candidates = []
     for day, month, year in _DOB_RE.findall(text):
         try:

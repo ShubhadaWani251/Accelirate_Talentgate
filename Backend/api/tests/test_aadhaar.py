@@ -172,15 +172,30 @@ class TestExtractDob:
     def test_no_date_shaped_text_returns_none(self):
         assert aadhaar._extract_dob('no dates here at all') is None
 
-    def test_more_than_one_candidate_is_ambiguous_and_returns_none(self):
-        """A card can print an issue date alongside a DOB - guessing which is which is worse than
-        not extracting one at all, same posture as _extract_verhoeff_valid_number.
+    def test_a_labelled_dob_wins_over_an_ambiguous_second_date(self):
+        """A real bug this pins down: EVERY genuine Aadhaar card also prints a separate
+        "Aadhaar no. issued: DD/MM/YYYY" date in the identical DD/MM/YYYY shape - an earlier
+        version of this function required exactly one date-shaped run in the whole text, which
+        found two equally-plausible candidates on every single real card and returned None every
+        time (confirmed against real production OCR text: '...issued:01/04/2012...
+        DOB:13/10/2003...' - not a hypothetical, a real candidate stuck at PENDING for 8 attempts
+        because of this). The "DOB" label - collapsed hard against the date, exactly as OCR
+        renders it with no space - must now be preferred over the ambiguous whole-text scan.
         """
-        assert aadhaar._extract_dob('DOB: 15-08-1995 Issued: 01-01-2020') is None
+        assert aadhaar._extract_dob('DOB:15-08-1995 Issued:01-01-2020') == TEST_DOB
+        assert aadhaar._extract_dob(
+            'Government of India Aadhaarno.issued:01/04/2012 Test Person '
+            'DOB:15/08/1995 Female 234123412346'
+        ) == TEST_DOB
 
     def test_an_invalid_calendar_date_is_not_counted_as_a_candidate(self):
         # 35th month/day-shaped text isn't a real date, so this must still resolve unambiguously.
         assert aadhaar._extract_dob('Ref: 99-99-9999 DOB: 15-08-1995') == TEST_DOB
+
+    def test_two_unlabelled_dates_with_no_dob_label_at_all_are_still_ambiguous(self):
+        # No "DOB" label anywhere to disambiguate with - falls back to the old "exactly one, else
+        # ambiguous" rule, same posture as _extract_verhoeff_valid_number.
+        assert aadhaar._extract_dob('15-08-1995 and separately 01-01-2020') is None
 
 
 @pytest.fixture
