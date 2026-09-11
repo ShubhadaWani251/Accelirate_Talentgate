@@ -64,6 +64,36 @@ opencv-python-headless==5.0.0.93
 # transitively via PyJWT[crypto] above; declared directly here for the same reason PyJWT[crypto]
 # itself is declared directly rather than relying on staying a transitive dependency.
 cryptography==50.0.1
+# OCR fallback for a card whose QR can't be decoded (no QR at all, or the newer Secure QR format
+# this module doesn't parse). Free and fully local (pure pip install, ONNX models bundled in the
+# wheel/first-run cache) - no cloud account, no per-call cost.
+#
+# rapidocr-onnxruntime ITSELF IS DELIBERATELY NOT LISTED HERE. Its own metadata hard-depends on
+# the `opencv-python` PyPI package (the GUI/full build, not opencv-python-headless above) -
+# confirmed by `pip install --dry-run --report` on this exact pin, which resolves opencv-python
+# regardless of opencv-python-headless already being present. A plain `pip install -r
+# requirements.txt` cannot exclude one package's transitive dependency, so listing
+# rapidocr-onnxruntime in this file at all means production gets BOTH opencv packages installed,
+# overwriting each other's files under the same cv2/ directory - and whichever copy of cv2 ends up
+# on disk needing libGL.so.1 (opencv-python's real requirement) crashes on the App Service Linux
+# runtime, which has no apt-get access to install it and no GUI libs by default. cv2 is imported
+# at module scope in services/aadhaar.py (existing, for QR decoding), so that import failure takes
+# down the entire app at Django startup, not just the OCR code path - this exact chain is what
+# caused the 2026-09-10 production outage.
+#
+# The fix: install rapidocr-onnxruntime with `pip install --no-deps` as its own separate step,
+# AFTER this file's normal install - wired into Backend/Dockerfile, Backend/startup.sh, and
+# azure-pipelines.yml (search each for "rapidocr-onnxruntime --no-deps"). All of its OTHER real
+# runtime dependencies (confirmed via `pip show rapidocr-onnxruntime`) are declared explicitly
+# below instead, so `--no-deps` only ever has to skip the one problematic line, never a package
+# this app actually needs installed some other way.
+onnxruntime==1.29.0
+numpy==2.5.3
+pillow==12.3.0
+pyclipper==1.4.0
+PyYAML==6.0.3
+shapely==2.1.2
+six==1.17.0
 
 # --- Shared cache for rate-limit and login-lockout counters ---
 # Used via django.core.cache.backends.redis.RedisCache when REDIS_URL is set. Without it those
