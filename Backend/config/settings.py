@@ -81,6 +81,9 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # Last: return DB connections after each request so idle workers do not exhaust
+    # max_connections on the shared Postgres tier (see db_connection.py).
+    'api.middleware.db_connection.ReleaseDbConnectionMiddleware',
 ]
 
 ROOT_URLCONF = 'config.urls'
@@ -119,25 +122,16 @@ DATABASES = {
             # without TLS configured needs DB_SSLMODE=disable set explicitly in .env.
             'sslmode': os.environ.get('DB_SSLMODE', 'require'),
         },
-        # Back to 0 (Django's own default) as a STOPGAP, not a reversal of the reasoning that
-        # used to justify 60 here. That reasoning assumed CONN_MAX_AGE closes a connection after
-        # N seconds; it does not - it only closes the NEXT time that worker gets a request after
-        # N seconds have passed, so a worker sitting idle holds its connection open indefinitely
-        # in the meantime. Confirmed live against the real shared server: connections observed
-        # idling up to 47 minutes, against a max_connections of 50 shared with local dev too -
-        # a much tighter, harder ceiling than "60s" ever suggested. 0 trades the reconnect
-        # handshake on every request for the one guarantee that actually matters here: a
-        # connection is never held open longer than the request that opened it, so the count in
-        # pg_stat_activity can never exceed concurrently-in-flight requests, no matter how long a
-        # worker sits idle or how many instances autoscale adds.
-        #
-        # This is still a stopgap, not the destination - see the same concern properly solved:
-        # a real pooler (PgBouncer, which Azure Postgres Flexible Server can front for you)
-        # decouples "connections Django holds" from "connections Postgres actually serves",
-        # which is what actually removes the tradeoff instead of picking a side of it. Move to
-        # that before ever running more than one App Service instance, and raise this back up
-        # once a pooler is fronting it.
-        'CONN_MAX_AGE': int(os.environ.get('DB_CONN_MAX_AGE', 0)),
+        # Reuse a connection for the ORM work inside one request (avoids paying a fresh TLS
+        # handshake on every query in the same view). Between requests, api.middleware.
+        # db_connection.ReleaseDbConnectionMiddleware closes all connections so idle gunicorn
+        # workers cannot hoard slots on the shared Postgres server - CONN_MAX_AGE alone does not
+        # do that; it only ages a connection out the *next* time its worker thread gets a request.
+        # Pair with capped WEB_CONCURRENCY/WEB_THREADS (see gunicorn.conf.py) on small plans.
+        # A real pooler (PgBouncer) is still the long-term fix before running multiple App
+        # Service instances under autoscale.
+        'CONN_MAX_AGE': int(os.environ.get('DB_CONN_MAX_AGE', 60)),
+        'CONN_HEALTH_CHECKS': True,
     }
 }
 # Password validation
