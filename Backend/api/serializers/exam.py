@@ -16,6 +16,7 @@ class TerminateSerializer(serializers.Serializer):
     # stored event_details.
     detected_object = serializers.CharField(required=False, max_length=40)
     confidence = serializers.FloatField(required=False, min_value=0, max_value=1)
+    similarity = serializers.FloatField(required=False, min_value=-1, max_value=1)
 
 
 class AnswerSerializer(serializers.Serializer):

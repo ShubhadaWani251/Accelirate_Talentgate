@@ -2,13 +2,26 @@ import { useEffect, useRef, useState } from 'react';
 import { isBlockedFrame, statsFromVideo } from './frameCheck';
 
 // Live camera preview + a snapshot-to-Blob capture button. Used twice on the identity-capture
-// screen (government ID, then live face) sharing the same underlying stream.
+// screen (Aadhaar Card, then live face) sharing the same underlying stream.
 //
 // A captured shot is shown back to the candidate and can be retaken. Both halves matter: a
 // blurred ID or a half-out-of-frame face is the TA's only identity evidence later, and before
 // this the first capture was final - the button simply went dead and read "Captured", so a
 // candidate who could see their photo was unusable had no way to fix it.
-export default function PhotoCapture({ stream, label, hint, onCapture, captured }) {
+//
+// Four props beyond the original stream/label/hint/onCapture/captured, all optional so the
+// face-photo card's usage stays exactly as simple as before:
+//   verifying      - captured, but a server verdict is still in flight (Aadhaar only)
+//   feedback       - { tone: 'green'|'red'|'amber', text } | null - null keeps the original,
+//                    always-green "captured" banner (used whenever there's no real verification
+//                    outcome to report, i.e. the face-photo card, and the Aadhaar card whenever
+//                    AADHAAR_VERIFICATION_ENABLED is off)
+//   retakeDisabled - hides the Retake button once matched or retries are exhausted
+//   liveHint       - { tone: 'green'|'gray', text } | null - shown above the LIVE preview only,
+//                    purely advisory, never blocks capture
+export default function PhotoCapture({
+  stream, label, hint, onCapture, captured, verifying, feedback, retakeDisabled, liveHint,
+}) {
   const videoRef = useRef(null);
   const [blankError, setBlankError] = useState('');
   const [previewUrl, setPreviewUrl] = useState(null);
@@ -68,6 +81,12 @@ export default function PhotoCapture({ stream, label, hint, onCapture, captured 
       <div className="box-label">{label}</div>
       {hint && <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 8 }}>{hint}</div>}
 
+      {!captured && liveHint && (
+        <div style={{ fontSize: 11.5, marginBottom: 6, color: liveHint.tone === 'green' ? 'var(--green)' : 'var(--muted)' }}>
+          {liveHint.tone === 'green' ? '● ' : '○ '}{liveHint.text}
+        </div>
+      )}
+
       {captured ? (
         <>
           {/* Shown back to the candidate so they can judge it before committing. */}
@@ -78,9 +97,19 @@ export default function PhotoCapture({ stream, label, hint, onCapture, captured 
               style={{ width: '100%', borderRadius: 8, background: '#111', display: 'block' }}
             />
           )}
-          <div className="alert success" style={{ marginTop: 8 }}>
-            ✔ {label} captured — check it is clear and readable, or retake it.
-          </div>
+          {verifying ? (
+            <div className="alert" style={{ marginTop: 8 }}>
+              Verifying {label}…
+            </div>
+          ) : feedback ? (
+            <div className={`alert ${feedback.tone}`} style={{ marginTop: 8 }}>
+              {feedback.text}
+            </div>
+          ) : (
+            <div className="alert success" style={{ marginTop: 8 }}>
+              ✔ {label} captured — check it is clear and readable, or retake it.
+            </div>
+          )}
         </>
       ) : (
         <video
@@ -96,9 +125,11 @@ export default function PhotoCapture({ stream, label, hint, onCapture, captured 
 
       <div className="btn-row" style={{ marginTop: 10, display: 'flex', gap: 8 }}>
         {captured ? (
-          <button type="button" className="btn" onClick={retake}>
-            ↻ Retake {label}
-          </button>
+          !retakeDisabled && (
+            <button type="button" className="btn" onClick={retake} disabled={verifying}>
+              ↻ Retake {label}
+            </button>
+          )
         ) : (
           <button type="button" className="btn primary" onClick={capture}>
             Capture {label}

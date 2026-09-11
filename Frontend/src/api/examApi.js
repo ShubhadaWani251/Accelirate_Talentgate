@@ -6,9 +6,20 @@ export const getTokenLanding = (token) =>
 export const verifyEmail = (token, email) =>
   examAxiosClient.post(`/exam/token/${token}/verify-email/`, { email }).then((r) => r.data);
 
-export const submitIdentity = (token, idPhotoBlob, facePhotoBlob) => {
+// First identity-capture step - the Aadhaar Card photo. Separate from submitIdentity below so a
+// real verification verdict (and a limited retry) can happen before face-photo capture is even
+// reachable - see ExamIdentityAadhaarCaptureView. Callable more than once (retakes); the server
+// enforces the retry cap, not this function.
+export const captureAadhaarPhoto = (token, idPhotoBlob) => {
   const form = new FormData();
   form.append('id_photo', idPhotoBlob, 'id_photo.jpg');
+  return examAxiosClient.post(`/exam/token/${token}/identity/aadhaar/`, form).then((r) => r.data);
+};
+
+// Second identity-capture step - the face photo, only reachable once the Aadhaar step above has
+// resolved (matched, or retries exhausted and flagged - never blocked).
+export const submitIdentity = (token, facePhotoBlob) => {
+  const form = new FormData();
   form.append('face_photo', facePhotoBlob, 'face_photo.jpg');
   return examAxiosClient.post(`/exam/token/${token}/identity/`, form).then((r) => r.data);
 };
