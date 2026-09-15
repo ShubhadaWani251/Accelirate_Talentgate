@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { isBlockedFrame, statsFromVideo } from './frameCheck';
+import { beginNativeDialog } from '../proctoring/nativeDialogGuard';
 
 // Live camera preview + a snapshot-to-Blob capture button. Used twice on the identity-capture
 // screen (Aadhaar Card, then live face) sharing the same underlying stream.
@@ -30,6 +31,9 @@ export default function PhotoCapture({
   const videoRef = useRef(null);
   const [blankError, setBlankError] = useState('');
   const [previewUrl, setPreviewUrl] = useState(null);
+  // Holds the current native-dialog end() between the upload input's onClick (which opens it)
+  // and whichever of onChange/window-focus resolves it first - see nativeDialogGuard.js.
+  const endUploadDialogRef = useRef(null);
 
   useEffect(() => {
     if (videoRef.current && stream) {
@@ -135,7 +139,17 @@ export default function PhotoCapture({
           <input
             type="file"
             accept="image/jpeg,image/png"
+            onClick={() => {
+              // Must be armed before the native dialog opens (onClick fires first) - see
+              // nativeDialogGuard.js. window regaining focus is the one signal common to every
+              // way the dialog can end (a file chosen, or cancelled), so that disarms it;
+              // onChange below also disarms it directly, as a belt-and-braces second path.
+              endUploadDialogRef.current = beginNativeDialog();
+              window.addEventListener('focus', endUploadDialogRef.current, { once: true });
+            }}
             onChange={(e) => {
+              endUploadDialogRef.current?.();
+              endUploadDialogRef.current = null;
               const file = e.target.files?.[0];
               e.target.value = '';
               if (file) onCapture(file);

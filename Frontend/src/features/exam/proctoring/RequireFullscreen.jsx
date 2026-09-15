@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { FULLSCREEN_SUPPORTED, enterFullscreen, isFullscreen } from './fullscreen';
+import { isNativeDialogOpen } from './nativeDialogGuard';
 import BrandHeader from '../../../components/layout/BrandHeader';
 import BrandFooter from '../../../components/layout/BrandFooter';
 
@@ -16,6 +17,12 @@ export default function RequireFullscreen({ children }) {
   useEffect(() => {
     if (!FULLSCREEN_SUPPORTED) return undefined;
     function sync() {
+      // A native OS dialog (the Aadhaar upload's file picker) also drops full-screen, same as a
+      // permission prompt - but that one IS expected and temporary, not a real exit, so showing
+      // this gate for it would unmount the very <input> the dialog is about to hand a file back
+      // to. See nativeDialogGuard.js for the full story. talentgate:nativedialogclose (below)
+      // re-runs this once the suppression lifts, so the real state still gets picked up.
+      if (isNativeDialogOpen()) return;
       setActive(isFullscreen());
     }
     // Re-read on mount as well as on every change: the browser can drop full-screen in the gap
@@ -24,7 +31,11 @@ export default function RequireFullscreen({ children }) {
     // would otherwise never be observed - leaving the gate hidden while full-screen is off.
     sync();
     document.addEventListener('fullscreenchange', sync);
-    return () => document.removeEventListener('fullscreenchange', sync);
+    window.addEventListener('talentgate:nativedialogclose', sync);
+    return () => {
+      document.removeEventListener('fullscreenchange', sync);
+      window.removeEventListener('talentgate:nativedialogclose', sync);
+    };
   }, []);
 
   async function onReenter() {
