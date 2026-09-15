@@ -106,7 +106,14 @@ export default function ExamIdVerify() {
   // matched, verification disabled, or retries exhausted and flagged - never blocked. This is
   // what actually makes "retry before face capture" real, not just a backend rule with no UX to
   // match it.
-  const aadhaarResolved = Boolean(idPhoto) && resolved;
+  //
+  // !aadhaarVerifying is required here, not just `resolved`: aadhaarFeedback(null) - the state
+  // right after a fresh capture, before its verdict has come back yet - returns resolved: true,
+  // the same value it returns when the feature is disabled outright (both are "no reason to
+  // block" from that function's point of view). Without this, idPhoto being set was already
+  // enough to reveal the face-photo card and enable Start Exam for however long the in-flight
+  // verification request took, before a mismatch had any chance to un-resolve it.
+  const aadhaarResolved = Boolean(idPhoto) && !aadhaarVerifying && resolved;
   const bothCaptured = Boolean(idPhoto && facePhoto);
 
   // Hooks must run unconditionally (before any early return below), even though its result is
