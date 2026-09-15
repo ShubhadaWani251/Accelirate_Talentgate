@@ -20,17 +20,28 @@ import { getVisionModels } from './visionModels';
 // main thread.
 const SAMPLE_MS = 1000;
 
-// Longest of the three, and deliberately a full minute (at the 1s cadence above): looking down
-// at the keyboard or notes, leaning back to think, or a moment of tracking loss while turning the
-// head are all common and entirely benign, and candidates were being warned over ordinary
-// looking-down well before a minute had passed at the previous, much shorter tolerance.
-const CONSECUTIVE_FACE_ABSENT = 60;
+// Longest of the three (at the 1s cadence above): looking down at the keyboard or notes,
+// leaning back to think, or a moment of tracking loss while turning the head are all common and
+// entirely benign, and deserve real patience before warning - but not so long that a genuine,
+// sustained absence (stepping away, a person-swap) goes unflagged for a minute.
+const CONSECUTIVE_FACE_ABSENT = 10;
 // A positively-identified second face is more specific evidence than "no face", but a passerby
 // crossing the background for a couple of seconds still deserves the same patience.
 const CONSECUTIVE_FACE_EXTRA = 4;
 // Matches useCameraGuard's own CONSECUTIVE_BLOCKED_CHECKS - an allow-listed, confidence-gated
 // object detection is about as specific a signal as that pixel check.
 const CONSECUTIVE_OBJECT_PRESENT = 3;
+
+// getVisionModels() resets its own cached promise on failure specifically so a later call gets a
+// fresh attempt rather than replaying the same rejection (see visionModels.js) - but neither of
+// its two callers actually did that until now. Without a retry here, one transient failure
+// loading the ~20MB of WASM/model assets (a slow connection, a momentary network blip) silently
+// left faceLandmarker/objectDetector undefined for good: check() below no-ops whenever either is
+// missing, so BOTH face-visibility and object detection would go dark for the rest of the exam
+// with nothing in the UI to show it. 5 attempts, 3s apart, gives a real network hiccup room to
+// clear without retrying forever into an exam that's already moved on.
+const MODEL_LOAD_MAX_ATTEMPTS = 5;
+const MODEL_LOAD_RETRY_MS = 3000;
 
 /**
  * @param {React.MutableRefObject<MediaStream|null>} streamRef the exam's camera/mic stream
@@ -72,11 +83,21 @@ export default function useVisionProctoringGuard(streamRef, active, onViolation)
 
     let faceLandmarker;
     let objectDetector;
-    getVisionModels().then((models) => {
-      if (cancelled) return;
-      faceLandmarker = models.faceLandmarker;
-      objectDetector = models.objectDetector;
-    });
+    let retryTimer = null;
+
+    function loadModels(attemptsSoFar) {
+      getVisionModels()
+        .then((models) => {
+          if (cancelled) return;
+          faceLandmarker = models.faceLandmarker;
+          objectDetector = models.objectDetector;
+        })
+        .catch(() => {
+          if (cancelled || attemptsSoFar >= MODEL_LOAD_MAX_ATTEMPTS) return;
+          retryTimer = setTimeout(() => loadModels(attemptsSoFar + 1), MODEL_LOAD_RETRY_MS);
+        });
+    }
+    loadModels(0);
 
     function check() {
       if (cancelled || !faceLandmarker || !objectDetector) return;
@@ -154,6 +175,7 @@ export default function useVisionProctoringGuard(streamRef, active, onViolation)
     return () => {
       cancelled = true;
       clearInterval(interval);
+      clearTimeout(retryTimer);
       video.srcObject = null;
       // Deliberately does NOT close faceLandmarker/objectDetector - they are a page-lifetime
       // singleton owned by visionModels.js, not this hook.
