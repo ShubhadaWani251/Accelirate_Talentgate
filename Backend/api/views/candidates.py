@@ -171,9 +171,14 @@ def _with_latest_attempt(qs):
     """Prefetch each candidate's most recent ExamAttempt in one extra query instead of one
     query per candidate - serializers/candidates.py's _latest_attempt reads the resulting
     `prefetched_latest_attempts` list instead of querying per-instance.
+
+    Ordered by -attempt_id - see the matching comment on serializers/candidates._latest_attempt
+    for why -started_at is wrong here (it stays null until the timed exam actually begins, and
+    Postgres sorts null as the largest value, so an abandoned pre-exam attempt can outrank a
+    later, completed one).
     """
     return qs.prefetch_related(
-        Prefetch('examattempt_set', queryset=ExamAttempt.objects.order_by('-started_at'),
+        Prefetch('examattempt_set', queryset=ExamAttempt.objects.order_by('-attempt_id'),
                  to_attr='prefetched_latest_attempts'),
         # Invitations too, for the Email Status column. Without this the column would fire one
         # query per row; serializers/candidates._latest_invitation reads this cache via .all().

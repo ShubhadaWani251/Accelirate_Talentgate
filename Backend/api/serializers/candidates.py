@@ -30,13 +30,23 @@ def _latest_attempt(candidate):
     """Per-instance cached lookup, same pattern as CandidateStagingSerializer._latest_check.
     Prefers a bulk-fetched `prefetched_latest_attempts` list (set by views/candidates.py's
     `_with_latest_attempt`) over the per-instance query, to avoid N+1 across a list response.
+
+    Ordered by -attempt_id, NOT -started_at: started_at stays null until the candidate actually
+    begins the timed exam (see exam_session.start_or_resume_attempt), so a candidate who
+    abandoned an earlier invitation right after identity capture - then got a fresh invite and
+    completed the exam on a second attempt - has one attempt with started_at=None and a LATER
+    one with a real timestamp. Postgres sorts null as the "largest" value, so ORDER BY
+    started_at DESC put the abandoned, evidence-less attempt first instead of the completed one
+    (a real incident: a candidate's Detail page showed no photo/recording and status
+    "In Progress" despite having actually finished). attempt_id is a BigAutoField, never null,
+    and increases with creation order, so it can't be shadowed by an attempt that never started.
     """
     if hasattr(candidate, 'prefetched_latest_attempts'):
         attempts = candidate.prefetched_latest_attempts
         return attempts[0] if attempts else None
     if not hasattr(candidate, '_latest_attempt_cache'):
         candidate._latest_attempt_cache = (
-            candidate.examattempt_set.order_by('-started_at').first()
+            candidate.examattempt_set.order_by('-attempt_id').first()
         )
     return candidate._latest_attempt_cache
 
