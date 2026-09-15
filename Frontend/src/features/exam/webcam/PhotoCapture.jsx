@@ -20,9 +20,12 @@ import { isBlockedFrame, statsFromVideo } from './frameCheck';
 //   liveHint       - { tone: 'green'|'gray', text } | null - shown above the LIVE preview only
 //   captureBlocked - true disables the Capture button entirely (e.g. no face detected yet) -
 //                    unlike liveHint (informational), this actually prevents the click
+//   allowUpload    - true also offers "upload a file instead of the live camera" (Aadhaar Card
+//                    only - a live face photo must come from the camera, not a file, or the
+//                    liveness check it feeds has nothing to check)
 export default function PhotoCapture({
   stream, label, hint, onCapture, captured, verifying, feedback, retakeDisabled, liveHint,
-  captureBlocked,
+  captureBlocked, allowUpload,
 }) {
   const videoRef = useRef(null);
   const [blankError, setBlankError] = useState('');
@@ -121,6 +124,24 @@ export default function PhotoCapture({
           muted
           style={{ width: '100%', borderRadius: 8, background: '#111', display: 'block' }}
         />
+      )}
+
+      {!captured && allowUpload && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 6 }}>
+            Or upload a scanned image instead — make sure the Aadhaar number and date of birth are
+            clearly visible in it.
+          </div>
+          <input
+            type="file"
+            accept="image/jpeg,image/png"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = '';
+              if (file) onCapture(file);
+            }}
+          />
+        </div>
       )}
 
       {blankError && <div className="alert error" style={{ marginTop: 8 }}>{blankError}</div>}

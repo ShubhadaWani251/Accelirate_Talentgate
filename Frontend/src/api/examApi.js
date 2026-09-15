@@ -12,7 +12,9 @@ export const verifyEmail = (token, email) =>
 // enforces the retry cap, not this function.
 export const captureAadhaarPhoto = (token, idPhotoBlob) => {
   const form = new FormData();
-  form.append('id_photo', idPhotoBlob, 'id_photo.jpg');
+  // An uploaded file (allowUpload on PhotoCapture) has its own real name/extension; a live
+  // webcam capture is a bare canvas Blob with none, so it falls back to the original name.
+  form.append('id_photo', idPhotoBlob, idPhotoBlob.name || 'id_photo.jpg');
   return examAxiosClient.post(`/exam/token/${token}/identity/aadhaar/`, form).then((r) => r.data);
 };
 

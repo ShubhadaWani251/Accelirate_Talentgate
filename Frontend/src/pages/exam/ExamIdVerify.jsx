@@ -255,6 +255,7 @@ export default function ExamIdVerify() {
                 verifying={aadhaarVerifying}
                 feedback={feedback}
                 retakeDisabled={retakeDisabled}
+                allowUpload
               />
               {aadhaarResolved && (
                 <PhotoCapture
