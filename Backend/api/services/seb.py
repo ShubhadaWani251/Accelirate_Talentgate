@@ -73,6 +73,16 @@ def build_config(invitation):
         'startURL': f"{settings.FRONTEND_ORIGIN}/t/{invitation.unique_link_token}/",
         'allowVideoCapture': True,
         'allowAudioCapture': True,
+        # Needed for the Aadhaar Card "upload a scanned image instead" option (ExamIdVerify.jsx /
+        # PhotoCapture's allowUpload) to open a file-choosing dialog at all - without these, SEB
+        # refuses the upload outright ("this setting is not enabled"), reported live. SEB 3.9+
+        # (Windows) / 3.5+ (Mac) split the older combined allowDownUploads into separate
+        # allowDownloads/allowUploads, ANDed with the deprecated key on clients that still read
+        # it - all three are set explicitly so this doesn't depend on guessing either the
+        # candidate's SEB version or its current defaults, which have moved between releases.
+        'allowDownUploads': True,
+        'allowDownloads': True,
+        'allowUploads': True,
     }
     key = _browser_exam_key(invitation)
     if key is not None:
