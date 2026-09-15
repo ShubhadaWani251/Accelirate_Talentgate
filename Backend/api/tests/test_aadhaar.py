@@ -197,6 +197,44 @@ class TestExtractDob:
         # ambiguous" rule, same posture as _extract_verhoeff_valid_number.
         assert aadhaar._extract_dob('15-08-1995 and separately 01-01-2020') is None
 
+    def test_a_dob_label_misread_as_d_zero_b_is_still_recognised(self):
+        """A real bug this pins down: OCR read the printed "DOB" label as "D0B" (digit zero, not
+        the letter O) on a real candidate's card - confirmed against real production OCR text
+        ('...ShubhadaSudhakarWani /D0B:26/08/2003...'). The labelled regex didn't match that
+        spelling, so this fell back to the ambiguous whole-text scan, which then found the
+        card's own "issued" date alongside the real DOB and returned None for both - the exact
+        failure mode the labelled-match-first rule exists to prevent.
+        """
+        assert aadhaar._extract_dob('D0B:15-08-1995 Issued:01-01-2020') == TEST_DOB
+
+
+class TestExtractVerhoeffValidNumber:
+    def test_a_single_match_is_returned(self):
+        assert aadhaar._extract_verhoeff_valid_number(f'Aadhaar {VALID_TEST_NUMBER} Name') == VALID_TEST_NUMBER
+
+    def test_no_match_returns_none(self):
+        assert aadhaar._extract_verhoeff_valid_number('no numbers here at all') is None
+
+    def test_two_different_valid_numbers_are_ambiguous(self):
+        # Independently Verhoeff-valid, not just a plausible-looking guess - see VALID_TEST_NUMBER's
+        # own comment on why that matters here.
+        other_valid_number = '999888770008'
+        assert aadhaar.verhoeff_is_valid(other_valid_number)
+        text = f'{VALID_TEST_NUMBER} and separately {other_valid_number}'
+        assert aadhaar._extract_verhoeff_valid_number(text) is None
+
+    def test_the_same_valid_number_printed_more_than_once_is_not_ambiguous(self):
+        """A real bug this pins down: a genuine Aadhaar card prints its own number more than
+        once (once near the photo, again under "Your Aadhaar No.", again near the VID) -
+        confirmed against real production OCR text where a clear, detailed capture read the
+        same valid number three times. An earlier version of this function counted RAW matches,
+        not DISTINCT ones, so three copies of the correct number were treated exactly like three
+        DIFFERENT numbers and rejected as ambiguous - the more thoroughly a card was read, the
+        more likely verification was to fail.
+        """
+        text = f'{VALID_TEST_NUMBER} ... Your Aadhaar No.: {VALID_TEST_NUMBER} ... VID: 1234 {VALID_TEST_NUMBER}'
+        assert aadhaar._extract_verhoeff_valid_number(text) == VALID_TEST_NUMBER
+
 
 @pytest.fixture
 def attempt(ta_user, make_batch, make_candidate, make_invitation):
@@ -481,6 +519,20 @@ class TestTryOcrInline:
     def test_garbage_bytes_return_false_not_raise(self, attempt, settings):
         settings.AADHAAR_VERIFICATION_ENABLED = True
         assert aadhaar.try_ocr_inline(attempt, b'garbage, not an image') is False
+
+    def test_a_card_with_its_own_number_printed_twice_still_matches(self, attempt, settings):
+        """End-to-end version of TestExtractVerhoeffValidNumber's dedup case, through the real
+        OCR engine rather than a hand-written string - see that test for the real incident this
+        traces back to.
+        """
+        settings.AADHAAR_VERIFICATION_ENABLED = True
+        photo = _printed_card_photo([
+            'Government of India', 'Aadhaar', VALID_TEST_NUMBER, TEST_DOB_OCR_TEXT,
+            'Your Aadhaar No.', VALID_TEST_NUMBER,
+        ])
+        assert aadhaar.try_ocr_inline(attempt, photo) is True
+        attempt.refresh_from_db()
+        assert attempt.aadhaar_verification_status == ExamAttempt.AadhaarVerificationStatus.MATCH
 
     def test_skipped_outright_when_no_concurrency_slot_is_free(self, attempt, settings):
         settings.AADHAAR_VERIFICATION_ENABLED = True

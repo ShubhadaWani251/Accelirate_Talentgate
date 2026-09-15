@@ -77,7 +77,12 @@ _DOB_RE = re.compile(r'(\d{2})[-/.](\d{2})[-/.](\d{4})')
 # A date immediately labelled "DOB" (UIDAI's own standard print label, "DOB : DD/MM/YYYY" or
 # "DOB:DD/MM/YYYY" with no space once OCR collapses it) - see _extract_dob's own docstring for why
 # this has to be tried before the older "exactly one date-shaped run in the whole text" rule.
-_LABELLED_DOB_RE = re.compile(r'DOB\s*:?\s*(\d{2})[-/.](\d{2})[-/.](\d{4})', re.IGNORECASE)
+# D[O0]B, not a literal "DOB": confirmed against real production OCR text reading the label as
+# "D0B" (the digit 0, not the letter O) - a common OCR confusion for that exact glyph pair, and
+# without this the labelled match silently fails to fire and falls back to the ambiguous
+# multi-date rule below, which then found the card's own "issued" date alongside the real DOB
+# and returned None for both - the same failure mode this label-first rule exists to prevent.
+_LABELLED_DOB_RE = re.compile(r'D[O0]B\s*:?\s*(\d{2})[-/.](\d{2})[-/.](\d{4})', re.IGNORECASE)
 
 # A conservative, English-only marker set for "this document is actually an Aadhaar card," not
 # some other ID - used only by the OCR fallback path below. The QR path needs no equivalent check:
@@ -423,15 +428,22 @@ def _ocr_text(image_bytes):
 
 
 def _extract_verhoeff_valid_number(text):
-    """Exactly one Verhoeff-valid 12-digit run in `text`, or None.
+    """Exactly one DISTINCT Verhoeff-valid 12-digit run in `text`, or None.
 
-    Deliberately requires exactly one match, not "the first one found" - a candidate's date of
-    birth or other printed digits on the same card could otherwise be mistaken for the Aadhaar
-    number. Ambiguity (zero or multiple valid candidates) is treated the same as "could not read
-    it" rather than guessing.
+    Deliberately requires exactly one distinct candidate, not "the first one found" - a
+    candidate's date of birth or other printed digits on the same card could otherwise be
+    mistaken for the Aadhaar number. Ambiguity (zero or multiple DIFFERING valid candidates) is
+    treated the same as "could not read it" rather than guessing.
+
+    Deduplicated (a set, not a list) because a real card prints its own number more than once -
+    confirmed against real production OCR text, where a clear, detailed capture read the same
+    valid number three times (once near the photo, once under "Your Aadhaar No.", once near the
+    VID). Three copies of the SAME number is not an ambiguity to bail out on - it's the opposite,
+    stronger evidence - but the un-deduplicated version above treated it exactly like three
+    DIFFERENT numbers, and rejected every one of them.
     """
-    candidates = [m for m in _AADHAAR_RE.findall(text.replace(' ', '')) if verhoeff_is_valid(m)]
-    return candidates[0] if len(candidates) == 1 else None
+    candidates = {m for m in _AADHAAR_RE.findall(text.replace(' ', '')) if verhoeff_is_valid(m)}
+    return next(iter(candidates)) if len(candidates) == 1 else None
 
 
 def _looks_like_aadhaar_card(text):
