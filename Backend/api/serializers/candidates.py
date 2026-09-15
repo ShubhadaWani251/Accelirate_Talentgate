@@ -270,13 +270,25 @@ class CandidateListSerializer(serializers.ModelSerializer):
 
 
 class CandidateUpdateSerializer(serializers.ModelSerializer):
-    """Deliberately excludes aadhaar_last4 and batch - changing either would silently
-    invalidate the duplicate-check that already ran against this candidate's current values.
+    """`batch` stays excluded - moving a candidate between batches has its own dedicated flow.
+
+    aadhaar_last4/date_of_birth ARE editable here even though they're the duplicate-detection
+    identity key (see services/candidate_profile.link_profile and services/duplicate_check.
+    run_duplicate_check) - saving a change through this endpoint does NOT re-run the duplicate
+    check or re-link the candidate's CandidateProfile, so a correction here can leave both
+    stale. Accepted tradeoff (TAs need to be able to fix a mistyped Aadhaar/DOB), not an
+    oversight.
     """
+    # The model field has blank=False, so DRF would otherwise reject '' - some existing rows
+    # were uploaded with a missing Aadhaar (see Candidate.ValidationStatus.MISSING_AADHAAR) and
+    # this form must still be able to save their OTHER fields without being forced to
+    # backfill it first.
+    aadhaar_last4 = serializers.CharField(max_length=4, allow_blank=True, required=False)
+
     class Meta:
         model = Candidate
         fields = [
-            'first_name', 'last_name', 'email', 'phone',
+            'first_name', 'last_name', 'email', 'phone', 'aadhaar_last4', 'date_of_birth',
             'college_name', 'degree', 'stream', 'percentage', 'passing_out_year', 'location',
         ]
 

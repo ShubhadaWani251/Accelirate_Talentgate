@@ -5,14 +5,19 @@ import { extractErrorMessage } from '../../utils/passwordSchema';
 import { fromDatetimeLocalValue, toDatetimeLocalValue } from '../../utils/datetime';
 import { ButtonSpinner } from '../../components/loading/Spinner';
 
-// Deliberately excludes Aadhaar last 4 and Batch from the editable fields - the backend
-// (CandidateUpdateSerializer) rejects them too, since changing either would silently invalidate
-// the duplicate-check that already ran against this candidate's current values.
+// Batch is deliberately excluded from the editable fields - the backend (CandidateUpdateSerializer)
+// rejects it too, since moving a candidate between batches has its own dedicated flow.
+//
+// Aadhaar last 4 and DOB ARE editable below even though they're the duplicate-detection identity
+// key (see Backend/api/services/candidate_profile.py) - saving here does not re-run the duplicate
+// check or re-link the candidate's profile, so a correction can leave both stale. Known tradeoff.
 export default function EditCandidateModal({ candidate, onClose, onSaved }) {
   const [form, setForm] = useState({
     first_name: candidate.full_name?.split(' ')[0] || '',
     last_name: candidate.full_name?.split(' ').slice(1).join(' ') || '',
     email: candidate.email,
+    aadhaar_last4: candidate.aadhaar_last4 || '',
+    date_of_birth: candidate.date_of_birth || '',
     college_name: candidate.college_name || '',
     degree: candidate.degree || '',
     stream: candidate.stream || '',
@@ -29,6 +34,12 @@ export default function EditCandidateModal({ candidate, onClose, onSaved }) {
     setForm({ ...form, [field]: value });
   }
 
+  // date_of_birth is nullable server-side, but an empty string isn't a valid date - a candidate
+  // uploaded before this field existed would otherwise fail to save on every unrelated edit too.
+  function buildPayload() {
+    return { ...form, date_of_birth: form.date_of_birth || null };
+  }
+
   function openResendConfirm() {
     setLinkValidFrom(toDatetimeLocalValue(candidate.link_valid_from));
     setLinkValidUntil(toDatetimeLocalValue(candidate.link_valid_until));
@@ -38,7 +49,7 @@ export default function EditCandidateModal({ candidate, onClose, onSaved }) {
   async function handleSave() {
     setSaving(true);
     try {
-      await candidateApi.updateCandidate(candidate.candidate_id, form);
+      await candidateApi.updateCandidate(candidate.candidate_id, buildPayload());
       toast.success('Candidate updated.');
       onSaved();
     } catch (err) {
@@ -64,7 +75,7 @@ export default function EditCandidateModal({ candidate, onClose, onSaved }) {
       // Save the edits FIRST, then send. The invite is addressed server-side from the stored
       // candidate record, so re-sending without saving would mail the old address and silently
       // discard whatever the TA just typed in this form.
-      await candidateApi.updateCandidate(candidate.candidate_id, form);
+      await candidateApi.updateCandidate(candidate.candidate_id, buildPayload());
       saved = true;
       // Gives THIS invitation its own window rather than touching the batch's (which is
       // locked once the batch leaves Draft - see CandidateResendInviteView/create_single_
@@ -102,6 +113,10 @@ export default function EditCandidateModal({ candidate, onClose, onSaved }) {
             <div className="field"><label>Last Name</label><input value={form.last_name} onChange={(e) => set('last_name', e.target.value)} /></div>
           </div>
           <div className="field"><label>Email Address</label><input value={form.email} onChange={(e) => set('email', e.target.value)} /></div>
+          <div className="grid-2">
+            <div className="field"><label>Aadhaar Last 4 Digits</label><input maxLength={4} value={form.aadhaar_last4} onChange={(e) => set('aadhaar_last4', e.target.value)} /></div>
+            <div className="field"><label>Date of Birth</label><input type="date" value={form.date_of_birth} onChange={(e) => set('date_of_birth', e.target.value)} /></div>
+          </div>
           <div className="field"><label>College Name</label><input value={form.college_name} onChange={(e) => set('college_name', e.target.value)} /></div>
           <div className="grid-2">
             <div className="field"><label>Degree</label><input value={form.degree} onChange={(e) => set('degree', e.target.value)} /></div>
