@@ -581,10 +581,9 @@ class TestInvitationEmailBody:
     def test_important_instructions_are_highlighted_red_in_the_html(
         self, ta_user, make_batch, make_candidate, make_invitation
     ):
-        """The three **marked** instructions (SEB is required, camera/mic must stay on, the
-        three-warning rule) render as bold red text in the HTML part - see
-        email_templates._highlight_important. The plain-text part can't show color at all, so
-        this only checks the HTML alternative.
+        """The two **marked** instructions (SEB is required, camera/mic must stay on) render as
+        bold red text in the HTML part - see email_templates._highlight_important. The
+        plain-text part can't show color at all, so this only checks the HTML alternative.
         """
         invitation = make_invitation(make_candidate(make_batch(ta_user), ta_user), ta_user)
 
@@ -593,7 +592,6 @@ class TestInvitationEmailBody:
         html = mail.outbox[0].alternatives[0][0]
         assert '<strong style="color:#db001e;">Required: this assessment must be taken' in html
         assert '<strong style="color:#db001e;">Your camera and microphone must remain enabled' in html
-        assert '<strong style="color:#db001e;">You get up to three warnings' in html
         assert '**' not in html
 
 
