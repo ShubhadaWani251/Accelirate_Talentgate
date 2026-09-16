@@ -20,17 +20,17 @@ import { getVisionModels } from './visionModels';
 // main thread.
 const SAMPLE_MS = 1000;
 
-// Longest of the three (at the 1s cadence above): looking down at the keyboard or notes,
-// leaning back to think, or a moment of tracking loss while turning the head are all common and
-// entirely benign, and deserve real patience before warning - but not so long that a genuine,
-// sustained absence (stepping away, a person-swap) goes unflagged for a minute.
-const CONSECUTIVE_FACE_ABSENT = 10;
+// A brief look-down or a moment of tracking loss shouldn't fire instantly, but shouldn't get a
+// long grace period either.
+const CONSECUTIVE_FACE_ABSENT = 5;
 // A positively-identified second face is more specific evidence than "no face", but a passerby
 // crossing the background for a couple of seconds still deserves the same patience.
 const CONSECUTIVE_FACE_EXTRA = 4;
-// Matches useCameraGuard's own CONSECUTIVE_BLOCKED_CHECKS - an allow-listed, confidence-gated
-// object detection is about as specific a signal as that pixel check.
-const CONSECUTIVE_OBJECT_PRESENT = 3;
+// Deliberately 1, not a streak - a forbidden object must warn on the very first confident
+// detection, no delay. Already gated by visionModels.js's own scoreThreshold (0.6) and
+// categoryAllowlist, so "first detection" is still a confidence-checked, allow-listed signal,
+// not a raw, unfiltered one.
+const CONSECUTIVE_OBJECT_PRESENT = 1;
 
 // getVisionModels() resets its own cached promise on failure specifically so a later call gets a
 // fresh attempt rather than replaying the same rejection (see visionModels.js) - but neither of
