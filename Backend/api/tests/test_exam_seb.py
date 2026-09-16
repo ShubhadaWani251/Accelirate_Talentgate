@@ -59,6 +59,16 @@ class TestBuildConfig:
         assert parsed['allowAudioCapture'] is True
         assert 'browserExamKey' in parsed
 
+    def test_the_upload_file_picker_is_not_restricted_to_one_folder(self, invitation, settings):
+        """Reported live: with uploads allowed, the file-choosing dialog for the Aadhaar
+        scanned-image option still only opened into SEB's own download folder, with no way to
+        browse elsewhere - see services.seb.build_config's own comment on allowCustomDownload
+        Location, confirmed against SEB's published config-key specification.
+        """
+        parsed = plistlib.loads(seb.build_config(invitation))
+
+        assert parsed['allowCustomDownloadLocation'] is True
+
     def test_browser_exam_key_is_deterministic_for_one_invitation(self, invitation, settings):
         settings.SEB_BROWSER_EXAM_KEY_SECRET = 'test-secret'
 

@@ -83,6 +83,15 @@ def build_config(invitation):
         'allowDownUploads': True,
         'allowDownloads': True,
         'allowUploads': True,
+        # Reported live: with uploads allowed (above), the file-choosing dialog still opened
+        # ONLY into SEB's own download folder, with no way to browse elsewhere on the device.
+        # Confirmed against SEB's own published config-key specification (SEB-Specification-
+        # ConfigKeys.pdf): allowCustomDownloadLocation - "Boolean indicating whether the user
+        # may choose where to save a download item" - defaults to false. SEB's Windows/Mac
+        # manuals describe this same setting as governing both the download save location AND
+        # the upload file picker together ("Allow user to select custom download/upload
+        # directory"), which matches exactly what was observed.
+        'allowCustomDownloadLocation': True,
     }
     key = _browser_exam_key(invitation)
     if key is not None:
