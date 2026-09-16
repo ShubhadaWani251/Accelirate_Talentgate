@@ -160,6 +160,17 @@ class TestLooksLikeAadhaarCard:
     def test_unrelated_document_text_is_rejected(self):
         assert aadhaar._looks_like_aadhaar_card('Permanent Account Number Income Tax Department') is False
 
+    def test_government_of_india_alone_is_recognised(self):
+        """A real bug this pins down: a clean, otherwise-perfectly-read capture (correct name,
+        DOB, gender, and a Verhoeff-valid number) was rejected because the card's own
+        "Aadhaar"/"UIDAI" header text wasn't in frame - unsurprising, since the candidate-facing
+        instructions ask for a close, legible shot of the number and DOB specifically. "Government
+        of India" is printed on the bio-data section itself, not just the header, so it survives
+        exactly the tight crop those instructions encourage.
+        """
+        text = f'Government of India Test Person DOB:15/08/1995 Male {VALID_TEST_NUMBER}'
+        assert aadhaar._looks_like_aadhaar_card(text) is True
+
 
 class TestExtractDob:
     def test_exactly_one_date_shaped_run_is_extracted(self):
@@ -222,6 +233,20 @@ class TestExtractVerhoeffValidNumber:
         assert aadhaar.verhoeff_is_valid(other_valid_number)
         text = f'{VALID_TEST_NUMBER} and separately {other_valid_number}'
         assert aadhaar._extract_verhoeff_valid_number(text) is None
+
+    def test_a_number_immediately_adjacent_to_another_digit_run_is_still_found(self):
+        """A real bug this pins down: OCR joined a DOB year directly onto the following Aadhaar
+        number with no separator between them (confirmed against real production OCR text:
+        '...03/03/2004680499533624' - the year and the number, glued together with nothing
+        between). A plain, non-overlapping 12-digit scan only ever checks windows starting at
+        the run's first digit, so it found "200468049953" (part year, part number) - not
+        Verhoeff-valid - and never even considered "680499533624" - the real, valid number -
+        four digits further in. _AADHAAR_RE's overlapping match considers every starting
+        position in a digit run, so the real number is found regardless of what happens to
+        precede it.
+        """
+        text = f'DOB:1952{VALID_TEST_NUMBER}'  # '1952' + the number, glued together like OCR did
+        assert aadhaar._extract_verhoeff_valid_number(text) == VALID_TEST_NUMBER
 
     def test_the_same_valid_number_printed_more_than_once_is_not_ambiguous(self):
         """A real bug this pins down: a genuine Aadhaar card prints its own number more than

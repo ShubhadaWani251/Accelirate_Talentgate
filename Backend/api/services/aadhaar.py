@@ -68,7 +68,15 @@ from api.models import ExamAttempt
 
 logger = logging.getLogger(__name__)
 
-_AADHAAR_RE = re.compile(r'\d{12}')
+# A zero-width lookahead capturing the 12 digits ahead of EVERY position, not a plain r'\d{12}'
+# consumed via findall - re.findall on a consuming pattern only returns NON-OVERLAPPING matches,
+# so a 16-digit run (the OCR'd DOB year immediately butted against the real number with no space
+# between them - a real, observed case: '...03/03/2004680499533624') would only ever be checked
+# starting from its first digit, never from its 5th, where the real 12-digit Aadhaar number
+# actually starts. The lookahead lets _extract_verhoeff_valid_number below consider a candidate
+# starting at every position in the run, exactly as it needs to when a DOB happens to land
+# directly against the number in the OCR text.
+_AADHAAR_RE = re.compile(r'(?=(\d{12}))')
 
 # Matches DD-MM-YYYY / DD/MM/YYYY / DD.MM.YYYY - the shapes an Aadhaar card's printed date of
 # birth, or a QR's dob attribute, actually uses.
@@ -93,7 +101,17 @@ _LABELLED_DOB_RE = re.compile(r'D[O0]B\s*:?\s*(\d{2})[-/.](\d{2})[-/.](\d{4})', 
 # can't actually see. Substring, case-insensitive, several close variants rather than one exact
 # phrase - OCR noise routinely mangles a word ("Aadhaar" -> "Aadhoar"), and a stricter match would
 # reject genuine cards more often than it rejects a different document entirely.
-_AADHAAR_CARD_MARKERS = ('aadhaar', 'aadhar', 'uidai', 'unique identification')
+#
+# 'government of india' added after a real, otherwise-perfectly-read capture (name, DOB, gender,
+# a Verhoeff-valid number all correct) was rejected here: the card's own "Aadhaar"/"UIDAI" header
+# text simply wasn't in frame - unsurprising, since the candidate-facing instructions ask for a
+# close, legible shot of the number and DOB specifically, not the whole card. "Government of
+# India" is printed directly on the bio-data section itself (not just the header), so it survives
+# exactly the tight crop those instructions encourage. Its own genericness is a smaller risk than
+# it looks: this check is a coarse pre-filter, not the real safeguard against a false match - that
+# is the Verhoeff checksum (already a strong filter on its own) AND the subsequent requirement
+# that the extracted last4+DOB match THIS SPECIFIC candidate's own stored records.
+_AADHAAR_CARD_MARKERS = ('aadhaar', 'aadhar', 'uidai', 'unique identification', 'government of india')
 
 
 def verhoeff_is_valid(digits):
@@ -441,6 +459,10 @@ def _extract_verhoeff_valid_number(text):
     VID). Three copies of the SAME number is not an ambiguity to bail out on - it's the opposite,
     stronger evidence - but the un-deduplicated version above treated it exactly like three
     DIFFERENT numbers, and rejected every one of them.
+
+    _AADHAAR_RE's overlapping-window match (see its own comment) means a 16-digit run yields up
+    to 5 candidate windows here, not 1 - Verhoeff validity does the real filtering, same as
+    always; this only widens what gets a chance to be checked, not what counts as a match.
     """
     candidates = {m for m in _AADHAAR_RE.findall(text.replace(' ', '')) if verhoeff_is_valid(m)}
     return next(iter(candidates)) if len(candidates) == 1 else None
