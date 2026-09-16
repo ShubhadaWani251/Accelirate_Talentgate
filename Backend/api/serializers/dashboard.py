@@ -1,8 +1,8 @@
 from collections import Counter, defaultdict
 
-from django.db.models import Case, Count, IntegerField, Q, Value, When
+from django.db.models import Case, Count, IntegerField, OuterRef, Q, Subquery, Value, When
 
-from api.models import Batch, Candidate, Question, QuestionBankSection, User
+from api.models import Batch, Candidate, ExamAttempt, Question, QuestionBankSection, User
 from api.serializers.batch import annotate_batch_counts
 from api.serializers.question import normalize_question_text
 from api.services.access import dedupe_by_profile, visible_batches_qs, visible_candidates_qs
@@ -23,9 +23,23 @@ def _build_stats(batches_qs, candidates_qs):
     # candidates_qs is deduped by profile (see services/access.dedupe_by_profile) before it
     # reaches here - "Total Candidates" counts real PEOPLE, matching what the All Candidates
     # page itself shows, not one count per batch appearance of the same person.
-    candidate_stats = candidates_qs.aggregate(
+    #
+    # "Completed" can't filter on Candidate.status=COMPLETED - nothing ever writes that value.
+    # The exam-taking flow only ever moves Candidate.status pending_invite -> invited (see
+    # serializers/candidates._effective_status's own comment); a candidate's real progress lives
+    # on their latest ExamAttempt instead, exactly like the Status column on every candidate
+    # list/detail view already computes it. This card was reporting 0 for exactly that reason,
+    # regardless of how many candidates had actually finished. Ordered by -attempt_id, not
+    # -started_at, for the same reason _latest_attempt is (see serializers/candidates.py).
+    latest_attempt_status = Subquery(
+        ExamAttempt.objects.filter(candidate=OuterRef('pk'))
+        .order_by('-attempt_id').values('status')[:1]
+    )
+    candidate_stats = candidates_qs.annotate(
+        latest_attempt_status=latest_attempt_status,
+    ).aggregate(
         total_candidates=Count('candidate_id'),
-        completed=Count('candidate_id', filter=Q(status=Candidate.Status.COMPLETED)),
+        completed=Count('candidate_id', filter=Q(latest_attempt_status=ExamAttempt.Status.SUBMITTED)),
         total_pass=Count('candidate_id', filter=Q(result=Candidate.Result.PASS)),
     )
     return {

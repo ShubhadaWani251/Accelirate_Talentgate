@@ -8,7 +8,9 @@ the same person - while the All Candidates page itself already collapsed to one 
 
 from datetime import date
 
-from api.models import Candidate
+from django.utils import timezone
+
+from api.models import Candidate, ExamAttempt
 from api.serializers.dashboard import build_dashboard_summary
 from api.services.candidate_profile import link_profile
 
@@ -48,17 +50,25 @@ class TestTotalCandidatesCountsPeopleNotRows:
         assert stats['total_candidates'] == 1
 
     def test_completed_and_pass_counts_reflect_the_latest_membership(
-        self, admin_user, make_batch, make_candidate,
+        self, admin_user, make_batch, make_candidate, make_invitation,
     ):
         """A person's most recent batch appearance is what counts, matching the same
         "recent entry wins" rule the profile itself follows.
+
+        "Completed" is built from the OLDER row's own latest ExamAttempt (SUBMITTED), not
+        Candidate.status - nothing in the real exam-taking flow ever writes that field (see
+        serializers/dashboard._build_stats' own comment), so pinning this against it would
+        test a state the application can never actually produce.
         """
         older = make_candidate(make_batch(admin_user), admin_user, aadhaar_last4='5678',
-                               date_of_birth=DOB, status=Candidate.Status.COMPLETED,
-                               result=Candidate.Result.PASS)
+                               date_of_birth=DOB, result=Candidate.Result.PASS)
         link_profile(older)
+        ExamAttempt.objects.create(
+            candidate=older, invitation=make_invitation(older, admin_user),
+            status=ExamAttempt.Status.SUBMITTED, submitted_at=timezone.now(),
+        )
         newer = make_candidate(make_batch(admin_user), admin_user, aadhaar_last4='5678', date_of_birth=DOB,
-                               status=Candidate.Status.PENDING_INVITE, result=Candidate.Result.PENDING)
+                               result=Candidate.Result.PENDING)
         link_profile(newer)
 
         stats = build_dashboard_summary(admin_user)['stats']
@@ -66,3 +76,34 @@ class TestTotalCandidatesCountsPeopleNotRows:
         assert stats['total_candidates'] == 1
         assert stats['completed'] == 0
         assert stats['total_pass'] == 0
+
+    def test_completed_counts_a_candidate_whose_latest_attempt_was_submitted(
+        self, admin_user, make_batch, make_candidate, make_invitation,
+    ):
+        """The bug this whole change fixes: Candidate.status is never written to COMPLETED by
+        the real exam-taking flow, so filtering on it left this card stuck at 0 regardless of
+        how many candidates had actually finished - reported live on a real dashboard showing
+        0 completed with real completed exams on record.
+        """
+        candidate = make_candidate(make_batch(admin_user), admin_user)
+        ExamAttempt.objects.create(
+            candidate=candidate, invitation=make_invitation(candidate, admin_user),
+            status=ExamAttempt.Status.SUBMITTED, submitted_at=timezone.now(),
+        )
+
+        stats = build_dashboard_summary(admin_user)['stats']
+
+        assert stats['completed'] == 1
+
+    def test_completed_does_not_count_an_in_progress_attempt(
+        self, admin_user, make_batch, make_candidate, make_invitation,
+    ):
+        candidate = make_candidate(make_batch(admin_user), admin_user)
+        ExamAttempt.objects.create(
+            candidate=candidate, invitation=make_invitation(candidate, admin_user),
+            status=ExamAttempt.Status.IN_PROGRESS,
+        )
+
+        stats = build_dashboard_summary(admin_user)['stats']
+
+        assert stats['completed'] == 0
