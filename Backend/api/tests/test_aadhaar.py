@@ -234,30 +234,40 @@ class TestExtractVerhoeffValidNumber:
         text = f'{VALID_TEST_NUMBER} and separately {other_valid_number}'
         assert aadhaar._extract_verhoeff_valid_number(text) is None
 
-    def test_a_number_immediately_adjacent_to_another_digit_run_is_still_found(self):
-        """A real bug this pins down: OCR joined a DOB year directly onto the following Aadhaar
-        number with no separator between them (confirmed against real production OCR text:
-        '...03/03/2004680499533624' - the year and the number, glued together with nothing
-        between). A plain, non-overlapping 12-digit scan only ever checks windows starting at
-        the run's first digit, so it found "200468049953" (part year, part number) - not
-        Verhoeff-valid - and never even considered "680499533624" - the real, valid number -
-        four digits further in. _AADHAAR_RE's overlapping match considers every starting
-        position in a digit run, so the real number is found regardless of what happens to
-        precede it.
+    def test_a_number_right_after_a_date_with_only_a_space_between_is_still_found(self):
+        """A real bug this pins down: an earlier version stripped every space in the text
+        before scanning for a bare r'\\d{12}'. OCR read a real card's DOB year with a perfectly
+        normal, real space before the following Aadhaar number ('...03/03/2004 680499533624'),
+        but stripping that space first fused them into one 16-digit run, and a non-overlapping
+        \\d{12} scan only ever checked a window starting at that run's first digit - "200468049953"
+        (part year, part number), not Verhoeff-valid - never considering "680499533624", the
+        real number, four digits further in. _AADHAAR_RE's (?<!\\d)/(?!\\d) boundary checks (see
+        its own comment) mean the real, natural space between them is what delimits the number
+        now, instead of being thrown away before the search even starts.
         """
-        text = f'DOB:1952{VALID_TEST_NUMBER}'  # '1952' + the number, glued together like OCR did
+        text = f'DOB:03/03/1952 {VALID_TEST_NUMBER}'  # a real space, exactly like the OCR text
         assert aadhaar._extract_verhoeff_valid_number(text) == VALID_TEST_NUMBER
 
     def test_the_same_valid_number_printed_more_than_once_is_not_ambiguous(self):
         """A real bug this pins down: a genuine Aadhaar card prints its own number more than
-        once (once near the photo, again under "Your Aadhaar No.", again near the VID) -
-        confirmed against real production OCR text where a clear, detailed capture read the
-        same valid number three times. An earlier version of this function counted RAW matches,
-        not DISTINCT ones, so three copies of the correct number were treated exactly like three
-        DIFFERENT numbers and rejected as ambiguous - the more thoroughly a card was read, the
-        more likely verification was to fail.
+        once (once near the photo, again under "Your Aadhaar No.", again near the VID), often
+        separated by nothing more than a single space - confirmed against real production OCR
+        text where a clear, detailed capture read the same valid number three times, twice with
+        only one space between them ('...634351212737 634351212737 VID:...'). An earlier
+        version of this function counted RAW matches, not DISTINCT ones, so three copies of the
+        correct number were treated exactly like three DIFFERENT numbers and rejected as
+        ambiguous - the more thoroughly a card was read, the more likely verification was to
+        fail. A LATER, since-replaced version fixed that with an overlapping window scan, which
+        then found SPURIOUS extra "candidates" straddling the boundary between two adjacent
+        copies of the same number - some of which happened to also pass Verhoeff, recreating the
+        exact same ambiguity from a different direction. _AADHAAR_RE's digit-boundary anchoring
+        (see its own comment) finds each real copy cleanly, without ever reading across the gap
+        between them.
         """
-        text = f'{VALID_TEST_NUMBER} ... Your Aadhaar No.: {VALID_TEST_NUMBER} ... VID: 1234 {VALID_TEST_NUMBER}'
+        text = (
+            f'{VALID_TEST_NUMBER} ... Your Aadhaar No.: {VALID_TEST_NUMBER} '
+            f'{VALID_TEST_NUMBER} VID: 1234'
+        )
         assert aadhaar._extract_verhoeff_valid_number(text) == VALID_TEST_NUMBER
 
 

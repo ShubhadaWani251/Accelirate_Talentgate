@@ -68,15 +68,27 @@ from api.models import ExamAttempt
 
 logger = logging.getLogger(__name__)
 
-# A zero-width lookahead capturing the 12 digits ahead of EVERY position, not a plain r'\d{12}'
-# consumed via findall - re.findall on a consuming pattern only returns NON-OVERLAPPING matches,
-# so a 16-digit run (the OCR'd DOB year immediately butted against the real number with no space
-# between them - a real, observed case: '...03/03/2004680499533624') would only ever be checked
-# starting from its first digit, never from its 5th, where the real 12-digit Aadhaar number
-# actually starts. The lookahead lets _extract_verhoeff_valid_number below consider a candidate
-# starting at every position in the run, exactly as it needs to when a DOB happens to land
-# directly against the number in the OCR text.
-_AADHAAR_RE = re.compile(r'(?=(\d{12}))')
+# Three groups of 4 digits, an OPTIONAL single space between each, and - critically - NOT
+# immediately preceded or followed by another digit. Matches an Aadhaar number exactly as UIDAI
+# prints it (grouped "6343 5121 2737") AND as OCR often reads it with the spaces collapsed
+# ("634351212737"), while the (?<!\d)/(?!\d) boundary checks stop it from EVER reading into a
+# digit run that belongs to something else - which is exactly what broke on real captures with
+# two different, real, non-hypothetical shapes:
+#   1. A prior version stripped every space before scanning with a plain r'\d{12}', so an OCR'd
+#      DOB year sitting directly before the number with only a real, natural space between them
+#      ('...03/03/2004 680499533624') had that space thrown away FIRST - turning two separate,
+#      cleanly-delimited numbers into one 16-digit run, then only checking for a 12-digit window
+#      starting at its first digit (part year, part number, not the real number at all).
+#   2. A version that scanned every possible window inside a digit run (to fix the above without
+#      restoring the space) then found SPURIOUS matches straddling the boundary between two
+#      adjacent, genuine printings of the SAME real number - a real card prints its own number
+#      more than once, often separated only by a single space - and some of those boundary-
+#      spanning fragments happened to also pass the Verhoeff checksum, which the "must be exactly
+#      one DISTINCT valid candidate" rule then read as unresolvable ambiguity.
+# Anchoring on real digit boundaries instead of blindly collapsing whitespace fixes both: it
+# finds the number whether OCR grouped it with spaces or not, without ever needing to guess
+# which spaces were "part of the number" and which weren't.
+_AADHAAR_RE = re.compile(r'(?<!\d)(\d{4})\s?(\d{4})\s?(\d{4})(?!\d)')
 
 # Matches DD-MM-YYYY / DD/MM/YYYY / DD.MM.YYYY - the shapes an Aadhaar card's printed date of
 # birth, or a QR's dob attribute, actually uses.
@@ -457,15 +469,20 @@ def _extract_verhoeff_valid_number(text):
     confirmed against real production OCR text, where a clear, detailed capture read the same
     valid number three times (once near the photo, once under "Your Aadhaar No.", once near the
     VID). Three copies of the SAME number is not an ambiguity to bail out on - it's the opposite,
-    stronger evidence - but the un-deduplicated version above treated it exactly like three
-    DIFFERENT numbers, and rejected every one of them.
+    stronger evidence - but a version of this function that didn't dedupe treated it exactly
+    like three DIFFERENT numbers, and rejected every one of them. _AADHAAR_RE's own digit-
+    boundary anchoring (see its comment) is what keeps those three genuine repeats from ever
+    being read as a fourth, spurious, boundary-straddling "candidate" in the first place.
 
-    _AADHAAR_RE's overlapping-window match (see its own comment) means a 16-digit run yields up
-    to 5 candidate windows here, not 1 - Verhoeff validity does the real filtering, same as
-    always; this only widens what gets a chance to be checked, not what counts as a match.
+    Not run against text.replace(' ', '') - _AADHAAR_RE handles the number's own optional
+    internal spacing itself. Blindly stripping every space in the whole text was the earlier
+    bug: it could turn two separate, legitimately space-delimited numbers (a preceding date and
+    the real number, or two genuine printings of the same number) into one indistinguishable
+    digit run.
     """
-    candidates = {m for m in _AADHAAR_RE.findall(text.replace(' ', '')) if verhoeff_is_valid(m)}
-    return next(iter(candidates)) if len(candidates) == 1 else None
+    candidates = {''.join(m) for m in _AADHAAR_RE.findall(text)}
+    valid_candidates = {c for c in candidates if verhoeff_is_valid(c)}
+    return next(iter(valid_candidates)) if len(valid_candidates) == 1 else None
 
 
 def _looks_like_aadhaar_card(text):
