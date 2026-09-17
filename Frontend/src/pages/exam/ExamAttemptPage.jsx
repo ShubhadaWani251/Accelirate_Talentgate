@@ -330,7 +330,7 @@ export default function ExamAttemptPage() {
   // never be the fallback for a value that simply hasn't arrived yet.
   const aiProctoringEnabled = sessionState?.ai_proctoring_enabled ?? true;
   const {
-    faceNotVisible, extraPersonDetected, forbiddenObjectDetected, forbiddenObjectType,
+    faceNotVisible, lookingAway, extraPersonDetected, forbiddenObjectDetected, forbiddenObjectType,
   } = useVisionProctoringGuard(mediaStreamRef, examActive && aiProctoringEnabled, onViolation);
   const { voiceDetected } = useVoiceActivityGuard(
     mediaStreamRef, examActive && aiProctoringEnabled, onViolation,
@@ -731,6 +731,13 @@ export default function ExamAttemptPage() {
             <div className="alert error" style={{ marginBottom: 10 }}>
               <b>Your face is not visible to the camera.</b> Position yourself so your face is
               clearly visible now.
+            </div>
+          )}
+
+          {lookingAway && (
+            <div className="alert error" style={{ marginBottom: 10 }}>
+              <b>You appear to be turned away from the screen.</b> Please face the screen —
+              looking down at your own rough work is fine.
             </div>
           )}
 

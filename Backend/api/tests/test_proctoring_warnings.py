@@ -32,6 +32,7 @@ class TestWhichCausesAreWarnable:
         TerminationReason.FULLSCREEN_EXIT,
         TerminationReason.CAMERA_OFF,
         TerminationReason.FACE_NOT_VISIBLE,
+        TerminationReason.LOOKING_AWAY,
         TerminationReason.EXTRA_PERSON_DETECTED,
         TerminationReason.FORBIDDEN_OBJECT_DETECTED,
         TerminationReason.VOICE_DETECTED,
@@ -215,13 +216,14 @@ class TestWarningNotAcknowledged:
 
 
 class TestAiDetectedReasons:
-    """The five client-side AI signals (face count, forbidden objects, voice activity, face
-    identity match) - each gets the same warn-then-terminate treatment as camera_off, for the
+    """The six client-side AI signals (face absence, head turned away, extra faces, forbidden
+    objects, voice activity, face identity match) - each gets the same warn-then-terminate treatment as camera_off, for the
     same reason: a live ML/CV detection is a best-guess, not a deterministic browser event.
     """
 
     @pytest.mark.parametrize('reason', [
         TerminationReason.FACE_NOT_VISIBLE,
+        TerminationReason.LOOKING_AWAY,
         TerminationReason.EXTRA_PERSON_DETECTED,
         TerminationReason.FORBIDDEN_OBJECT_DETECTED,
         TerminationReason.VOICE_DETECTED,
@@ -236,6 +238,7 @@ class TestAiDetectedReasons:
 
     @pytest.mark.parametrize('reason', [
         TerminationReason.FACE_NOT_VISIBLE,
+        TerminationReason.LOOKING_AWAY,
         TerminationReason.EXTRA_PERSON_DETECTED,
         TerminationReason.FORBIDDEN_OBJECT_DETECTED,
         TerminationReason.VOICE_DETECTED,
@@ -255,6 +258,7 @@ class TestAiDetectedReasons:
 
     @pytest.mark.parametrize('reason', [
         TerminationReason.FACE_NOT_VISIBLE,
+        TerminationReason.LOOKING_AWAY,
         TerminationReason.EXTRA_PERSON_DETECTED,
         TerminationReason.FORBIDDEN_OBJECT_DETECTED,
         TerminationReason.VOICE_DETECTED,
@@ -265,6 +269,7 @@ class TestAiDetectedReasons:
 
     @pytest.mark.parametrize('reason', [
         TerminationReason.FACE_NOT_VISIBLE,
+        TerminationReason.LOOKING_AWAY,
         TerminationReason.EXTRA_PERSON_DETECTED,
         TerminationReason.FORBIDDEN_OBJECT_DETECTED,
         TerminationReason.VOICE_DETECTED,

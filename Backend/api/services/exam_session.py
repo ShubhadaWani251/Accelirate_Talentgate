@@ -68,6 +68,11 @@ class TerminationReason:
     WARNING_NOT_ACKNOWLEDGED = 'warning_not_acknowledged'
     WINDOW_CLOSED = 'window_closed'
     FACE_NOT_VISIBLE = 'face_not_visible'
+    # Distinct from FACE_NOT_VISIBLE on purpose. "Not visible" is ambiguous - the candidate may
+    # be looking down at their desk, which is what taking an aptitude test looks like - so it is
+    # treated leniently. This one is the unambiguous case: the face IS detected and is turned
+    # away from the screen, which nothing about answering a question requires.
+    LOOKING_AWAY = 'looking_away'
     EXTRA_PERSON_DETECTED = 'extra_person_detected'
     FORBIDDEN_OBJECT_DETECTED = 'forbidden_object_detected'
     VOICE_DETECTED = 'voice_detected'
@@ -113,6 +118,10 @@ TERMINATION_MESSAGES = {
     TerminationReason.FACE_NOT_VISIBLE:
         'Your assessment was ended because your face was not visible to the camera for an '
         'extended period. You must stay clearly visible on camera for the whole assessment.',
+    TerminationReason.LOOKING_AWAY:
+        'Your assessment was ended because you were repeatedly turned away from the screen. '
+        'You must face the screen for the whole assessment - looking down at your own rough '
+        'work is fine.',
     TerminationReason.EXTRA_PERSON_DETECTED:
         'Your assessment was ended because more than one face was detected in the camera '
         'frame. Only you may be visible on camera during the assessment.',
@@ -146,6 +155,7 @@ TERMINATION_LABELS = {
     TerminationReason.WARNING_NOT_ACKNOWLEDGED: 'Did not return within 10 seconds of a warning',
     TerminationReason.WINDOW_CLOSED: 'Safe Exam Browser / assessment window closed mid-exam',
     TerminationReason.FACE_NOT_VISIBLE: 'Face not visible to camera for an extended period',
+    TerminationReason.LOOKING_AWAY: 'Turned away from the screen (head turned left/right)',
     TerminationReason.EXTRA_PERSON_DETECTED: 'More than one face detected in camera frame',
     TerminationReason.FORBIDDEN_OBJECT_DETECTED:
         'Unauthorized object detected in camera frame (phone/laptop/book/etc.)',
@@ -227,6 +237,7 @@ WARNABLE_REASONS = {
     # this warn-first tier exists to absorb, rather than wrongly ending an honest candidate's
     # exam on the new signal's first bad day.
     TerminationReason.FACE_NOT_VISIBLE,
+    TerminationReason.LOOKING_AWAY,
     TerminationReason.EXTRA_PERSON_DETECTED,
     TerminationReason.FORBIDDEN_OBJECT_DETECTED,
     TerminationReason.VOICE_DETECTED,
@@ -262,7 +273,9 @@ _WARNING_CAUSES = {
         'your camera stopped sending video - it may be switched off, covered, blocked by a '
         'privacy shutter, or in use by another application',
     TerminationReason.FACE_NOT_VISIBLE:
-        'your face was not visible to the camera for several seconds',
+        'your face was not visible to the camera for an extended period',
+    TerminationReason.LOOKING_AWAY:
+        'you were turned away from the screen',
     TerminationReason.EXTRA_PERSON_DETECTED:
         'more than one face was detected in your camera frame',
     TerminationReason.FORBIDDEN_OBJECT_DETECTED:
@@ -284,6 +297,8 @@ _WARNING_REMEDIES = {
         'Turn your camera back on now and leave it on until you submit',
     TerminationReason.FACE_NOT_VISIBLE:
         'Position yourself so your face is clearly visible to the camera',
+    TerminationReason.LOOKING_AWAY:
+        'Face the screen. Looking down at your own rough work is fine',
     TerminationReason.EXTRA_PERSON_DETECTED:
         'Make sure no one else is visible in your camera frame',
     TerminationReason.FORBIDDEN_OBJECT_DETECTED:

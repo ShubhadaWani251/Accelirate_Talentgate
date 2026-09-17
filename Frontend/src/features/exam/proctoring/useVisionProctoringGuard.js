@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { getVisionModels } from './visionModels';
+import { isLookingAway } from './headPose';
 
 // Watches the shared camera feed for two independent signals: is exactly one face visible, and
 // is a forbidden electronic device (phone/laptop/remote/tv) in frame. Structured after useCameraGuard -
@@ -20,19 +21,31 @@ import { getVisionModels } from './visionModels';
 // main thread.
 const SAMPLE_MS = 1000;
 
-// 60 seconds, raised from 5 after real candidates were warned three times in one sitting for
-// looking down at their desk to work through questions - which is what sitting an aptitude test
-// looks like. MediaPipe loses the face entirely once the head pitches down far enough, so a
-// candidate doing rough work on paper is indistinguishable, to this check, from one who has left
-// the room. Five seconds made that misfire constantly; a full minute of a completely unseen face
-// is a genuinely unusual event that a real absence still trips.
+// NO FACE DETECTED AT ALL - 15 seconds.
 //
-// The cost is honest and worth stating: someone who leaves their seat now has up to a minute
-// before this fires. That is accepted deliberately - the session recording captures the whole
-// period for a TA to review either way, and the face-identity guard (useFaceIdentityGuard) still
-// catches a person SWAP within ~6s regardless of this number, which is the threat that actually
-// matters. This check only ever meant "is the candidate visibly present", not "is it still them".
-const CONSECUTIVE_FACE_ABSENT = 60;
+// This case is genuinely ambiguous and has to be treated as such. MediaPipe loses the face
+// entirely once the head pitches down far enough, so a candidate doing rough work on paper
+// produces exactly the same signal as one who has walked off: zero faces. They cannot be told
+// apart from this input, and warning immediately on it is what caused real candidates to be
+// warned three times in a single sitting for reading their own desk.
+//
+// 15 seconds is long enough to cover working through a question on paper, and short enough that
+// a genuine absence is still caught quickly. The residual cost - someone can be away for up to
+// 15s unwarned - is covered by the session recording, and by useFaceIdentityGuard, which still
+// catches a person SWAP within ~6s regardless of this number. That is the threat that actually
+// matters; this check only ever meant "is the candidate visibly present".
+const CONSECUTIVE_FACE_ABSENT = 15;
+
+// FACE DETECTED BUT TURNED AWAY - effectively immediate.
+//
+// The unambiguous half of the split. Here the face IS tracked and is pointing away from the
+// screen (see headPose.js), which nothing about answering a question requires - unlike looking
+// down, which is why that case is handled by the streak above instead.
+//
+// 2 samples rather than 1 purely to discard a single bad frame: motion blur or a lighting
+// flicker can momentarily skew the landmark positions, and one glitched frame should not cost a
+// candidate a warning. At a 1s cadence this still reports within about two seconds.
+const CONSECUTIVE_LOOKING_AWAY = 2;
 // A positively-identified second face is more specific evidence than "no face", but a passerby
 // crossing the background for a couple of seconds still deserves the same patience.
 const CONSECUTIVE_FACE_EXTRA = 4;
@@ -62,6 +75,7 @@ const MODEL_LOAD_RETRY_MS = 3000;
 export default function useVisionProctoringGuard(streamRef, active, onViolation) {
   const [state, setState] = useState({
     faceNotVisible: false,
+    lookingAway: false,
     extraPersonDetected: false,
     forbiddenObjectDetected: false,
     forbiddenObjectType: null,
@@ -69,6 +83,7 @@ export default function useVisionProctoringGuard(streamRef, active, onViolation)
 
   const faceAbsentFiredRef = useRef(false);
   const faceExtraFiredRef = useRef(false);
+  const lookingAwayFiredRef = useRef(false);
   const objectFiredRef = useRef(false);
 
   useEffect(() => {
@@ -79,6 +94,7 @@ export default function useVisionProctoringGuard(streamRef, active, onViolation)
     let cancelled = false;
     let faceAbsentStreak = 0;
     let faceExtraStreak = 0;
+    let lookingAwayStreak = 0;
     let objectStreak = 0;
     let lastObjectSeen = null;
 
@@ -121,16 +137,23 @@ export default function useVisionProctoringGuard(streamRef, active, onViolation)
       if (faceCount === 0) {
         faceAbsentStreak += 1;
         faceExtraStreak = 0;
+        lookingAwayStreak = 0;
       } else if (faceCount > 1) {
         faceExtraStreak += 1;
         faceAbsentStreak = 0;
+        lookingAwayStreak = 0;
       } else {
         faceAbsentStreak = 0;
         faceExtraStreak = 0;
+        // Exactly one face, so its orientation is a meaningful question. Looking down keeps the
+        // nose centred horizontally and so reads as facing forward here - correctly, since the
+        // streak above is what covers that case.
+        lookingAwayStreak = isLookingAway(faceResult.faceLandmarks[0]) ? lookingAwayStreak + 1 : 0;
       }
 
       const faceNotVisible = faceAbsentStreak >= CONSECUTIVE_FACE_ABSENT;
       const extraPersonDetected = faceExtraStreak >= CONSECUTIVE_FACE_EXTRA;
+      const lookingAway = lookingAwayStreak >= CONSECUTIVE_LOOKING_AWAY;
 
       if (faceNotVisible && !faceAbsentFiredRef.current) {
         faceAbsentFiredRef.current = true;
@@ -144,6 +167,13 @@ export default function useVisionProctoringGuard(streamRef, active, onViolation)
         onViolation('extra_person_detected');
       } else if (!extraPersonDetected) {
         faceExtraFiredRef.current = false;
+      }
+
+      if (lookingAway && !lookingAwayFiredRef.current) {
+        lookingAwayFiredRef.current = true;
+        onViolation('looking_away');
+      } else if (!lookingAway) {
+        lookingAwayFiredRef.current = false;
       }
 
       const objectResult = objectDetector.detectForVideo(video, now);
@@ -174,6 +204,7 @@ export default function useVisionProctoringGuard(streamRef, active, onViolation)
 
       setState({
         faceNotVisible,
+        lookingAway,
         extraPersonDetected,
         forbiddenObjectDetected,
         forbiddenObjectType: forbiddenObjectDetected ? lastObjectSeen.type : null,

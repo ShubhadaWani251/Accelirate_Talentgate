@@ -22,6 +22,7 @@ const PRIORITY = {
   // the default of 0 that would let an unrelated window_blur silently win the race and hide the
   // AI-specific message.
   face_not_visible: 4,
+  looking_away: 4,
   extra_person_detected: 4,
   forbidden_object_detected: 4,
   voice_detected: 4,
