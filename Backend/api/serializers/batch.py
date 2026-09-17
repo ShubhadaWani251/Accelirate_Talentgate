@@ -56,7 +56,6 @@ class BatchSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     pass_count = serializers.SerializerMethodField()
     fail_count = serializers.SerializerMethodField()
-    borderline_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Batch
@@ -67,7 +66,7 @@ class BatchSerializer(serializers.ModelSerializer):
             'logical_cutoff', 'quantitative_cutoff', 'verbal_cutoff', 'programming_cutoff',
             'status', 'status_display', 'total_candidates',
             'primary_ta_user', 'primary_ta_user_name', 'created_at',
-            'pass_count', 'fail_count', 'borderline_count',
+            'pass_count', 'fail_count',
             'ai_proctoring_enabled',
         ]
         read_only_fields = [
@@ -103,11 +102,6 @@ class BatchSerializer(serializers.ModelSerializer):
         if hasattr(batch, 'fail_count'):
             return batch.fail_count
         return batch.candidate_set.filter(result=Candidate.Result.FAIL, is_deleted=False).count()
-
-    def get_borderline_count(self, batch):
-        # No real exam scoring exists yet (that's Phase 4) - always 0 for now, kept here so
-        # the frontend table shape doesn't need to change once scoring lands.
-        return 0
 
     def validate(self, attrs):
         link_from = attrs.get('link_valid_from', getattr(self.instance, 'link_valid_from', None))

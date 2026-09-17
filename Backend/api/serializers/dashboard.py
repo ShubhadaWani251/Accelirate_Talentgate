@@ -78,7 +78,6 @@ def _build_batches_overview(batches_qs, is_admin, status_group='active'):
             'status_display': batch.get_status_display(),
             'pass_count': batch.pass_count,
             'fail_count': batch.fail_count,
-            'borderline_count': 0,
         }
         if is_admin:
             row['primary_ta_user_name'] = batch.primary_ta_user.full_name

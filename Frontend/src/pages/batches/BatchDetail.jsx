@@ -194,11 +194,10 @@ export default function BatchDetail() {
         </div>
       )}
 
-      <div className="grid-4" style={{ marginBottom: 20 }}>
+      <div className="grid-3" style={{ marginBottom: 20 }}>
         <div className="stat-card"><div className="stat-num">{batch.total_candidates}</div><div className="stat-lbl">Candidates</div></div>
         <div className="stat-card"><div className="stat-num">{batch.pass_count}</div><div className="stat-lbl">Pass</div></div>
         <div className="stat-card"><div className="stat-num">{batch.fail_count}</div><div className="stat-lbl">Fail</div></div>
-        <div className="stat-card"><div className="stat-num">{batch.borderline_count}</div><div className="stat-lbl">Borderline</div></div>
       </div>
 
       {/* Wireframe order for this screen is Filters, then Configure Batch, then the candidate
