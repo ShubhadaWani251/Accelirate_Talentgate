@@ -6,6 +6,7 @@ from rest_framework import serializers
 from api.models import AuditLog, Candidate, ExamAttempt, Invitation
 from api.serializers.common import format_aadhaar_last4
 from api.services import aadhaar, blob_storage
+from api.services.email_templates import format_datetime
 from api.services.exam_session import termination_label
 
 SECTION_LABELS = {
@@ -528,10 +529,14 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
                 events.append({
                     'timestamp': invitation.email_sent_at,
                     'event': 'Invite Re-sent' if invitation.is_re_invite else 'Invite Sent',
-                    'details': (
-                        f'Link valid until '
-                        f'{invitation.link_expired_at.strftime("%d-%b-%Y %I:%M %p")}'
-                    ),
+                    # format_datetime, not a bare .strftime() on the stored value. Timestamps
+                    # are stored in UTC (settings.TIME_ZONE), so strftime rendered this 5h30m
+                    # behind the IST times shown in the same table's own Date/Time column - an
+                    # invite sent at 03:01 pm read "Link valid until 11:30 AM", i.e. apparently
+                    # expiring before it was sent. Same bug, and the same fix, as the one
+                    # format_datetime's own docstring describes for candidate emails; the zone
+                    # is named in the output so the reader never has to assume which one it is.
+                    'details': f'Link valid until {format_datetime(invitation.link_expired_at)}',
                 })
             if invitation.link_clicked_at:
                 events.append({

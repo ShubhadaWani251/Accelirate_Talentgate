@@ -12,11 +12,30 @@ export function fromDatetimeLocalValue(localValue) {
   return new Date(localValue).toISOString();
 }
 
+// Every displayed timestamp is rendered in IST and labelled as such, NOT in the viewer's own
+// timezone. These are timestamps about an Indian hiring process - an assessment window, when an
+// invite went out, when a candidate started - and the only reading of them that is ever useful
+// is the local one everybody involved is actually working in.
+//
+// toLocaleString(undefined, ...) previously used whatever timezone the viewing machine happened
+// to be set to. For a TA in India that is IST and looks correct, which is exactly what makes it
+// dangerous: a laptop still set to another zone (or a colleague reviewing from abroad) silently
+// renders every time in this table shifted, with nothing on screen to reveal it. Pinning the
+// zone makes the value the same for everyone, and the suffix means nobody has to assume.
+//
+// Matches DISPLAY_TIME_ZONE in Backend/config/settings.py, which is what the server already
+// renders candidate-facing emails and the timeline's own detail strings in - the two must agree
+// or the same row shows two different times in adjacent columns.
+const DISPLAY_TIME_ZONE = 'Asia/Kolkata';
+const DISPLAY_TIME_ZONE_LABEL = 'IST';
+
 export function formatDateTime(isoString) {
   if (!isoString) return '—';
-  return new Date(isoString).toLocaleString(undefined, {
+  const formatted = new Date(isoString).toLocaleString('en-GB', {
     day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+    hour12: true, timeZone: DISPLAY_TIME_ZONE,
   });
+  return `${formatted} ${DISPLAY_TIME_ZONE_LABEL}`;
 }
 
 // Date-only fields (Date of Birth) - always DD/MM/YYYY, the one format used everywhere it's
