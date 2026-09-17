@@ -30,6 +30,7 @@ protobuf==7.36.1
 psycopg2-binary==2.9.12
 pyclipper==1.4.0
 pycparser==3.0
+pypdfium2==5.13.0
 Pygments==2.21.0
 PyJWT==2.13.0
 pytest==9.1.1

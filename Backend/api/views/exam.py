@@ -23,7 +23,7 @@ from rest_framework.views import APIView
 from api.authentication import CandidateAttemptAuthentication
 from api.models import ExamAnswer, ExamAttempt, Invitation
 from api.serializers.exam import AnswerSerializer, EmailVerifySerializer, TerminateSerializer
-from api.services import aadhaar, blob_storage, exam_session, seb
+from api.services import aadhaar, aadhaar_pdf, blob_storage, exam_session, seb
 from api.services.image_validation import InvalidImageUpload, validate_identity_photo
 from api.services.exam_session import TerminationReason
 from api.services.question_selection import SECTION_LABELS, SECTION_ORDER, InsufficientQuestionsError
@@ -288,7 +288,7 @@ class ExamIdentityAadhaarCaptureView(APIView):
             return Response({'detail': 'An Aadhaar Card photo is required.'},
                              status=status.HTTP_400_BAD_REQUEST)
         try:
-            validate_identity_photo(id_photo, 'Aadhaar Card photo')
+            validate_identity_photo(id_photo, 'Aadhaar Card photo', allow_pdf=True)
         except InvalidImageUpload as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -315,9 +315,26 @@ class ExamIdentityAadhaarCaptureView(APIView):
         # caveat as the face photo (see ExamIdentityCaptureView) - validate_identity_photo is what
         # actually guards against a malicious declared type.
         id_photo_bytes = id_photo.read()
+        id_photo_content_type = id_photo.content_type
+
+        # A PDF becomes a PNG here, before anything is stored or verified. Everything
+        # downstream - blob storage, the QR/OCR pipeline, the TA's evidence panel - then deals
+        # only in images, exactly as it did when images were all this endpoint accepted. The
+        # original PDF is deliberately not kept: it is commonly an encrypted e-Aadhaar that a
+        # TA could not open anyway. See services/aadhaar_pdf.py.
+        if aadhaar_pdf.is_pdf_upload(id_photo_content_type):
+            try:
+                id_photo_bytes = aadhaar_pdf.pdf_to_png_bytes(
+                    id_photo_bytes,
+                    aadhaar_pdf.candidate_pdf_passwords(invitation.candidate),
+                )
+            except aadhaar_pdf.AadhaarPdfError as exc:
+                return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            id_photo_content_type = 'image/png'
+
         try:
             attempt.aadhaar_capture_url = blob_storage.upload_photo(
-                attempt.attempt_id, 'id_photo', id_photo_bytes, id_photo.content_type,
+                attempt.attempt_id, 'id_photo', id_photo_bytes, id_photo_content_type,
             )
         except Exception:
             logger.exception(

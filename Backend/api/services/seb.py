@@ -92,6 +92,19 @@ def build_config(invitation):
         # the upload file picker together ("Allow user to select custom download/upload
         # directory"), which matches exactly what was observed.
         'allowCustomDownloadLocation': True,
+        # Where that dialog OPENS. allowCustomDownloadLocation above is what permits browsing
+        # away from this folder at all; this only decides the starting point - and an empty
+        # value (the default) starts inside the Downloads folder specifically, which is what a
+        # candidate hits when their Aadhaar scan is in Pictures, on the Desktop, or anywhere
+        # else. Starting at the user's profile root puts Desktop, Documents, Downloads and
+        # Pictures all one click away instead of one level up from Downloads.
+        #
+        # %USERPROFILE% rather than a literal path: SEB resolves Windows environment variables
+        # here (the official SebClient.seb ships 'Desktop' in this key the same way), so the
+        # config stays portable across candidate machines and usernames. Windows-only key -
+        # downloadDirectoryOSX is the Mac equivalent and is deliberately not set, since the
+        # macOS file-dialog behaviour is governed by chooseFileToUploadPolicy instead.
+        'downloadDirectoryWin': '%USERPROFILE%',
     }
     key = _browser_exam_key(invitation)
     if key is not None:

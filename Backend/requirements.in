@@ -60,6 +60,13 @@ imageio-ffmpeg==0.6.0
 # wheel with no system libzbar install needed - same "wheel over system package" reasoning as
 # imageio-ffmpeg above, since App Service's code-deploy has no apt-get access either.
 opencv-python-headless==5.0.0.93
+# Renders an uploaded Aadhaar PDF to an image so the QR/OCR pipeline above can read it - most
+# candidates hold their Aadhaar as the official e-Aadhaar PDF, not a photo (services/
+# aadhaar_pdf.py). Self-contained wheels bundling PDFium itself, with no system libraries to
+# install - the same constraint that drove opencv-python-headless and imageio-ffmpeg, since the
+# App Service runtime has no apt-get. Unlike rapidocr-onnxruntime below, its metadata is clean,
+# so it installs normally as part of this file with no --no-deps handling.
+pypdfium2==5.13.0
 # RSA/X.509 signature verification for a UIDAI Secure QR. Already resolves into this tree
 # transitively via PyJWT[crypto] above; declared directly here for the same reason PyJWT[crypto]
 # itself is declared directly rather than relying on staying a transitive dependency.

@@ -133,12 +133,17 @@ export default function PhotoCapture({
       {!captured && allowUpload && (
         <div style={{ marginTop: 8 }}>
           <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 6 }}>
-            Or upload a scanned image instead — make sure the Aadhaar number and date of birth are
-            clearly visible in it.
+            Or upload your Aadhaar instead — an image (JPG/PNG) or the official e-Aadhaar PDF.
+            Make sure the Aadhaar number and date of birth are clearly visible. If your PDF is
+            password-protected, we will try to open it using your registered name and date of
+            birth.
           </div>
           <input
             type="file"
-            accept="image/jpeg,image/png"
+            // PDF included because the official e-Aadhaar download is one - see
+            // Backend/api/services/aadhaar_pdf.py, which renders page 1 to an image server-side
+            // so nothing downstream has to know a PDF was ever involved.
+            accept="image/jpeg,image/png,application/pdf"
             onClick={() => {
               // Must be armed before the native dialog opens (onClick fires first) - see
               // nativeDialogGuard.js. window regaining focus is the one signal common to every

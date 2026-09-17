@@ -21,6 +21,14 @@ canvas.toBlob(..., 'image/jpeg')), so an allowlist costs the legitimate flow not
 
 ALLOWED_IMAGE_CONTENT_TYPES = frozenset({'image/jpeg', 'image/png'})
 
+# The Aadhaar card upload additionally accepts a PDF, because that is the form the official
+# e-Aadhaar download actually takes - see services/aadhaar_pdf.py. It is converted to a PNG at
+# upload time and only the PNG is ever stored, so the "what content type is this blob served
+# back to staff with" concern this module exists for is unchanged: nothing stores a PDF.
+# Deliberately NOT extended to the face photo, which comes from the webcam and has no reason
+# to ever be a document.
+ALLOWED_DOCUMENT_CONTENT_TYPES = frozenset({'application/pdf'})
+
 # A single identity photo. Comfortably above a JPEG from any webcam at reasonable quality;
 # far below what would let one candidate meaningfully strain evidence storage.
 MAX_PHOTO_SIZE_BYTES = 5 * 1024 * 1024
@@ -30,7 +38,7 @@ class InvalidImageUpload(Exception):
     """Raised with a message safe to show the candidate directly."""
 
 
-def validate_identity_photo(uploaded_file, field_label):
+def validate_identity_photo(uploaded_file, field_label, allow_pdf=False):
     """Raises InvalidImageUpload if this upload cannot be trusted as an identity photo.
 
     Checks the claimed content type against an allowlist and enforces a size cap. This is a
@@ -39,11 +47,19 @@ def validate_identity_photo(uploaded_file, field_label):
     content type the blob is STORED with, not what the bytes look like). It does not guarantee
     the bytes are a genuine JPEG; that is a data-quality concern for the identity review the TA
     already performs manually, not a security boundary.
+
+    `allow_pdf` additionally accepts application/pdf - set only for the Aadhaar card upload,
+    whose caller converts the PDF to a PNG before anything is stored.
     """
+    allowed = ALLOWED_IMAGE_CONTENT_TYPES
+    if allow_pdf:
+        allowed = allowed | ALLOWED_DOCUMENT_CONTENT_TYPES
+
     content_type = (uploaded_file.content_type or '').split(';')[0].strip().lower()
-    if content_type not in ALLOWED_IMAGE_CONTENT_TYPES:
+    if content_type not in allowed:
         raise InvalidImageUpload(
-            f'{field_label} must be a JPEG or PNG image. Please retake the photo and try again.'
+            f'{field_label} must be a JPEG or PNG image{" or a PDF" if allow_pdf else ""}. '
+            f'Please retake the photo and try again.'
         )
     if uploaded_file.size > MAX_PHOTO_SIZE_BYTES:
         raise InvalidImageUpload(

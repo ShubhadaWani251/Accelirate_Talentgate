@@ -69,6 +69,16 @@ class TestBuildConfig:
 
         assert parsed['allowCustomDownloadLocation'] is True
 
+    def test_the_file_picker_opens_at_the_users_profile_not_inside_downloads(self, invitation):
+        """allowCustomDownloadLocation above permits browsing anywhere; this decides where the
+        dialog STARTS. Left unset, SEB starts inside the Downloads folder specifically - which
+        is the wrong place for a candidate whose Aadhaar scan is in Pictures or on the Desktop.
+        The profile root puts all of those one click away.
+        """
+        parsed = plistlib.loads(seb.build_config(invitation))
+
+        assert parsed['downloadDirectoryWin'] == '%USERPROFILE%'
+
     def test_browser_exam_key_is_deterministic_for_one_invitation(self, invitation, settings):
         settings.SEB_BROWSER_EXAM_KEY_SECRET = 'test-secret'
 
