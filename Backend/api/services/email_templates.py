@@ -128,9 +128,16 @@ NOTIFICATION_TEMPLATES = {
 }
 
 
-# Sent from Batch Details -> "Send Certification Link". The two UiPath course URLs are part of
-# the approved copy and are NOT TA-supplied - the only per-send value is the deadline, so a TA
-# can never accidentally email the wrong course link.
+# Sent from "Send Certification Link". The deadline and both course URLs are per-send values
+# supplied by the TA, so a different course can be assigned without a code change. The URLs
+# below are the defaults the modal pre-fills with, and what is used if a caller omits them;
+# views.candidates.CandidateCertificationView requires each supplied URL to be https:// so a
+# javascript:/data: URI can never be mailed to a candidate.
+DEFAULT_CERTIFICATION_COURSE_1_URL = 'https://academy.uipath.com/courses/introduction-to-automation'
+DEFAULT_CERTIFICATION_COURSE_2_URL = (
+    'https://academy.uipath.com/learning-plans/automation-developer-associate-training'
+)
+
 CERTIFICATION_TEMPLATE = {
     # No subject line was given for this one in the source document - supplied here to match
     # the house style of the others. Change freely; nothing depends on the wording.
@@ -142,11 +149,11 @@ CERTIFICATION_TEMPLATE = {
         'and share the proof within the given deadline.\n\n'
         'Course Details (Mandatory):\n\n'
         '1. Introduction to Automation Course | UiPath Academy\n'
-        '   https://academy.uipath.com/courses/introduction-to-automation\n'
+        '   {course_1_url}\n'
         '   - Platform: UiPath Academy\n'
         '   - Please share the PDF certificate/diploma after completion.\n\n'
         '2. Automation Developer Associate Training\n'
-        '   https://academy.uipath.com/learning-plans/automation-developer-associate-training\n'
+        '   {course_2_url}\n'
         '   - Platform: UiPath Academy\n'
         '   - Learning Plan: Automation Developer Associate Training\n'
         '   - Complete the first 11 modules\n'
@@ -308,10 +315,19 @@ def render_invitation_email(candidate, invitation, link, sender=None, seb_config
     )
 
 
-def render_certification_email(candidate, deadline):
-    """Resolve the fixed certification copy for one candidate with the TA's deadline."""
+def render_certification_email(candidate, deadline, course_1_url=None, course_2_url=None):
+    """Resolve the certification copy for one candidate with the TA's deadline and course links.
+
+    The two course URLs fall back to the module-level defaults when a caller omits them, so an
+    older caller (or a test) that passes only a deadline still renders the standard UiPath
+    pairing. The caller is responsible for rejecting a non-https URL before it reaches here -
+    see views.candidates.CandidateCertificationView.
+    """
     return CERTIFICATION_TEMPLATE['subject'], CERTIFICATION_TEMPLATE['body'].format(
-        name=candidate.full_name, deadline=deadline,
+        name=candidate.full_name,
+        deadline=deadline,
+        course_1_url=course_1_url or DEFAULT_CERTIFICATION_COURSE_1_URL,
+        course_2_url=course_2_url or DEFAULT_CERTIFICATION_COURSE_2_URL,
     )
 
 

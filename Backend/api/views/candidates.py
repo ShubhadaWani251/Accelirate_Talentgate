@@ -30,7 +30,9 @@ from api.services.access import dedupe_by_profile, visible_candidates_qs
 from api.services.audit import log_action
 from api.services.candidate_history import build_candidate_history
 from api.services.email_templates import (
-    CERTIFICATION_TEMPLATE, NOTIFICATION_TEMPLATES, render_certification_email, render_template,
+    CERTIFICATION_TEMPLATE, DEFAULT_CERTIFICATION_COURSE_1_URL,
+    DEFAULT_CERTIFICATION_COURSE_2_URL, NOTIFICATION_TEMPLATES, render_certification_email,
+    render_template,
 )
 from api.services.excel_upload import generate_candidates_workbook
 from api.services.invites import (
@@ -455,12 +457,11 @@ class CandidateNotifyView(APIView):
 
 @method_decorator(ratelimit(key=ratelimit_user_key, rate='10/m', method='POST', block=False), name='post')
 class CandidateCertificationView(APIView):
-    """Send the fixed certification email to a checked shortlist.
+    """Send the certification email to a checked shortlist.
 
-    The copy lives in email_templates.CERTIFICATION_TEMPLATE and is not editable from the UI.
-    The two UiPath course URLs are part of the approved wording, so the TA supplies only the
-    deadline - they cannot email the wrong course link, and the instructions can't drift
-    per-send.
+    The wording lives in email_templates.CERTIFICATION_TEMPLATE; the TA supplies the deadline
+    and the two course URLs per send, so a different course can be assigned without a code
+    change. Both URLs default to the standard UiPath pair when omitted.
     """
     permission_classes = [IsAdminOrTA]
 
@@ -468,6 +469,22 @@ class CandidateCertificationView(APIView):
     # TA may legitimately write "5 March 2026" or "Friday, 5 March (EOD)". It's rendered into
     # the email verbatim, so it's length-capped and newline-stripped rather than parsed.
     MAX_DEADLINE_LENGTH = 80
+
+    # Course URLs are TA-supplied and land in an email sent to candidates, so they are held to
+    # https:// specifically - that rejects javascript:/data: URIs (which some mail clients will
+    # render as a clickable link) and plain http, which would send candidates over cleartext.
+    MAX_COURSE_URL_LENGTH = 500
+
+    def _clean_course_url(self, raw, label):
+        """Returns (url_or_None, error_or_None). None means "use the template default"."""
+        url = (raw or '').strip()
+        if not url:
+            return None, None
+        if len(url) > self.MAX_COURSE_URL_LENGTH:
+            return None, f'{label} is too long (max {self.MAX_COURSE_URL_LENGTH} characters).'
+        if not url.lower().startswith('https://'):
+            return None, f'{label} must be a full https:// link.'
+        return url, None
 
     def post(self, request):
         if getattr(request, 'limited', False):
@@ -490,6 +507,15 @@ class CandidateCertificationView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        course_1_url, error = self._clean_course_url(
+            request.data.get('course_1_url'), 'The first course link')
+        if error:
+            return Response({'detail': error}, status=status.HTTP_400_BAD_REQUEST)
+        course_2_url, error = self._clean_course_url(
+            request.data.get('course_2_url'), 'The second course link')
+        if error:
+            return Response({'detail': error}, status=status.HTTP_400_BAD_REQUEST)
+
         candidates = list(visible_candidates_qs(request.user).filter(candidate_id__in=candidate_ids))
         if not candidates:
             return Response({'detail': 'No matching candidates found.'},
@@ -506,11 +532,16 @@ class CandidateCertificationView(APIView):
         subject = CERTIFICATION_TEMPLATE['subject']
         send_notification_emails(
             sendable, subject,
-            lambda c: render_certification_email(c, deadline)[1],
+            lambda c: render_certification_email(c, deadline, course_1_url, course_2_url)[1],
         )
         for candidate in sendable:
+            # The course URLs are recorded on the audit entry because they are now per-send and
+            # candidate-facing - "which link did we actually mail this person" has to be
+            # answerable after the fact, not inferred from whatever the template says today.
             log_action(request, request.user, 'certification_sent', 'candidate', candidate.candidate_id,
-                       details={'subject': subject})
+                       details={'subject': subject,
+                                'course_1_url': course_1_url or DEFAULT_CERTIFICATION_COURSE_1_URL,
+                                'course_2_url': course_2_url or DEFAULT_CERTIFICATION_COURSE_2_URL})
 
         detail = f'Certification links queued for {len(sendable)} candidate(s).'
         if skipped:

@@ -54,13 +54,16 @@ export const notifyCandidates = (candidateIds, { template, message, subject } = 
     .post('/candidates/notify/', { candidate_ids: candidateIds, template, message, subject })
     .then((r) => r.data);
 
-// The certification copy is fixed server-side - only the two links travel from the UI.
-// The two UiPath course links are part of the approved copy server-side, so the only
-// per-send value is the completion deadline.
-export const sendCertificationEmail = (candidateIds, { deadline }) =>
+// The surrounding wording is fixed server-side; the deadline and the two course URLs are
+// per-send values. Omitting either URL makes the server fall back to its own default UiPath
+// link, and it rejects anything that isn't https://.
+export const sendCertificationEmail = (candidateIds, { deadline, course1Url, course2Url }) =>
   axiosClient
     .post('/candidates/send-certification/', {
-      candidate_ids: candidateIds, deadline,
+      candidate_ids: candidateIds,
+      deadline,
+      course_1_url: course1Url,
+      course_2_url: course2Url,
     })
     .then((r) => r.data);
 

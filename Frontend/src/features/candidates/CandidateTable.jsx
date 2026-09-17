@@ -40,9 +40,9 @@ export default function CandidateTable({
           <input type="checkbox" checked={selected.size === candidates.length && candidates.length > 0} onChange={onToggleSelectAll} />
           <b>Select All</b>
         </label>
-        {/* Batch Details passes this; All Candidates deliberately doesn't - a new link is
-            issued in the context of the batch that owns it. Sends a genuinely NEW token, so it
-            also covers candidates whose original link expired. */}
+        {/* Passed by both Batch Details and All Candidates. Sends a genuinely NEW token, so it
+            also covers candidates whose original link expired. Still prop-gated rather than
+            always-on, so a future caller can render this table without the email actions. */}
         {onOpenInvite && (
           <button className="btn" onClick={requireSelection(onOpenInvite)}>
             📧 Send New Invite Link ({selected.size})
@@ -51,8 +51,8 @@ export default function CandidateTable({
         <button className="btn" onClick={requireSelection(onOpenNotify)}>
           ✉ Send Notification Email ({selected.size})
         </button>
-        {/* Batch Details passes this; All Candidates deliberately doesn't - certification is
-            sent per-batch once its results are in. */}
+        {/* Passed by both Batch Details and All Candidates - a shortlist worth certifying is
+            often assembled across batches, not just within one. */}
         {onOpenCertification && (
           <button className="btn" onClick={requireSelection(onOpenCertification)}>
             🎓 Send Certification Link ({selected.size})

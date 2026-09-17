@@ -8,10 +8,13 @@ import { EMPTY_CANDIDATE_FILTERS } from '../../features/candidates/candidateFilt
 import CandidateTable from '../../features/candidates/CandidateTable';
 import EditCandidateModal from '../../features/candidates/EditCandidateModal';
 import NotifyModal from '../../features/candidates/NotifyModal';
+import CertificationModal from '../../features/candidates/CertificationModal';
 import ExportModal from '../../features/candidates/ExportModal';
 import PaginationControls from '../../components/common/PaginationControls';
 import { ListPageSkeleton } from '../../components/loading/Skeleton';
+import { ButtonSpinner } from '../../components/loading/Spinner';
 import { extractErrorMessage } from '../../utils/passwordSchema';
+import { fromDatetimeLocalValue } from '../../utils/datetime';
 
 const EMPTY_FILTERS = EMPTY_CANDIDATE_FILTERS;
 
@@ -32,6 +35,14 @@ export default function AllCandidates() {
   const [editingCandidate, setEditingCandidate] = useState(null);
   const [notifyOpen, setNotifyOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [certificationOpen, setCertificationOpen] = useState(false);
+  // Re-invite from here always carries its own explicit window rather than inheriting a
+  // batch's: this page spans every batch, so the selection can legitimately contain candidates
+  // from several of them at once and there is no single batch window to fall back to.
+  const [inviteConfirmOpen, setInviteConfirmOpen] = useState(false);
+  const [invitesSending, setInvitesSending] = useState(false);
+  const [linkValidFrom, setLinkValidFrom] = useState('');
+  const [linkValidUntil, setLinkValidUntil] = useState('');
 
   useEffect(() => {
     // page_size covers every realistic batch count in one page - this dropdown needs all of
@@ -86,6 +97,35 @@ export default function AllCandidates() {
     refresh(EMPTY_FILTERS, 1);
   }
 
+  // Emails every selected candidate a brand-new assessment link. Confirmed first because it
+  // invalidates nothing but does mean the link they were originally told about is no longer
+  // the one to use.
+  async function handleSendInvites() {
+    if (!linkValidFrom || !linkValidUntil) {
+      toast.error('Both Link Valid From and Link Valid Until are required.');
+      return;
+    }
+    if (linkValidUntil <= linkValidFrom) {
+      toast.error('Link Valid Until must be after Link Valid From.');
+      return;
+    }
+    setInvitesSending(true);
+    try {
+      const res = await candidateApi.resendInvitesBulk(Array.from(selected), {
+        link_valid_from: fromDatetimeLocalValue(linkValidFrom),
+        link_valid_until: fromDatetimeLocalValue(linkValidUntil),
+      });
+      toast.success(res.detail);
+      setInviteConfirmOpen(false);
+      setSelected(new Set());
+      refresh();
+    } catch (err) {
+      toast.error(extractErrorMessage(err, ['link_valid_from', 'link_valid_until']));
+    } finally {
+      setInvitesSending(false);
+    }
+  }
+
   function toggleRow(id) {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -133,6 +173,8 @@ export default function AllCandidates() {
         onEdit={setEditingCandidate}
         onOpenNotify={() => setNotifyOpen(true)}
         onOpenExport={() => setExportOpen(true)}
+        onOpenInvite={() => setInviteConfirmOpen(true)}
+        onOpenCertification={() => setCertificationOpen(true)}
       />
 
       <PaginationControls
@@ -159,6 +201,51 @@ export default function AllCandidates() {
           onClose={() => setNotifyOpen(false)}
           onSent={() => { setNotifyOpen(false); setSelected(new Set()); }}
         />
+      )}
+
+      {certificationOpen && (
+        <CertificationModal
+          candidateIds={Array.from(selected)}
+          onClose={() => setCertificationOpen(false)}
+          onSent={() => { setCertificationOpen(false); setSelected(new Set()); }}
+        />
+      )}
+
+      {inviteConfirmOpen && (
+        <div className="modal-overlay">
+          <div className="modal-box">
+            <h4>Send a new invite link?</h4>
+            <p>
+              {selected.size} selected candidate(s) will be emailed a <b>new</b> assessment
+              link. Any link they were sent previously will no longer be the one they should
+              use. Candidates who have already submitted or been terminated cannot retake the
+              assessment.
+            </p>
+            {/* This window applies only to the invitations sent here, not to any batch's own
+                dates - the selection can span multiple batches from this page. */}
+            <div className="grid-2">
+              <div className="field">
+                <label htmlFor="all_link_valid_from">Link Valid From</label>
+                <input id="all_link_valid_from" type="datetime-local" value={linkValidFrom}
+                       onChange={(e) => setLinkValidFrom(e.target.value)} />
+              </div>
+              <div className="field">
+                <label htmlFor="all_link_valid_until">Link Valid Until</label>
+                <input id="all_link_valid_until" type="datetime-local" value={linkValidUntil}
+                       onChange={(e) => setLinkValidUntil(e.target.value)} />
+              </div>
+            </div>
+            <div className="btn-row">
+              <button className="btn" type="button" onClick={() => setInviteConfirmOpen(false)}>
+                Cancel
+              </button>
+              <button className="btn primary" type="button" disabled={invitesSending}
+                      onClick={handleSendInvites}>
+                <ButtonSpinner loading={invitesSending}>Send New Link</ButtonSpinner>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {exportOpen && <ExportModal onClose={() => setExportOpen(false)} />}
