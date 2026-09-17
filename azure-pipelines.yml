@@ -68,6 +68,19 @@ stages:
 
           - script: |
               set -e
+              DJANGO_SETTINGS_MODULE=config.settings_test python manage.py makemigrations --check --dry-run
+            workingDirectory: Backend
+            displayName: Guard against uncommitted model changes
+            # The suite runs with --no-migrations (migration 0013 contains PostgreSQL-only SQL
+            # that cannot run on SQLite), so it builds the schema straight from the models and
+            # never exercises the migration history. That leaves exactly one way for a model
+            # change to reach main without its migration: nobody notices. This check is what
+            # notices - it fails the build if models/ and migrations/ have drifted apart.
+            # settings_test is used because it is self-contained (its own SECRET_KEY, in-memory
+            # SQLite), so this needs no database and no secrets in CI.
+
+          - script: |
+              set -e
               python -m pytest -q --junitxml=$(Build.ArtifactStagingDirectory)/pytest.xml
             workingDirectory: Backend
             displayName: Run pytest

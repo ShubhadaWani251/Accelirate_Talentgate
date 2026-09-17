@@ -84,8 +84,13 @@ schedule 30 terminate_stale_attempts &
 # cadence just bounds how long after an exam ends before its MP4 copy is ready.
 schedule 600 transcode_recordings &
 # Same 10-minute cadence as transcode_recordings - no candidate is waiting on this one in real
-# time either, and it's a no-op every tick while AADHAAR_VERIFICATION_ENABLED stays off.
+# time either. It is the deferred safety net for a capture whose inline OCR was skipped because
+# no concurrency slot was free, so most ticks find nothing to do.
 schedule 600 verify_aadhaar_ocr_fallback &
+# Daily. Deletes denylist rows for refresh tokens that have already expired on their own - the
+# table otherwise grows one row per logout, forever. Nothing breaks if this lags, so it gets the
+# longest interval here by a wide margin.
+schedule 86400 purge_expired_revoked_tokens &
 
 echo "==> Starting gunicorn"
 # --config picks up gunicorn.conf.py, which binds to $PORT. App Service sets PORT and expects the
