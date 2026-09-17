@@ -333,7 +333,7 @@ class ExamIdentityAadhaarCaptureView(APIView):
         update_fields = ['aadhaar_capture_url']
         # Purely informational (how many tries it took, visible to a TA) - retries are unlimited
         # either way, so nothing reads this count to decide whether to keep allowing them. Only
-        # counted while the feature is actually on, so today's default (off) never touches it.
+        # counted while the feature is on, which it is by default in every environment.
         if settings.AADHAAR_VERIFICATION_ENABLED:
             attempt.aadhaar_verification_attempts += 1
             update_fields.append('aadhaar_verification_attempts')
@@ -419,8 +419,8 @@ class ExamIdentityCaptureView(APIView):
 
         # The real enforcement point for the hard-block policy: a candidate who bypassed the
         # frontend entirely (calling this endpoint directly) is still refused here, not just
-        # nudged away in the UI. Only checked while the feature is actually on, so today's
-        # default (off) leaves this exactly as permissive as it was before this policy existed.
+        # nudged away in the UI. Only checked while the feature is on - which it is by default
+        # in every environment, so this gate is live unless someone has explicitly disabled it.
         if (settings.AADHAAR_VERIFICATION_ENABLED
                 and attempt.aadhaar_verification_status != ExamAttempt.AadhaarVerificationStatus.MATCH):
             return Response(

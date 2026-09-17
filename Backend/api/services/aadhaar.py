@@ -1,7 +1,8 @@
 """Automated Aadhaar identity verification for the exam-time identity-capture flow.
 
-Gated end-to-end by settings.AADHAAR_VERIFICATION_ENABLED (default off) - nothing in this module
-does anything until that flag is explicitly turned on. Once it IS on, this deliberately gates exam
+Gated end-to-end by settings.AADHAAR_VERIFICATION_ENABLED, which defaults to ON in every
+environment - the flag exists as an emergency kill switch, not as a normal opt-in, so in practice
+this module is always live. Turning it off is the exception. While it IS on, this deliberately gates exam
 start: identity capture only completes once one of verify_identity_photo / try_ocr_inline /
 run_ocr_fallback has recorded a MATCH (see views.exam.ExamIdentityCaptureView's own check), and a
 candidate who hasn't matched yet retries the Aadhaar photo - as many times as it takes - rather

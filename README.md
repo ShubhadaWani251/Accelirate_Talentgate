@@ -16,6 +16,12 @@ email verification, identity capture, webcam proctoring with violation handling,
 attempt itself, scoring, and the result and termination screens. The endpoints are in
 `Backend/api/views/exam.py` and the screens in `Frontend/src/pages/exam/`.
 
+Two things about that flow are worth knowing before demoing it. **Safe Exam Browser is
+mandatory** - `ExamSebChoice.jsx` has no "continue in a regular browser" option, so a candidate
+(or a demo machine) needs SEB installed beforehand. And **Aadhaar verification gates exam
+start**: `AADHAAR_VERIFICATION_ENABLED` defaults to on, and identity capture will not complete
+until the photographed card's last 4 digits and date of birth match the candidate's record.
+
 ## Architecture
 
 Two independently deployable apps in one repo:
@@ -181,10 +187,11 @@ and a comment on what each one does. Highlights:
 
 ### Scheduled jobs (required in any real deployment)
 
-Four commands have to run on a timer. None is optional: without them, abandoned exam attempts
-sit `in_progress` forever, **invitation emails are never sent at all**, a candidate whose
-browser or Safe Exam Browser closes mid-exam is never flagged as such, and a TA whose
-browser/network won't handle a session recording's native WebM never gets an MP4 copy.
+Six commands run on a timer, and the first four are not optional: without them, abandoned exam
+attempts sit `in_progress` forever, **invitation emails are never sent at all**, a candidate
+whose browser or Safe Exam Browser closes mid-exam is never flagged as such, and a TA whose
+browser/network won't handle a session recording's native WebM never gets an MP4 copy. The last
+two are housekeeping - nothing breaks immediately if they lag.
 
 There is no Celery/broker-based task queue - `process_email_queue` is a DB-backed one instead:
 creating an Invitation (sending an invite, or re-sending one) only sets `email_status=QUEUED` on
@@ -200,8 +207,10 @@ See **Deployment** below for ready-made configurations.
 | `python manage.py process_email_queue` | every 1 min | Sends every queued invitation email - the only thing that does. Not a backup job like the other two; a candidate is waiting on this for their assessment link. Paced by `INVITE_SEND_DELAY_SECONDS` between sends, and stops auto-retrying a row past `INVITE_MAX_RETRY_ATTEMPTS` failures (`--include-failed` opts a run into retrying failures at all; `--ignore-retry-limit` overrides the cap for a deliberate one-off push). Skips rows whose link is already opened or expired. |
 | `python manage.py terminate_stale_attempts` | every 30-60 sec | Terminates an in-progress attempt whose browser/SEB has gone silent (no authenticated request - see `ExamAttempt.last_activity_at`) for longer than `--threshold-seconds` (default 60), as distinct from one that simply ran out of time (which `finalize_expired_attempts` above already owns). `--dry-run` reports what would be terminated without changing anything. |
 | `python manage.py transcode_recordings` | every 5-10 min | Converts a finished attempt's WebM session recording to MP4 (`services/video_transcode.py`, via the `imageio-ffmpeg`-bundled static binary - no system ffmpeg install needed) for a TA whose browser/network won't play WebM comfortably. Only ever attempts `submitted`/`terminated` attempts, never `in_progress` ones (the WebM is still being written to). Caps automatic retries at `MAX_TRANSCODE_ATTEMPTS` (3) per recording. `--dry-run` reports what would be converted; `--max` bounds one run's batch size. |
+| `python manage.py verify_aadhaar_ocr_fallback` | every 5-10 min | The deferred safety net for Aadhaar verification: re-runs OCR on captures still `pending` because the inline attempt was skipped when no concurrency slot was free (`AADHAAR_OCR_MAX_CONCURRENT`). Caps automatic retries at 3 per attempt, and processes at most `--max` (default 20) rows per run. |
+| `python manage.py purge_expired_revoked_tokens` | daily | Deletes refresh-token denylist rows whose token has already expired on its own. Without it the table grows one row per logout and per token refresh, forever. `--dry-run` reports the count without deleting. |
 
-All four are safe to run more often than suggested - each is idempotent and does nothing when
+All six are safe to run more often than suggested - each is idempotent and does nothing when
 there is nothing to process. `process_email_queue` specifically should not run LESS often than
 every minute or two - unlike the others, nothing else stands in for it if it lags.
 `terminate_stale_attempts` should not run much less often than its own threshold either, or a
@@ -217,7 +226,7 @@ explicitly from the Drafts list in the UI (`services/draft_expiry.delete_draft_b
 cd Backend && python -m pytest
 ```
 
-212 tests, a few seconds. `pytest.ini` and `Backend/api/tests/` hold the suite; it covers
+500 tests, well under a minute. `pytest.ini` and `Backend/api/tests/` hold the suite; it covers
 the invariants that are silent when they break rather than trying for line coverage:
 
 | File | What it pins down |
@@ -328,12 +337,13 @@ deploy stage's branch condition skips them, so the gate is never even reached.
 
 #### Migration state: `main` and the database are in step
 
-Checked on 2026-08-25: `main` contains all 17 `api` migrations, through
-`0017_batch_college_name_optional`, and `makemigrations --check` reports no uncommitted model
-changes. The server was recorded as having all 17 applied on 2026-08-24, so **a deploy applies none
-of them**. That includes `0013_candidate_aadhaar_last4`, whose `UPDATE candidates SET
-aadhaar_number = RIGHT(...)` is deliberately irreversible — it has already run, so there are no
-full Aadhaar numbers left to lose.
+Checked on 2026-09-17: `main` contains all 30 `api` migrations, through
+`0030_examattempt_aadhaar_verification`, and `makemigrations --check` reports no uncommitted
+model changes (this check now runs in CI on every push — see `azure-pipelines.yml`). Verify what
+the *server* has applied with `showmigrations api` against it before deploying, since that side
+is not checked automatically. `0013_candidate_aadhaar_last4`, whose `UPDATE candidates SET
+aadhaar_number = RIGHT(...)` is deliberately irreversible, ran long ago — there are no full
+Aadhaar numbers left to lose.
 
 **Never deploy a branch whose migrations stop short of the database.** `migrate` is a no-op against
 history rows whose files it cannot see, so nothing warns you at deploy time: the schema has

@@ -48,9 +48,10 @@ class ExamAttempt(models.Model):
         OCR = 'ocr', 'OCR Fallback'
 
     # Automated reading of the id_photo captured above - see services/aadhaar.py. Gated
-    # end-to-end by settings.AADHAAR_VERIFICATION_ENABLED (default off); this never blocks or
-    # delays exam start regardless of outcome, same guarantee services.seb.record_seb_usage
-    # already gives for SEB verification.
+    # end-to-end by settings.AADHAAR_VERIFICATION_ENABLED, which defaults to ON (it is an
+    # emergency kill switch, not an opt-in). While it is on, a status other than MATCH DOES
+    # block exam start - see views.exam.ExamIdentityCaptureView. That is deliberately unlike
+    # services.seb.record_seb_usage, which never gates anything.
     aadhaar_verification_status = models.CharField(
         max_length=17, choices=AadhaarVerificationStatus.choices,
         default=AadhaarVerificationStatus.PENDING,
