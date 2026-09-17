@@ -4,7 +4,6 @@ import * as examApi from '../../api/examApi';
 import { useExamSession } from '../../features/exam/examSessionContext';
 import { formatDateTime } from '../../utils/datetime';
 import BrandHeader from '../../components/layout/BrandHeader';
-import BrandFooter from '../../components/layout/BrandFooter';
 
 const DEAD_END_COPY = {
   invalid: {
@@ -143,7 +142,6 @@ export default function ExamVerify() {
           )}
         </div>
       </div>
-      <BrandFooter roleCode="candidate" />
     </div>
   );
 }

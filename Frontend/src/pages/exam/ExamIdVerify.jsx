@@ -8,7 +8,6 @@ import useLiveFaceCheck from '../../features/exam/webcam/useLiveFaceCheck';
 import { computeFaceEmbedding } from '../../features/exam/proctoring/faceEmbedding';
 import useDisplayGuard from '../../features/exam/proctoring/useDisplayGuard';
 import BrandHeader from '../../components/layout/BrandHeader';
-import BrandFooter from '../../components/layout/BrandFooter';
 import { ButtonSpinner } from '../../components/loading/Spinner';
 
 // Dev-only convenience for a test machine with no working webcam (see useCameraStream.js) -
@@ -300,7 +299,6 @@ export default function ExamIdVerify() {
           </button>
         </div>
       </div>
-      <BrandFooter roleCode="candidate" />
     </div>
     </RequireFullscreen>
   );

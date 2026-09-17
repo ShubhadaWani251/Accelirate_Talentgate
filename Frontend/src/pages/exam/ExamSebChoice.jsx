@@ -4,7 +4,6 @@ import { useExamSession } from '../../features/exam/examSessionContext';
 import { isRunningInSeb } from '../../features/exam/seb/sebDetection';
 import { configUrl, configZipUrl, sebLaunchUrl } from '../../features/exam/seb/sebLaunch';
 import BrandHeader from '../../components/layout/BrandHeader';
-import BrandFooter from '../../components/layout/BrandFooter';
 
 const SEB_DOWNLOAD_URL = 'https://safeexambrowser.org/download_en.html';
 
@@ -72,7 +71,6 @@ export default function ExamSebChoice() {
             </button>
           </div>
         </div>
-        <BrandFooter roleCode="candidate" />
       </div>
     );
   }
@@ -120,7 +118,6 @@ export default function ExamSebChoice() {
           </button>
         </div>
       </div>
-      <BrandFooter roleCode="candidate" />
     </div>
   );
 }

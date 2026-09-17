@@ -3,7 +3,6 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useExamSession } from '../../features/exam/examSessionContext';
 import RequireFullscreen from '../../features/exam/proctoring/RequireFullscreen';
 import BrandHeader from '../../components/layout/BrandHeader';
-import BrandFooter from '../../components/layout/BrandFooter';
 
 export default function ExamInstructions() {
   const { token } = useParams();
@@ -91,7 +90,6 @@ export default function ExamInstructions() {
           </button>
         </div>
       </div>
-      <BrandFooter roleCode="candidate" />
     </div>
     </RequireFullscreen>
   );

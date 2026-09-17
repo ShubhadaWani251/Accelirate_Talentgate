@@ -5,7 +5,6 @@ import useCameraStream from '../../features/exam/webcam/useCameraStream';
 import { checkCameraNotBlocked } from '../../features/exam/webcam/frameCheck';
 import { getVisionModels } from '../../features/exam/proctoring/visionModels';
 import BrandHeader from '../../components/layout/BrandHeader';
-import BrandFooter from '../../components/layout/BrandFooter';
 
 function stopStream(stream) {
   stream?.getTracks?.().forEach((t) => t.stop());
@@ -81,7 +80,6 @@ export default function ExamCameraPermission() {
             </button>
           </div>
         </div>
-        <BrandFooter roleCode="candidate" />
       </div>
     );
   }
@@ -112,7 +110,6 @@ export default function ExamCameraPermission() {
           </button>
         </div>
       </div>
-      <BrandFooter roleCode="candidate" />
     </div>
   );
 }

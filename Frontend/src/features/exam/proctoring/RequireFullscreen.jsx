@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { FULLSCREEN_SUPPORTED, enterFullscreen, isFullscreen } from './fullscreen';
 import { isNativeDialogOpen } from './nativeDialogGuard';
 import BrandHeader from '../../../components/layout/BrandHeader';
-import BrandFooter from '../../../components/layout/BrandFooter';
 
 // Browsers drop full-screen mode on their own the moment a permission prompt (camera/mic) needs
 // to show - real, deliberate browser security behavior to stop a full-screen page from spoofing
@@ -63,7 +62,6 @@ export default function RequireFullscreen({ children }) {
           </button>
         </div>
       </div>
-      <BrandFooter roleCode="candidate" />
     </div>
   );
 }

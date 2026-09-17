@@ -3,7 +3,6 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useExamSession } from '../../features/exam/examSessionContext';
 import { FULLSCREEN_SUPPORTED, enterFullscreen } from '../../features/exam/proctoring/fullscreen';
 import BrandHeader from '../../components/layout/BrandHeader';
-import BrandFooter from '../../components/layout/BrandFooter';
 
 // Full-screen has to start from a real user gesture (requestFullscreen() is rejected otherwise),
 // so this screen exists specifically to be that click.
@@ -62,7 +61,6 @@ export default function ExamFullscreenGate() {
           </button>
         </div>
       </div>
-      <BrandFooter roleCode="candidate" />
     </div>
   );
 }
