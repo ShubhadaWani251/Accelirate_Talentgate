@@ -101,6 +101,9 @@ TERMINATION_MESSAGES = {
     TerminationReason.FULLSCREEN_NOT_ENTERED:
         'Your assessment was ended because full-screen mode was not entered within 30 seconds '
         'of reaching this step.',
+    # Legacy - no longer produced by any code path (the acknowledgment deadline was removed; see
+    # the comment above _WARNING_CAUSES). Retained so attempts terminated under the old rule
+    # still show the reason they were actually ended for.
     TerminationReason.WARNING_NOT_ACKNOWLEDGED:
         'Your assessment was ended because you did not return to the assessment within 10 '
         'seconds of a warning being shown.',
@@ -139,6 +142,7 @@ TERMINATION_LABELS = {
     TerminationReason.SYSTEM_ISSUE: 'Technical issue - camera/microphone lost',
     TerminationReason.LINK_REOPENED: 'Assessment link reopened after starting (closed tab/lost session)',
     TerminationReason.FULLSCREEN_NOT_ENTERED: 'Did not enter full-screen within 30 seconds',
+    # Legacy - see TERMINATION_MESSAGES above.
     TerminationReason.WARNING_NOT_ACKNOWLEDGED: 'Did not return within 10 seconds of a warning',
     TerminationReason.WINDOW_CLOSED: 'Safe Exam Browser / assessment window closed mid-exam',
     TerminationReason.FACE_NOT_VISIBLE: 'Face not visible to camera for an extended period',
@@ -233,12 +237,18 @@ WARNABLE_REASONS = {
 # in the browser, so reloading the page - or clearing storage - cannot hand out a fresh warning.
 MAX_WARNINGS = 3
 
-# A warning that just sits there unacknowledged is functionally the same risk as ignoring it
-# outright - the candidate could be reading notes, talking to someone, or looking something up
-# for as long as the modal stays open, all while the exam timer keeps running (see
-# ExamAttemptPage's warning modal). Giving that its own short, hard deadline closes the gap
-# without changing what the three real warnings above are for.
-WARNING_RESPONSE_SECONDS = 10
+# There is deliberately NO deadline for acknowledging a warning. An earlier version gave the
+# candidate 10 seconds to dismiss the modal and ended the attempt automatically otherwise, on the
+# reasoning that an unacknowledged modal is as exploitable as ignoring the warning outright. That
+# was removed: the warning text is several sentences long and names a specific cause, remedy and
+# consequence, and 10 seconds is not enough to READ it - a candidate who paused to understand
+# what they had done wrong lost their assessment for doing exactly the right thing. The exam
+# timer keeps running while the modal is open, which is the real cost of lingering, and the three
+# warnings above remain the actual deterrent.
+#
+# TerminationReason.WARNING_NOT_ACKNOWLEDGED is kept (not deleted) so historical attempts already
+# terminated under the old rule still render a meaningful reason on the TA's screen. Nothing
+# reports it any more.
 
 _WARNING_CAUSES = {
     TerminationReason.TAB_SWITCH:
@@ -309,12 +319,7 @@ def warning_message(reason_code, warning_number, max_warnings):
             'This was your final warning - the next violation will end your assessment '
             'immediately.'
         )
-    return (
-        f'Warning {warning_number} of {max_warnings}: {cause}. {remedy}. {consequence} '
-        f'You must also return to the assessment within {WARNING_RESPONSE_SECONDS} seconds of '
-        f'this warning, or it will be ended automatically - your answers submitted as they '
-        f'stand, and it cannot be resumed.'
-    )
+    return f'Warning {warning_number} of {max_warnings}: {cause}. {remedy}. {consequence}'
 
 
 def warnings_used(attempt):

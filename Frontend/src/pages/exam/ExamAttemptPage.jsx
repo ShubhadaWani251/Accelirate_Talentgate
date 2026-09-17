@@ -28,11 +28,6 @@ import ExamTerminated from './ExamTerminated';
 
 const OPTIONS = ['A', 'B', 'C', 'D'];
 const OPTION_LABEL_KEY = { A: 'option_a', B: 'option_b', C: 'option_c', D: 'option_d' };
-// Must match WARNING_RESPONSE_SECONDS in Backend/api/services/exam_session.py - the warning
-// modal's own copy (warning.detail, from the server) states this same number, so the two
-// cannot drift apart without the countdown contradicting what the candidate was just told.
-const WARNING_RESPONSE_SECONDS = 10;
-
 function flattenAnswers(sections) {
   const answers = {};
   sections.forEach((section) => {
@@ -75,9 +70,6 @@ export default function ExamAttemptPage() {
   // null. Purely for display - the authoritative count lives on the server, so this is not what
   // stops a further warning being issued.
   const [warning, setWarning] = useState(null);
-  // Counts down while a warning is showing - see the effect below. Purely for display; the
-  // actual deadline is the effect's own setTimeout, not this number reaching 0.
-  const [warningSecondsLeft, setWarningSecondsLeft] = useState(WARNING_RESPONSE_SECONDS);
   // Re-arm counters for the guards' once-only latches. Two of them, because the window guards
   // and the full-screen guard have to come back at different moments - see onViolation and
   // acknowledgeWarning.
@@ -191,8 +183,8 @@ export default function ExamAttemptPage() {
         .reportViolation(state.reason, state.extra)
         .then((data) => {
           // The SERVER decides warn-vs-terminate; this only renders the outcome. Leaving the
-          // exam window earns one warning, counted in the database so a reload can't earn
-          // another - see exam_session.record_violation.
+          // exam window earns a warning from a shared budget of three, counted in the database
+          // so a reload can't earn another - see exam_session.record_violation.
           if (data.action === 'warned') {
             setWarning({ detail: data.detail, used: data.warnings_used,
                          allowed: data.warnings_allowed });
@@ -252,41 +244,12 @@ export default function ExamAttemptPage() {
     setFullscreenGuardGen((g) => g + 1);
   }, []);
 
-  // A warning sitting on screen unacknowledged is its own risk - the candidate could be reading
-  // notes or talking to someone for as long as it stays open, all while the exam timer keeps
-  // running. Keyed on `warning` itself (not violationRef) so acknowledgeWarning's setWarning(null)
-  // is what stops this - same shape as the 30-second full-screen grace period below, one clock
-  // per gate. Ending here reports a distinct reason (warning_not_acknowledged) rather than
-  // replaying whatever the original violation was, since the candidate's failure now is not
-  // responding, not the original trigger.
-  useEffect(() => {
-    if (!warning) return undefined;
-    setWarningSecondsLeft(WARNING_RESPONSE_SECONDS);
-    const interval = setInterval(() => {
-      setWarningSecondsLeft((s) => Math.max(0, s - 1));
-    }, 1000);
-    const timeout = setTimeout(() => {
-      examApi
-        .reportViolation('warning_not_acknowledged')
-        .then((data) => {
-          setWarning(null);
-          setTerminationMessage(data.detail);
-          setView('terminated');
-        })
-        .catch(() => {
-          setWarning(null);
-          setTerminationMessage(
-            'Your assessment was ended and could not be reported to the server. '
-            + 'Please contact the Staffing team.'
-          );
-          setView('terminated');
-        });
-    }, WARNING_RESPONSE_SECONDS * 1000);
-    return () => {
-      clearInterval(interval);
-      clearTimeout(timeout);
-    };
-  }, [warning]);
+  // There is deliberately no countdown on the warning modal. It used to end the attempt
+  // automatically if the candidate didn't dismiss it within 10 seconds, which is less time than
+  // it takes to read the warning - a candidate who stopped to understand what they had done
+  // wrong lost their assessment for it. The exam timer keeps running while the modal is open,
+  // so lingering already has a cost, and the three-warning budget is the real deterrent.
+  // See the matching comment in Backend/api/services/exam_session.py.
 
   const examActive = view === 'exam' && fullscreenReady && begun;
 
@@ -333,8 +296,8 @@ export default function ExamAttemptPage() {
   useExamLockdown(examActive, onViolation, windowGuardGen);
   useSessionRecorder(mediaStreamRef.current, examActive);
 
-  // A second display appearing mid-exam is treated the same way as leaving the window: one
-  // warning, then the attempt ends. It rides on the existing violation pipeline rather than
+  // A second display appearing mid-exam is treated the same way as leaving the window: it earns
+  // a warning from the shared budget. It rides on the existing violation pipeline rather than
   // having its own path, so the warning count is shared - a candidate cannot spend one warning
   // on a tab switch and another on a monitor.
   //
@@ -619,8 +582,9 @@ export default function ExamAttemptPage() {
             <h3>Enter Full-Screen to Begin</h3>
             <div className="auth-sub">
               The assessment runs in full-screen mode. Exiting full-screen, switching tabs or
-              leaving this window gives you one warning; the second time, your attempt ends
-              automatically. Every such event is logged — per the integrity rules shown earlier.
+              leaving this window earns a warning — you get up to three, after which the next
+              occurrence ends your attempt automatically. Every such event is logged — per the
+              integrity rules shown earlier.
             </div>
             <div className="auth-sub" style={{ fontWeight: 600,
                          color: fullscreenSecondsLeft <= 10 ? 'var(--brand-red)' : undefined }}>
@@ -869,10 +833,8 @@ export default function ExamAttemptPage() {
               Warning {warning.used} of {warning.allowed}. This has been recorded and is visible
               to the Staffing team. Your timer has continued to run.
             </p>
-            <p style={{ fontWeight: 600,
-                       color: warningSecondsLeft <= 3 ? 'var(--brand-red)' : undefined }}>
-              Return within {warningSecondsLeft} second{warningSecondsLeft === 1 ? '' : 's'}, or
-              your assessment will be ended automatically.
+            <p style={{ fontWeight: 600 }}>
+              Read this carefully, then return to your assessment. Your timer is still running.
             </p>
             <div className="btn-row">
               <button className="btn primary block" type="button" onClick={acknowledgeWarning}>

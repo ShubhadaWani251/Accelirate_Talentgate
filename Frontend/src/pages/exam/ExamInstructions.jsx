@@ -49,7 +49,7 @@ export default function ExamInstructions() {
               <li>Please keep your physical Aadhaar Card ready and within reach before proceeding — you'll be asked to photograph it, and the assessment cannot start until it is successfully verified. Show the <b>front side</b>, with your <b>Aadhaar number and date of birth</b> clearly visible and no glare. If it isn't read correctly, you can retake the photo as many times as needed</li>
               <li>Please start the assessment at least 30 minutes before your assessment window closes, to allow sufficient time to complete it</li>
               <li><b style={{ color: 'var(--brand-red)' }}>This assessment must be taken inside Safe Exam Browser (SEB)</b> - see the next step to launch it</li>
-              <li><b style={{ color: 'var(--brand-red)' }}>Your camera and microphone must stay on for the entire assessment</b> for identity verification and continuous proctoring. Switching your camera off, or covering it, is treated the same as leaving the window - one warning, then the attempt ends</li>
+              <li><b style={{ color: 'var(--brand-red)' }}>Your camera and microphone must stay on for the entire assessment</b> for identity verification and continuous proctoring. Switching your camera off, or covering it, is treated the same as leaving the window - it earns a warning from the same three-warning allowance</li>
               <li>Do not read questions aloud or talk during the assessment - sustained talking is detected and treated as a violation. Brief background noise is fine</li>
               <li>You're now in full-screen mode for the rest of this assessment</li>
               <li>Do not switch browser tabs, minimize, exit full-screen, or open other applications once the exam begins</li>
@@ -62,7 +62,7 @@ export default function ExamInstructions() {
               {/* Stated precisely, because a candidate who is told "one warning" for everything
                   would reasonably feel misled when a Print Screen ends the attempt outright.
                   The split is defined server-side in exam_session.WARNABLE_REASONS. */}
-              <li><b style={{ color: 'var(--brand-red)' }}>You get up to three warnings</b> for leaving the assessment window. After your third warning, the next occurrence ends your attempt immediately and your answers are submitted as they are. Each warning must also be acknowledged within <b style={{ color: 'var(--brand-red)' }}>10 seconds</b> — if you do not click back into the assessment in time, your attempt ends automatically even if you still have warnings left</li>
+              <li><b style={{ color: 'var(--brand-red)' }}>You get up to three warnings</b> for leaving the assessment window. After your third warning, the next occurrence ends your attempt immediately and your answers are submitted as they are. Take the time to read each warning — there is no time limit on dismissing it, but your exam timer keeps running while it is open</li>
               <li>Keyboard shortcuts like Print Screen, F12 or Ctrl+U end your attempt <b>immediately, with no warning</b></li>
               <li>Every such event is logged and shown to the Staffing team, with the specific reason shown to you too</li>
               {/* Stated explicitly because candidates routinely assume the opposite and leave

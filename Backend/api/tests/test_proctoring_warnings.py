@@ -182,16 +182,22 @@ class TestWarningMessageCountsDownAccurately:
         assert 'final warning' in detail
         assert 'warnings left' not in detail
 
-    def test_every_warning_states_the_response_deadline(self):
-        detail = exam_session.warning_message(TerminationReason.TAB_SWITCH, 1, 3)
-        assert f'{exam_session.WARNING_RESPONSE_SECONDS} seconds' in detail
+    def test_no_warning_imposes_a_deadline_for_acknowledging_it(self):
+        """The acknowledgment countdown was removed - the modal now waits indefinitely so the
+        candidate can actually read the warning. The text must not still threaten a deadline
+        that nothing enforces.
+        """
+        for number in (1, 2, 3):
+            detail = exam_session.warning_message(TerminationReason.TAB_SWITCH, number, 3)
+            assert 'seconds' not in detail
+            assert 'ended automatically' not in detail
 
 
 class TestWarningNotAcknowledged:
-    """The candidate's browser reports this itself once its own 10-second countdown on the
-    warning modal runs out - see ExamAttemptPage's warning-response effect. Independent of how
-    many of the three real warnings are left: ignoring a warning ends the attempt immediately
-    either way, since letting it slide would make the whole response deadline optional.
+    """LEGACY reason code. Nothing reports this any more - the 10-second acknowledgment deadline
+    was removed (see exam_session's comment above _WARNING_CAUSES). These tests pin the behavior
+    that still applies to attempts terminated under the old rule, and confirm the code path stays
+    intact so those historical rows keep rendering a meaningful reason.
     """
 
     def test_it_ends_the_attempt_even_with_warnings_still_available(self, attempt):

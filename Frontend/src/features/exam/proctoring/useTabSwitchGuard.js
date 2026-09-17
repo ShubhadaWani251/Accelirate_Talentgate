@@ -5,8 +5,8 @@ import { useEffect, useRef } from 'react';
 // onViolation receives the specific reason code ('tab_switch' vs 'window_blur') so the candidate
 // sees exactly what triggered it, not one generic message for both.
 //
-// This hook does NOT decide the consequence. Leaving the exam window earns one warning before
-// the attempt ends, and that count is held by the server (see exam_session.record_violation) -
+// This hook does NOT decide the consequence. Leaving the exam window earns a warning from a
+// shared three-warning budget, and that count is held by the server (see exam_session.record_violation) -
 // a browser-side counter would reset on reload. `rearmKey` is bumped by the caller after a
 // warning is acknowledged, which re-runs this effect and clears the once-only latch so the next
 // occurrence is reported too.

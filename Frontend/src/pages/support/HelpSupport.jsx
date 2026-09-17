@@ -33,9 +33,9 @@ export default function HelpSupport() {
               <br /><br />
               <b>Can I leave the assessment tab or window?</b><br />
               No. Once the assessment begins you must stay on that tab, in full-screen, for the
-              whole duration - switching tabs, minimizing, or exiting full-screen ends your
-              attempt after one warning. This is stated on the instructions screen before you
-              begin.
+              whole duration - switching tabs, minimizing, or exiting full-screen each earns a
+              warning. You get up to three; after the third, the next occurrence ends your
+              attempt. This is stated on the instructions screen before you begin.
               <br /><br />
               <b>My camera was flagged as off or covered.</b><br />
               Keep your camera on and unobstructed for the entire assessment - check for a privacy

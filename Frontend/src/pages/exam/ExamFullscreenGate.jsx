@@ -54,8 +54,8 @@ export default function ExamFullscreenGate() {
             Camera and microphone access is granted. The assessment now runs in full-screen mode
             for its full duration — through the instructions, identity verification, and the exam
             itself. Once the exam begins, leaving the assessment window — exiting full-screen,
-            switching tabs or minimizing — gives you one warning; the second time, your attempt
-            ends automatically.
+            switching tabs or minimizing — earns a warning. You get up to three; after the
+            third, the next occurrence ends your attempt automatically.
           </div>
           <button className="btn primary block" type="button" onClick={onContinue}>
             Continue to Full-Screen Mode

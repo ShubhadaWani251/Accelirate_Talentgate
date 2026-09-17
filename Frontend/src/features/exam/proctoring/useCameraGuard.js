@@ -68,7 +68,8 @@ export default function useCameraGuard(streamRef, active, onViolation) {
   // candidate has been warned and asked to restore the camera, and re-reporting every two
   // seconds while they slide the flap back open would terminate them for the act of complying.
   // Cleared when the camera returns, so a SECOND switch-off is reported - which is what makes
-  // the "one warning, then out" rule apply here.
+  // each genuine occurrence cost one of the three shared warnings, rather than one continuous
+  // outage burning through all of them.
   const firedRef = useRef(false);
 
   useEffect(() => {

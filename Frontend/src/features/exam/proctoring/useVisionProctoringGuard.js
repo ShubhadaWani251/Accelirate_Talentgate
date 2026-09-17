@@ -12,7 +12,7 @@ import { getVisionModels } from './visionModels';
 // the same phone is still visibly in frame, and the very next sample would re-fire immediately -
 // burning through the whole 3-warning pool in seconds for what is really one continuous
 // occurrence. Clearing only when the condition itself resolves (mirroring cameraOff exactly) is
-// what makes "one warning, then a real second chance" actually hold.
+// what makes each genuine occurrence cost exactly one of the three shared warnings.
 
 // Sampling both models every second, not every frame: detectForVideo is synchronous and running
 // two models back-to-back is meaningfully heavier than useCameraGuard's single pixel-stddev
