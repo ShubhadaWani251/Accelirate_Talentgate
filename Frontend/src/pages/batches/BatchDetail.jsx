@@ -8,6 +8,7 @@ import { selectRoleCode } from '../../features/auth/authSlice';
 import ConfigureBatchStep from '../../features/batches/ConfigureBatchStep';
 import DeactivateBatchModal from '../../features/batches/DeactivateBatchModal';
 import CompleteBatchModal from '../../features/batches/CompleteBatchModal';
+import AddCandidatesModal from '../../features/batches/AddCandidatesModal';
 import CandidateFilters from '../../features/candidates/CandidateFilters';
 import { EMPTY_CANDIDATE_FILTERS } from '../../features/candidates/candidateFilterDefaults';
 import CandidateTable from '../../features/candidates/CandidateTable';
@@ -59,6 +60,7 @@ export default function BatchDetail() {
     setInviteConfirmOpen(true);
   }
   const [certificationOpen, setCertificationOpen] = useState(false);
+  const [addCandidatesOpen, setAddCandidatesOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
 
   async function refresh() {
@@ -178,6 +180,14 @@ export default function BatchDetail() {
         </h3>
         {!isCancelled && (
           <div className="btn-row" style={{ display: 'flex', gap: 10 }}>
+            {/* Only while the drive is actually running. A completed batch's results are
+                already being acted on, so adding a candidate to it would quietly change what
+                those results describe - the backend refuses it for the same reason. */}
+            {batch.status === 'in_progress' && (
+              <button className="btn" onClick={() => setAddCandidatesOpen(true)}>
+                + Add Candidates
+              </button>
+            )}
             {batch.status === 'in_progress' && (
               <button className="btn" onClick={() => setCompleteOpen(true)}>Mark Completed</button>
             )}
@@ -250,6 +260,13 @@ export default function BatchDetail() {
           candidate={editingCandidate}
           onClose={() => setEditingCandidate(null)}
           onSaved={() => { setEditingCandidate(null); refreshCandidates(); }}
+        />
+      )}
+      {addCandidatesOpen && (
+        <AddCandidatesModal
+          batch={batch}
+          onClose={() => setAddCandidatesOpen(false)}
+          onAdded={() => { refresh(); refreshCandidates(); }}
         />
       )}
       {certificationOpen && (

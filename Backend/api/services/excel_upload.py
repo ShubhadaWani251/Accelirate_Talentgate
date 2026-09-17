@@ -410,3 +410,55 @@ def stage_candidates_from_workbook(batch, file_obj, user, cooling_off_months=3):
     # repeat an address from the first.
     staged = revalidate_batch_candidates(batch)
     return created, missing_columns, staged, skipped_duplicates
+
+
+@transaction.atomic
+def add_candidates_to_live_batch(batch, file_obj, user, cooling_off_months=3):
+    """Add candidates to a batch that has already been finalized and had invites sent.
+
+    Same parse/validate/duplicate-check pipeline as the Draft upload above, with one deliberate
+    difference: rows that fail validation are NOT kept.
+
+    On a Draft the wizard walks the TA through fixing every invalid row before the batch can be
+    finalized, so an invalid row is a normal intermediate state. A live batch has no such step -
+    an invalid row added here would simply sit in the candidate table forever, never invitable
+    (create_invitations only ever picks up validation_status=OK rows) and with nothing in the UI
+    explaining why. Worse, correcting it through the Candidate Details edit form would not clear
+    the stale status, because that path deliberately doesn't re-validate.
+
+    So the valid rows are kept and the invalid ones are reported back with their reasons and
+    discarded. The TA corrects the spreadsheet and uploads it again; the duplicate collapsing in
+    stage_candidates_from_workbook is seeded from the rows already on the batch, so the
+    already-imported candidates are skipped rather than added twice.
+
+    Returns (added, rejected, missing_columns, skipped_duplicates), where `added` is a list of
+    Candidate rows now on the batch awaiting an invitation, and `rejected` is a list of
+    {row_number, name, email, errors} describing what was thrown back.
+    """
+    created, missing_columns, _staged, skipped_duplicates = stage_candidates_from_workbook(
+        batch, file_obj, user, cooling_off_months,
+    )
+
+    # Re-read rather than trusting the in-memory objects: revalidate_batch_candidates() writes
+    # validation_status through a bulk_update, so the instances in `created` can be stale.
+    created_ids = [c.candidate_id for c in created]
+    invalid = list(
+        Candidate.objects.filter(candidate_id__in=created_ids)
+        .exclude(validation_status=Candidate.ValidationStatus.OK)
+    )
+
+    rejected = [{
+        'row_number': candidate.upload_row_number,
+        'name': candidate.full_name,
+        'email': candidate.email,
+        'errors': [e['message'] for e in (candidate.validation_errors or [])],
+    } for candidate in invalid]
+
+    if invalid:
+        Candidate.objects.filter(candidate_id__in=[c.candidate_id for c in invalid]).delete()
+
+    added = list(
+        Candidate.objects.filter(candidate_id__in=created_ids)
+        .filter(validation_status=Candidate.ValidationStatus.OK)
+    )
+    return added, rejected, missing_columns, skipped_duplicates

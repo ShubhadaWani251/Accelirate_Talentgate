@@ -31,8 +31,8 @@ from api.services import exam_session
 from api.services.candidate_profile import link_profile
 from api.services.duplicate_check import clear_duplicate, run_duplicate_check
 from api.services.excel_upload import (
-    generate_template_workbook, generate_validation_report_workbook,
-    stage_candidates_from_workbook,
+    add_candidates_to_live_batch, generate_template_workbook,
+    generate_validation_report_workbook, stage_candidates_from_workbook,
 )
 from api.services.invites import (
     BatchNotInvitableError, assert_batch_can_invite, create_invitations,
@@ -283,11 +283,21 @@ class BatchUploadView(APIView):
     # how much memory/CPU stage_candidates_from_workbook's row-by-row parsing can be made to burn.
     MAX_UPLOAD_SIZE_BYTES = 5 * 1024 * 1024
 
+    # A Draft is the upload wizard's own flow. In Progress is a live drive a TA is adding more
+    # candidates to - a real need (a college sends a second list, a candidate is added late)
+    # that previously meant creating a whole separate batch for them. Completed and Cancelled
+    # are both deliberately closed: a completed drive's results are being acted on, and a
+    # cancelled batch cannot invite anyone, so adding candidates to either could only mislead.
+    UPLOADABLE_STATUSES = (Batch.Status.DRAFT, Batch.Status.IN_PROGRESS)
+
     def post(self, request, batch_id):
         batch = _get_batch_or_404(request.user, batch_id)
-        if batch.status != Batch.Status.DRAFT:
-            return Response({'detail': 'This batch has already been finalized.'},
-                             status=status.HTTP_400_BAD_REQUEST)
+        if batch.status not in self.UPLOADABLE_STATUSES:
+            return Response(
+                {'detail': f'Candidates cannot be added to a '
+                           f'{batch.get_status_display().lower()} batch.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         upload = request.FILES.get('file')
         if not upload:
@@ -305,6 +315,9 @@ class BatchUploadView(APIView):
         except (TypeError, ValueError):
             cooling_off_months = 3
         cooling_off_months = max(1, min(cooling_off_months, 24))
+
+        if batch.status == Batch.Status.IN_PROGRESS:
+            return self._add_to_live_batch(request, batch, upload, cooling_off_months)
 
         try:
             created, missing_columns, staged, skipped_duplicates = stage_candidates_from_workbook(
@@ -359,6 +372,63 @@ class BatchUploadView(APIView):
             # Repeated entries collapsed to one. Reported rather than silent: the reviewer
             # should know their 40-row sheet became 38 candidates, and why.
             'skipped_duplicates': skipped_duplicates,
+        }, status=status.HTTP_201_CREATED)
+
+    def _add_to_live_batch(self, request, batch, upload, cooling_off_months):
+        """Adding candidates to an already-finalized, already-invited batch.
+
+        Separate from the Draft path because the outcome is different in kind: there is no
+        review step to come, so this either adds a candidate who is immediately ready to be
+        invited, or rejects the row outright (see excel_upload.add_candidates_to_live_batch).
+        The new candidates land as pending_invite - the TA still has to select them and send
+        invites, exactly as they would for the batch's original cohort.
+        """
+        try:
+            added, rejected, missing_columns, skipped_duplicates = add_candidates_to_live_batch(
+                batch, upload, request.user, cooling_off_months,
+            )
+        except (zipfile.BadZipFile, InvalidFileException, KeyError, DataError):
+            logger.exception('Failed to parse uploaded workbook for batch_id=%s', batch.batch_id)
+            return Response(
+                {'detail': 'Could not read that file. Make sure it matches the template format.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not added and not rejected:
+            if skipped_duplicates:
+                return Response(
+                    {'detail': f'Every row in this file is already on this batch '
+                               f'({len(skipped_duplicates)} duplicate(s) skipped) - nothing new '
+                               f'to add.',
+                     'skipped_duplicates': skipped_duplicates},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            return Response({'detail': 'No data rows found in that file.'},
+                             status=status.HTTP_400_BAD_REQUEST)
+
+        batch.total_candidates = batch.candidate_set.filter(is_deleted=False).count()
+        batch.save(update_fields=['total_candidates'])
+        log_action(request, request.user, 'upload', 'batch', batch.batch_id,
+                   details={'added_to_live_batch': len(added), 'rejected': len(rejected),
+                            'missing_columns': missing_columns,
+                            'duplicates_skipped': len(skipped_duplicates)})
+
+        detail = f'{len(added)} candidate(s) added. They are awaiting an invite.'
+        if rejected:
+            detail += (f' {len(rejected)} row(s) were not added because they failed validation - '
+                       f'correct them in the spreadsheet and upload it again.')
+        if skipped_duplicates:
+            detail += f' {len(skipped_duplicates)} row(s) were already on this batch.'
+
+        return Response({
+            'added_count': len(added),
+            'rejected_count': len(rejected),
+            # Full reasons per rejected row, so the TA can fix the sheet without guessing which
+            # rows to look at or why.
+            'rejected': rejected,
+            'missing_columns': missing_columns,
+            'skipped_duplicates': skipped_duplicates,
+            'detail': detail,
         }, status=status.HTTP_201_CREATED)
 
 
