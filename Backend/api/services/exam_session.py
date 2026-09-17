@@ -117,7 +117,7 @@ TERMINATION_MESSAGES = {
         'Your assessment was ended because more than one face was detected in the camera '
         'frame. Only you may be visible on camera during the assessment.',
     TerminationReason.FORBIDDEN_OBJECT_DETECTED:
-        'Your assessment was ended because a phone, laptop, book, or other unauthorized item '
+        'Your assessment was ended because an electronic device (such as a phone, laptop or TV) '
         'was detected in view of the camera.',
     TerminationReason.VOICE_DETECTED:
         'Your assessment was ended because sustained talking was detected during the '
@@ -266,7 +266,8 @@ _WARNING_CAUSES = {
     TerminationReason.EXTRA_PERSON_DETECTED:
         'more than one face was detected in your camera frame',
     TerminationReason.FORBIDDEN_OBJECT_DETECTED:
-        'a phone, laptop, book, or other unauthorized item was detected in view of your camera',
+        'an electronic device - a phone, laptop, TV or remote - was detected in view of your '
+        'camera',
     TerminationReason.VOICE_DETECTED:
         'sustained talking was detected in the room',
     TerminationReason.FACE_MISMATCH:
@@ -286,7 +287,7 @@ _WARNING_REMEDIES = {
     TerminationReason.EXTRA_PERSON_DETECTED:
         'Make sure no one else is visible in your camera frame',
     TerminationReason.FORBIDDEN_OBJECT_DETECTED:
-        'Remove the item from view and keep your desk clear for the rest of the assessment',
+        'Move the device out of view of your camera. Paper and pens for rough work are fine',
     TerminationReason.VOICE_DETECTED:
         'Remain quiet - brief background noise is fine, but do not talk during the assessment',
     TerminationReason.FACE_MISMATCH:

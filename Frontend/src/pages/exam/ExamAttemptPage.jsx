@@ -22,7 +22,10 @@ import {
   REASON_SETTLE_MS, moreSpecificReason,
 } from '../../features/exam/proctoring/violationReasons';
 import BrandHeader from '../../components/layout/BrandHeader';
-import BrandFooter from '../../components/layout/BrandFooter';
+// No BrandFooter on this page, deliberately. Its Privacy Policy link is a plain <a>, so a
+// mid-exam click would navigate the candidate clean out of their attempt - losing the in-memory
+// session and tripping the window guards on the way. Nothing in that footer is worth that risk
+// while the clock is running; the pre-exam screens still carry it.
 import ExamResult from './ExamResult';
 import ExamTerminated from './ExamTerminated';
 
@@ -568,7 +571,6 @@ export default function ExamAttemptPage() {
             </button>
           </div>
         </div>
-        <BrandFooter roleCode="candidate" />
       </div>
     );
   }
@@ -596,7 +598,6 @@ export default function ExamAttemptPage() {
             </button>
           </div>
         </div>
-        <BrandFooter roleCode="candidate" />
       </div>
     );
   }
@@ -622,7 +623,6 @@ export default function ExamAttemptPage() {
             )}
           </div>
         </div>
-        <BrandFooter roleCode="candidate" />
       </div>
     );
   }
@@ -750,8 +750,8 @@ export default function ExamAttemptPage() {
 
           {forbiddenObjectDetected && (
             <div className="alert error" style={{ marginBottom: 10 }}>
-              <b>Unauthorized item detected{forbiddenObjectType ? ` (${forbiddenObjectType})` : ''}.</b>{' '}
-              Remove it from view now.
+              <b>Electronic device detected{forbiddenObjectType ? ` (${forbiddenObjectType})` : ''}.</b>{' '}
+              Move it out of view of your camera now. Paper and pens are fine.
             </div>
           )}
 
@@ -815,7 +815,6 @@ export default function ExamAttemptPage() {
             </div>
           )}
 
-          <BrandFooter roleCode="candidate" />
         </main>
       </div>
 

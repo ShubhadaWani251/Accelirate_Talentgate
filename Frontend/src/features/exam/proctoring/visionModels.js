@@ -16,7 +16,13 @@ const OBJECT_MODEL_PATH = '/models/vision/efficientdet_lite0.tflite';
 // matter how many people are actually in frame - this has to be raised explicitly.
 const MAX_FACES = 3;
 
-export const FORBIDDEN_OBJECT_CATEGORIES = ['cell phone', 'laptop', 'book', 'remote', 'tv'];
+// ELECTRONIC DEVICES ONLY. 'book' was removed after a candidate was warned for a sheet of rough
+// paper on their desk: the model reports that as 'book', rough work is a normal and permitted
+// part of sitting an aptitude test, and a warning a candidate cannot avoid by behaving correctly
+// is worse than the cheating it was meant to catch. What remains is the set of things that can
+// actually display or receive information - which is what the rule is really about, and what the
+// candidate-facing instructions can state precisely.
+export const FORBIDDEN_OBJECT_CATEGORIES = ['cell phone', 'laptop', 'remote', 'tv'];
 const OBJECT_SCORE_THRESHOLD = 0.6;
 
 let modelsPromise = null;

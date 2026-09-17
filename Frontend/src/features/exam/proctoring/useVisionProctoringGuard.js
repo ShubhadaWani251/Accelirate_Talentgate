@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { getVisionModels } from './visionModels';
 
 // Watches the shared camera feed for two independent signals: is exactly one face visible, and
-// is a forbidden object (phone/laptop/book/remote/tv) in frame. Structured after useCameraGuard -
+// is a forbidden electronic device (phone/laptop/remote/tv) in frame. Structured after useCameraGuard -
 // one offscreen <video> and one setInterval poll for the life of the exam, self-clearing latches
 // rather than a parent-driven rearm.
 //
@@ -20,9 +20,19 @@ import { getVisionModels } from './visionModels';
 // main thread.
 const SAMPLE_MS = 1000;
 
-// A brief look-down or a moment of tracking loss shouldn't fire instantly, but shouldn't get a
-// long grace period either.
-const CONSECUTIVE_FACE_ABSENT = 5;
+// 60 seconds, raised from 5 after real candidates were warned three times in one sitting for
+// looking down at their desk to work through questions - which is what sitting an aptitude test
+// looks like. MediaPipe loses the face entirely once the head pitches down far enough, so a
+// candidate doing rough work on paper is indistinguishable, to this check, from one who has left
+// the room. Five seconds made that misfire constantly; a full minute of a completely unseen face
+// is a genuinely unusual event that a real absence still trips.
+//
+// The cost is honest and worth stating: someone who leaves their seat now has up to a minute
+// before this fires. That is accepted deliberately - the session recording captures the whole
+// period for a TA to review either way, and the face-identity guard (useFaceIdentityGuard) still
+// catches a person SWAP within ~6s regardless of this number, which is the threat that actually
+// matters. This check only ever meant "is the candidate visibly present", not "is it still them".
+const CONSECUTIVE_FACE_ABSENT = 60;
 // A positively-identified second face is more specific evidence than "no face", but a passerby
 // crossing the background for a couple of seconds still deserves the same patience.
 const CONSECUTIVE_FACE_EXTRA = 4;
