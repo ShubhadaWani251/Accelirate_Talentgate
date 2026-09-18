@@ -5,7 +5,7 @@ services/candidate_validation.py - lets the auth layer, the session-state view, 
 management-command safety net all share exactly one finalize path (see finalize_attempt).
 """
 
-from decimal import Decimal
+from decimal import ROUND_CEILING, Decimal
 from datetime import timedelta
 
 from django.db import transaction
@@ -631,9 +631,47 @@ def section_marks_for_attempt(attempt):
     return section_marks(_load_answers(attempt))
 
 
+def marks_needed_to_clear(available, cutoff):
+    """The fewest marks that clear `cutoff` percent of `available` - the smallest whole m where
+    m / available * 100 >= cutoff.
+
+    Exactly equivalent to comparing the percentage directly, and _grade_sections derives BOTH
+    "cleared" and "how many marks short" from this one number specifically so the two can never
+    disagree. Computing them separately would have let a rounding difference declare a section
+    failed and simultaneously zero marks short.
+
+    Decimal with ROUND_CEILING, not float: cutoffs are stored as Decimal, and a percentage like
+    33.33 against a 3-mark section is precisely where binary floating point rounds the wrong way
+    at the boundary.
+    """
+    return int((Decimal(cutoff) * available / 100).to_integral_value(rounding=ROUND_CEILING))
+
+
+# A candidate who missed the cutoff by a hair, in a small enough number of sections, is put in
+# front of a human instead of being failed outright - see Candidate.Result.BORDERLINE.
+#
+# The rule, as specified: short by at most 1 mark, in at most 3 subjects. EVERY missed section
+# must be within that 1 mark. A candidate who is 1 short in two sections and 4 short in a third
+# is a clear fail, not a borderline case - they did not "just barely" miss, and putting them in
+# a TA's review queue would dilute the queue's meaning for the people who did.
+BORDERLINE_MAX_SHORTFALL = 1
+BORDERLINE_MAX_SECTIONS = 3
+
+
+def is_borderline(missed_by):
+    """Whether {section_key: marks short} from _grade_sections is a borderline miss.
+
+    False for an empty dict - a candidate who missed nothing passed outright and never needs a
+    human decision.
+    """
+    if not missed_by or len(missed_by) > BORDERLINE_MAX_SECTIONS:
+        return False
+    return all(short <= BORDERLINE_MAX_SHORTFALL for short in missed_by.values())
+
+
 def _grade_sections(attempt, answers, batch):
     """Recompute per-section scores/cleared and the overall totals from already-marked answers,
-    against the batch's CURRENT cutoffs. Returns all_cleared.
+    against the batch's CURRENT cutoffs. Returns (all_cleared, {section_key: marks short}).
 
     Split out of finalize_attempt so re-grading after a cutoff change (see regrade_batch) runs
     exactly the same arithmetic rather than a second, drifting copy of it.
@@ -653,6 +691,7 @@ def _grade_sections(attempt, answers, batch):
     """
     marks_earned = marks_available = 0
     all_cleared = True
+    missed_by = {}
     marks_by_section = section_marks(answers)
     for section_key in SECTION_ORDER:
         earned, available = marks_by_section.get(section_key, (0, 0))
@@ -662,10 +701,11 @@ def _grade_sections(attempt, answers, batch):
         if available == 0:
             cleared = None
         else:
-            cutoff = getattr(batch, f'{section_key}_cutoff')
-            cleared = (Decimal(earned) / Decimal(available) * 100) >= cutoff
+            needed = marks_needed_to_clear(available, getattr(batch, f'{section_key}_cutoff'))
+            cleared = earned >= needed
             if not cleared:
                 all_cleared = False
+                missed_by[section_key] = needed - earned
 
         setattr(attempt, f'{section_key}_score', earned)
         setattr(attempt, f'{section_key}_cleared', cleared)
@@ -677,13 +717,22 @@ def _grade_sections(attempt, answers, batch):
         round(Decimal(marks_earned) / Decimal(marks_available) * 100, 2)
         if marks_available else Decimal('0.00')
     )
-    return all_cleared
+    return all_cleared, missed_by
 
 
-def _write_candidate_result(candidate, passed):
+def _write_candidate_result(candidate, result):
     """finalize_attempt and regrade_attempt are the only writers of Candidate.result."""
-    candidate.result = Candidate.Result.PASS if passed else Candidate.Result.FAIL
+    candidate.result = result
     candidate.save(update_fields=['result', 'overall_score'])
+
+
+def graded_result(all_cleared, missed_by):
+    """The Candidate.Result a set of section outcomes earns, before any human decision."""
+    if all_cleared:
+        return Candidate.Result.PASS
+    return (
+        Candidate.Result.BORDERLINE if is_borderline(missed_by) else Candidate.Result.FAIL
+    )
 
 
 def regrade_attempt(attempt, batch=None):
@@ -695,6 +744,12 @@ def regrade_attempt(attempt, batch=None):
     Deliberately does NOT re-mark ExamAnswer.is_correct - the answers and the answer key are not
     what changed. Only the pass/fail verdict derived from them is recomputed.
 
+    A result a TA or Admin decided by hand (Candidate.result_decided_by, only ever set for a
+    BORDERLINE candidate) is left alone - the attempt's own scores and section flags are still
+    recomputed and saved, but the human's call is not overwritten by the machine's. Without this,
+    revising a cutoff would silently undo every borderline decision already made on that batch.
+    They can always decide again from Candidate Details.
+
     Returns True if anything actually changed.
     """
     if attempt.status != ExamAttempt.Status.SUBMITTED:
@@ -702,18 +757,19 @@ def regrade_attempt(attempt, batch=None):
 
     batch = batch or attempt.invitation.batch
     before = [getattr(attempt, f) for f in GRADED_FIELDS]
-    all_cleared = _grade_sections(attempt, _load_answers(attempt), batch)
+    all_cleared, missed_by = _grade_sections(attempt, _load_answers(attempt), batch)
     changed = before != [getattr(attempt, f) for f in GRADED_FIELDS]
 
     candidate = attempt.candidate
-    new_result = Candidate.Result.PASS if all_cleared else Candidate.Result.FAIL
+    decided_by_hand = candidate.result_decided_by_id is not None
+    new_result = candidate.result if decided_by_hand else graded_result(all_cleared, missed_by)
     result_changed = candidate.result != new_result or candidate.overall_score != attempt.overall_score
 
     if changed:
         attempt.save(update_fields=GRADED_FIELDS)
     if result_changed:
         candidate.overall_score = attempt.overall_score
-        _write_candidate_result(candidate, all_cleared)
+        _write_candidate_result(candidate, new_result)
     return changed or result_changed
 
 
@@ -748,7 +804,7 @@ def finalize_attempt(attempt, outcome, reason=None):
         ExamAnswer.objects.bulk_update(answered, ['is_correct'])
 
     batch = attempt.invitation.batch
-    all_cleared = _grade_sections(attempt, answers, batch)
+    all_cleared, missed_by = _grade_sections(attempt, answers, batch)
     attempt.total_answered = len(answered)
 
     now = timezone.now()
@@ -763,9 +819,14 @@ def finalize_attempt(attempt, outcome, reason=None):
 
     # First writer of these two fields anywhere in the codebase - Candidate.result has never
     # been set before this (services/invites.py only ever moves candidate.status). A terminated
-    # attempt fails outright, matching the wireframe's zero-tolerance framing.
+    # attempt fails outright, matching the wireframe's zero-tolerance framing - and is never
+    # BORDERLINE however close the marks were, because what failed it was the proctoring
+    # violation, not the score.
     candidate = attempt.candidate
     candidate.overall_score = attempt.overall_score
-    _write_candidate_result(candidate, outcome == 'submitted' and all_cleared)
+    _write_candidate_result(
+        candidate,
+        graded_result(all_cleared, missed_by) if outcome == 'submitted' else Candidate.Result.FAIL,
+    )
 
     return attempt

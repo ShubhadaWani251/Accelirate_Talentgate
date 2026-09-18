@@ -43,9 +43,12 @@ export default function CandidateFilters({ filters, onChange, batches, onApply, 
           <div className="field">
             <label>Result</label>
             <select value={filters.result} onChange={(e) => set('result', e.target.value)}>
-              <option value="">All (Pass / Fail)</option>
+              <option value="">All Results</option>
               <option value="pass">Pass</option>
               <option value="fail">Fail</option>
+              {/* The Borderline card on Batch Details is a work queue - this is how a TA
+                  actually gets to the people sitting in it. */}
+              <option value="borderline">Borderline</option>
               <option value="pending">Pending</option>
             </select>
           </div>
@@ -57,9 +60,10 @@ export default function CandidateFilters({ filters, onChange, batches, onApply, 
           <div className="field">
             <label>Result</label>
             <select value={filters.result} onChange={(e) => set('result', e.target.value)}>
-              <option value="">All (Pass / Fail)</option>
+              <option value="">All Results</option>
               <option value="pass">Pass</option>
               <option value="fail">Fail</option>
+              <option value="borderline">Borderline</option>
               <option value="pending">Pending</option>
             </select>
           </div>

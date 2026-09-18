@@ -28,6 +28,7 @@ from .batches import (
 from .candidates import (
     CandidateListView,
     CandidateDetailView,
+    CandidateDecideResultView,
     CandidateHistoryView,
     CandidateBulkResendInviteView,
     CandidateResendInviteView,
@@ -78,7 +79,8 @@ __all__ = [
     'BatchUploadView', 'BatchCandidatesStagingView', 'BatchCandidateRowView',
     'BatchCandidateDeleteView', 'BatchCandidateClearDuplicateView',
     'BatchValidationReportView', 'BatchFinalizeView', 'BatchSendInvitesView',
-    'CandidateListView', 'CandidateDetailView', 'CandidateHistoryView', 'CandidateResendInviteView',
+    'CandidateListView', 'CandidateDetailView', 'CandidateDecideResultView',
+    'CandidateHistoryView', 'CandidateResendInviteView',
     'CandidateNotifyView', 'CandidateCertificationView', 'NotificationTemplateListView',
     'CandidateExportView',
     'CandidateEvidenceZipView', 'DashboardSummaryView',

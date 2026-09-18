@@ -95,6 +95,11 @@ class Candidate(models.Model):
         PENDING = 'pending', 'Pending'
         PASS = 'pass', 'Pass'
         FAIL = 'fail', 'Fail'
+        # Missed the cutoff, but only just - see services.exam_session.is_borderline for the
+        # exact rule. NOT a third outcome the candidate is left in: it means "a human still has
+        # to call this one", and a TA or Admin resolves it to PASS or FAIL from Candidate
+        # Details. Until they do, the candidate counts as neither passed nor failed anywhere.
+        BORDERLINE = 'borderline', 'Borderline'
 
     candidate_id = models.BigAutoField(primary_key=True)
     first_name = models.CharField(max_length=80)
@@ -159,6 +164,19 @@ class Candidate(models.Model):
                               default=Status.PENDING_INVITE)
     result = models.CharField(max_length=10, choices=Result.choices,
                               default=Result.PENDING)
+    # Who resolved a BORDERLINE result to PASS or FAIL, and when. Set only by the explicit
+    # decision endpoint (views.candidates.CandidateDecideResultView), never by grading.
+    #
+    # Its real job is to make the decision STICK: services.exam_session.regrade_attempt
+    # recomputes every submitted attempt's result whenever a batch's cutoffs change, and would
+    # otherwise silently overwrite a human's call with the machine's. A TA can always decide
+    # again - the field records the latest decision, and every one of them is in the audit log
+    # and on the candidate's own timeline.
+    result_decided_by = models.ForeignKey(
+        'api.User', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='result_decisions', db_column='result_decided_by',
+    )
+    result_decided_at = models.DateTimeField(null=True, blank=True)
     overall_score = models.DecimalField(max_digits=5, decimal_places=2,
                                         null=True, blank=True)
 

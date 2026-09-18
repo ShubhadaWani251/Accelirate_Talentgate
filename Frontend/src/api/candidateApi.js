@@ -41,6 +41,12 @@ export const resendInvitesBulk = (candidateIds, linkWindow = {}) =>
   axiosClient.post('/candidates/resend-invite/', { candidate_ids: candidateIds, ...linkWindow })
     .then((r) => r.data);
 
+// Resolves a BORDERLINE candidate - one who missed a cutoff by at most 1 mark in at most 3
+// sections - to a final 'pass' or 'fail'. The system deliberately refuses to make that call
+// itself; this is a TA's or Admin's. Re-deciding is allowed, and every decision is audited.
+export const decideResult = (id, result) =>
+  axiosClient.post(`/candidates/${id}/decide-result/`, { result }).then((r) => r.data);
+
 export const getCandidateHistory = (id) =>
   axiosClient.get(`/candidates/${id}/history/`).then((r) => r.data);
 

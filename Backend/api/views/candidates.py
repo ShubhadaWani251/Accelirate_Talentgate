@@ -6,6 +6,7 @@ import zipfile
 
 from django.db.models import Prefetch, Q
 from django.http import Http404, HttpResponse
+from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.utils.dateparse import parse_date, parse_datetime
 from django_ratelimit.decorators import ratelimit
@@ -240,6 +241,51 @@ class CandidateDetailView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         log_action(request, request.user, 'update', 'candidate', candidate.candidate_id)
+        return Response(CandidateDetailSerializer(candidate).data)
+
+
+class CandidateDecideResultView(APIView):
+    """POST /api/candidates/<id>/decide-result/ - resolve a BORDERLINE candidate to Pass or Fail.
+
+    A borderline candidate missed a cutoff by at most 1 mark in at most 3 sections (see
+    services.exam_session.is_borderline). The system deliberately refuses to call that one: it
+    marks the candidate BORDERLINE and stops, and this endpoint is how a TA or Admin makes the
+    call instead.
+
+    Re-deciding is allowed - a decision is a judgement, and a misclick should not be permanent.
+    The condition below is what makes that possible: once decided, `result` is no longer
+    BORDERLINE, so `result_decided_by` being set is what marks the candidate as still decidable.
+    That same field is what stops regrade_attempt overwriting the decision when a cutoff changes.
+    """
+    permission_classes = [IsAdminOrTA]
+
+    DECIDABLE_RESULTS = {Candidate.Result.PASS, Candidate.Result.FAIL}
+
+    def post(self, request, candidate_id):
+        candidate = _get_candidate_or_404(request.user, candidate_id)
+
+        result = request.data.get('result')
+        if result not in self.DECIDABLE_RESULTS:
+            return Response({'detail': 'Decide either "pass" or "fail".'},
+                             status=status.HTTP_400_BAD_REQUEST)
+
+        already_decided = candidate.result_decided_by_id is not None
+        if candidate.result != Candidate.Result.BORDERLINE and not already_decided:
+            return Response(
+                {'detail': 'Only a borderline candidate needs a manual pass/fail decision.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        previous = candidate.result
+        candidate.result = result
+        candidate.result_decided_by = request.user
+        candidate.result_decided_at = timezone.now()
+        candidate.save(update_fields=['result', 'result_decided_by', 'result_decided_at'])
+
+        # `previous` is recorded too: on a re-decision it is the only place the earlier call
+        # survives, since the row itself now holds only the latest one.
+        log_action(request, request.user, 'result_decided', 'candidate', candidate.candidate_id,
+                   details={'result': result, 'previous_result': previous})
         return Response(CandidateDetailSerializer(candidate).data)
 
 

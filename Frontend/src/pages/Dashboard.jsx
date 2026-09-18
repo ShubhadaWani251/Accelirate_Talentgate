@@ -146,6 +146,7 @@ export default function Dashboard() {
                 <th>Status</th>
                 <th>Pass</th>
                 <th>Fail</th>
+                <th>Borderline</th>
                 <th></th>
                 <th></th>
               </tr>
@@ -155,9 +156,9 @@ export default function Dashboard() {
                   previous rows belong to a different filter, so showing them faded reads as if
                   they were the (wrong) result. */}
               {tableLoading ? (
-                <SkeletonTableRows rows={5} columns={isAdmin ? 8 : 7} />
+                <SkeletonTableRows rows={5} columns={isAdmin ? 9 : 8} />
               ) : batches.length === 0 ? (
-                <tr><td colSpan={isAdmin ? 8 : 7}>{EMPTY_MESSAGE[batchStatus] || 'No batches yet.'}</td></tr>
+                <tr><td colSpan={isAdmin ? 9 : 8}>{EMPTY_MESSAGE[batchStatus] || 'No batches yet.'}</td></tr>
               ) : (
                 batches.map((b) => (
                   <tr key={b.batch_id}>
@@ -167,6 +168,9 @@ export default function Dashboard() {
                     <td><span className={`pill ${STATUS_PILL[b.status] || 'gray'}`}>{b.status_display}</span></td>
                     <td>{b.pass_count}</td>
                     <td>{b.fail_count}</td>
+                    {/* Candidates who missed a cutoff by at most 1 mark and are waiting on a
+                        TA's pass/fail decision - they are counted in neither column above. */}
+                    <td>{b.borderline_count}</td>
                     <td style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
                       {/* Opens that batch's own page, not a filtered All Candidates view -
                           Batch Details is where the batch's config, actions and candidates live.

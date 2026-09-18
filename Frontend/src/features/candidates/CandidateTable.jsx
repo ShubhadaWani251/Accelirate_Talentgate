@@ -7,7 +7,10 @@ const STATUS_PILL = {
   pending_invite: 'gray', invited: 'blue', in_progress: 'blue',
   completed: 'green', terminated: 'amber', no_show: 'gray',
 };
-const RESULT_PILL = { pending: 'gray', pass: 'green', fail: 'red' };
+// Borderline is amber, matching ReviewStep's DUPLICATE_PILL convention - green safe, amber
+// worth a look, red needs a decision. Amber rather than red because a borderline candidate has
+// not failed; nobody has ruled either way yet.
+const RESULT_PILL = { pending: 'gray', pass: 'green', fail: 'red', borderline: 'amber' };
 // Email delivery, shown separately from the candidate's pipeline Status on purpose: Status
 // flips to "Invited" when the invitation row is created, which happens BEFORE the send is
 // attempted. So Status alone reads as success even when the email never left.

@@ -15,12 +15,32 @@ from api.services.exam_session import termination_label
 # NB: 'invite_sent' is deliberately absent - invites are surfaced from the Invitation table
 # above, which also knows whether delivery failed and whether it was a re-send. Listing it
 # here too would double every invite row in the modal.
+#
+# A value may be a callable taking the AuditLog row, for an event whose label depends on what
+# was actually recorded.
 _AUDIT_EVENT_LABELS = {
     'update': 'Details Edited',
     'notify_sent': 'Notification Email Sent',
     'certification_sent': 'Certification Link Sent',
     'duplicate_cleared': 'Duplicate Flag Cleared',
+    'result_decided': lambda row: _result_decided_label(row),
 }
+
+
+def _result_decided_label(row):
+    """A borderline result resolved by hand - see views.candidates.CandidateDecideResultView.
+
+    The decision itself is in the label, not just "Result Decided": a TA reading the timeline
+    needs to see WHAT was decided, and because re-deciding is allowed, a static label would
+    render two indistinguishable rows for a decision that was later reversed.
+    """
+    decided = (row.action_details or {}).get('result')
+    return f'Result Decided - {decided.title()}' if decided else 'Result Decided'
+
+
+def _audit_label(row):
+    label = _AUDIT_EVENT_LABELS[row.action_type]
+    return label(row) if callable(label) else label
 
 
 def _event(timestamp, label, batch_name):
@@ -65,7 +85,7 @@ def _events_for_record(candidate):
         action_type__in=_AUDIT_EVENT_LABELS,
     ).order_by('created_at')
     for row in audit_rows:
-        events.append(_event(row.created_at, _AUDIT_EVENT_LABELS[row.action_type], batch_name))
+        events.append(_event(row.created_at, _audit_label(row), batch_name))
 
     return events
 

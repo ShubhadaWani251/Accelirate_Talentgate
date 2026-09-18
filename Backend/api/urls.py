@@ -61,6 +61,8 @@ urlpatterns = [
     path('candidates/<int:candidate_id>/', views.CandidateDetailView.as_view(), name='candidate-detail'),
     path('candidates/<int:candidate_id>/history/', views.CandidateHistoryView.as_view(),
          name='candidate-history'),
+    path('candidates/<int:candidate_id>/decide-result/', views.CandidateDecideResultView.as_view(),
+         name='candidate-decide-result'),
     path('candidates/<int:candidate_id>/resend-invite/', views.CandidateResendInviteView.as_view(),
          name='candidate-resend-invite'),
     path('candidates/<int:candidate_id>/evidence.zip', views.CandidateEvidenceZipView.as_view(),

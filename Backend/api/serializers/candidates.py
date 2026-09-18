@@ -339,6 +339,13 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
     overall_total = serializers.SerializerMethodField()
     total_correct = serializers.SerializerMethodField()
     total_marks_earned = serializers.SerializerMethodField()
+    # Whether this candidate's pass/fail is a human's call, and whose. `needs_result_decision`
+    # is what the UI gates the Pass/Fail buttons on, so it is true both for an undecided
+    # borderline candidate AND for one already decided - a decision stays revisable.
+    needs_result_decision = serializers.SerializerMethodField()
+    result_decided_by_name = serializers.CharField(
+        source='result_decided_by.full_name', read_only=True, default=None,
+    )
     evidence = serializers.SerializerMethodField()
     timeline = serializers.SerializerMethodField()
     email_status = serializers.SerializerMethodField()
@@ -358,6 +365,7 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
             'aadhaar_last4', 'date_of_birth', 'batch_id', 'batch_name', 'status', 'status_display',
             'result', 'result_display', 'overall_score', 'overall_total', 'total_correct',
             'total_marks_earned', 'section_results',
+            'needs_result_decision', 'result_decided_by_name', 'result_decided_at',
             'evidence', 'timeline',
             'email_status', 'email_status_display', 'email_error', 'email_sent_at',
             'email_last_attempt_at', 'email_retry_count',
@@ -412,6 +420,17 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
         """
         attempt = _latest_attempt(candidate)
         return attempt.total_marks_earned if attempt else None
+
+    def get_needs_result_decision(self, candidate):
+        """Whether Candidate Details should offer the Pass/Fail decision buttons.
+
+        True for a borderline candidate nobody has ruled on, and also for one already decided -
+        the decision is revisable, and hiding the buttons afterwards would leave a misclick with
+        no way back. Matches CandidateDecideResultView's own precondition exactly; if one
+        changes, so must the other.
+        """
+        return (candidate.result == Candidate.Result.BORDERLINE
+                or candidate.result_decided_by_id is not None)
 
     def get_overall_total(self, candidate):
         """MARKS available - the denominator for that "14/40" reading, taken from the

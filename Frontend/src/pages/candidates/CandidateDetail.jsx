@@ -14,7 +14,10 @@ import {
 } from '../../utils/datetime';
 import { extractErrorMessage } from '../../utils/passwordSchema';
 
-const RESULT_PILL = { pending: 'gray', pass: 'green', fail: 'red' };
+// Borderline is amber, matching ReviewStep's DUPLICATE_PILL convention - green safe, amber
+// worth a look, red needs a decision. Amber rather than red because a borderline candidate has
+// not failed; nobody has ruled either way yet.
+const RESULT_PILL = { pending: 'gray', pass: 'green', fail: 'red', borderline: 'amber' };
 const AADHAAR_VERIFICATION_PILL = {
   match: 'green', mismatch: 'red', signature_invalid: 'red', unreadable: 'gray', pending: 'gray',
 };
@@ -26,6 +29,10 @@ export default function CandidateDetail() {
   // null | 'notfound' | 'server' - which error page (if any) replaces this page.
   const [loadError, setLoadError] = useState(null);
   const [sending, setSending] = useState(false);
+  // Holds the result being decided ('pass' | 'fail'), not just a boolean - the spinner has to
+  // land on the button that was actually pressed, and both are disabled while either is in
+  // flight.
+  const [deciding, setDeciding] = useState(null);
   const [downloadingZip, setDownloadingZip] = useState(false);
   const [inviteConfirmOpen, setInviteConfirmOpen] = useState(false);
   // Seeded from the batch's CURRENT window each time the dialog opens (not on load), so a
@@ -84,6 +91,21 @@ export default function CandidateDetail() {
       toast.error(extractErrorMessage(err, ['link_valid_from', 'link_valid_until']));
     } finally {
       setSending(false);
+    }
+  }
+
+  async function handleDecideResult(result) {
+    setDeciding(result);
+    try {
+      // The endpoint returns the full updated candidate, so the pill, the banner and the
+      // "decided by" line all refresh from one response - no second fetch, and no window where
+      // the page shows a stale result next to the decision that just changed it.
+      setCandidate(await candidateApi.decideResult(id, result));
+      toast.success(`Marked as ${result === 'pass' ? 'Pass' : 'Fail'}.`);
+    } catch (err) {
+      toast.error(extractErrorMessage(err));
+    } finally {
+      setDeciding(null);
     }
   }
 
@@ -206,6 +228,44 @@ export default function CandidateDetail() {
               · <span className={`pill ${RESULT_PILL[candidate.result] || 'gray'}`}>{candidate.result_display}</span>
             </b>
           </div>
+
+          {/* The borderline decision. Rendered here rather than with the page's other actions
+              because it only makes sense next to the section table that caused it - a TA needs
+              to see WHICH sections were missed, and by how little, before ruling. */}
+          {candidate.needs_result_decision && (
+            <div className="alert amber" style={{ marginTop: 12, textAlign: 'left' }}>
+              <b>Borderline — this one is your call.</b>
+              <div style={{ marginTop: 4 }}>
+                {candidate.full_name.split(' ')[0]} missed the cutoff by no more than 1 mark, in
+                at most 3 sections. The system does not pass or fail a result this close on its
+                own.
+              </div>
+              {candidate.result_decided_by_name && (
+                <div style={{ marginTop: 6, color: 'var(--muted)' }}>
+                  Currently marked <b>{candidate.result_display}</b> by{' '}
+                  {candidate.result_decided_by_name}
+                  {candidate.result_decided_at && <> on {formatDateTime(candidate.result_decided_at)}</>}
+                  . You can change this.
+                </div>
+              )}
+              <div className="btn-row" style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+                <button
+                  className="btn primary"
+                  disabled={deciding || candidate.result === 'pass'}
+                  onClick={() => handleDecideResult('pass')}
+                >
+                  <ButtonSpinner loading={deciding === 'pass'}>✓ Mark as Pass</ButtonSpinner>
+                </button>
+                <button
+                  className="btn"
+                  disabled={deciding || candidate.result === 'fail'}
+                  onClick={() => handleDecideResult('fail')}
+                >
+                  <ButtonSpinner loading={deciding === 'fail'}>✕ Mark as Fail</ButtonSpinner>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
