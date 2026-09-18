@@ -19,6 +19,18 @@ class BatchNotInvitableError(Exception):
     """A batch's status forbids issuing invitations. Carries the message shown to the user."""
 
 
+class CandidateNotInvitableError(Exception):
+    """This ONE candidate must not be invited, whatever their batch allows. Carries the message
+    shown to the user.
+
+    Deliberately a separate type from BatchNotInvitableError, because the two need different
+    handling in a bulk send: a batch refusal applies identically to every candidate from that
+    batch (so the loop stops and reports once), while this one is per-person and the remaining
+    selection must still go out. Sharing an exception type would have made "stop" the only
+    possible response to both.
+    """
+
+
 # Only a live batch may issue invitations. A Draft hasn't been activated yet, and a Cancelled
 # batch is closed - both stay fully visible and readable, they just can't send.
 INVITE_BLOCKED_REASONS = {
@@ -46,6 +58,25 @@ def assert_batch_can_invite(batch):
         raise BatchNotInvitableError(reason)
 
 
+def assert_candidate_can_be_reinvited(candidate):
+    """Raise CandidateNotInvitableError if this candidate has already PASSED.
+
+    One attempt exists per invitation, so a fresh link is a fresh exam: the candidate would sit
+    the assessment a second time and finalize_attempt would overwrite Candidate.result with
+    whatever the retake scored. A TA clicking "Send Invite Again" on the wrong row could
+    therefore turn a pass into a fail, silently, with no undo - the first attempt's result is
+    not kept anywhere else. Nothing about the previous UI hinted at that.
+
+    Only PASS is blocked. A FAIL or a terminated attempt is exactly the case where a deliberate
+    second chance is a legitimate TA decision, and PENDING means they never sat it at all.
+    """
+    if candidate.result == Candidate.Result.PASS:
+        raise CandidateNotInvitableError(
+            f'{candidate.full_name} has already passed this assessment. A new link would let '
+            f'them sit it again and replace that result, so it has not been sent.'
+        )
+
+
 def _generate_token():
     return secrets.token_urlsafe(32)[:64]
 
@@ -59,7 +90,10 @@ def create_invitations(batch, user, candidate_ids=None):
     `candidate_ids` narrows this to an explicit subset - the reviewer's checkbox selection on
     the upload screen. Omit it to invite every still-pending candidate on the batch.
 
-    Raises BatchNotInvitableError if the batch is Draft or Cancelled.
+    Raises BatchNotInvitableError if the batch is Draft or Cancelled. Does NOT need
+    assert_candidate_can_be_reinvited: this path only ever picks up PENDING_INVITE candidates,
+    who by definition have never been sent a link, so they cannot hold a result yet. The filter
+    below is what enforces that - keep the two in step if it is ever relaxed.
     """
     assert_batch_can_invite(batch)
     invitations = []
@@ -96,9 +130,13 @@ def create_single_reinvite(candidate, user, link_valid_from=None, link_valid_unt
     can't shift the window out from under every other candidate in the same batch. Omit either
     to inherit the batch's current value, same as before these parameters existed.
 
-    Raises BatchNotInvitableError if the candidate's batch is Draft or Cancelled.
+    Raises BatchNotInvitableError if the candidate's batch is Draft or Cancelled, and
+    CandidateNotInvitableError if this candidate has already passed. Both are checked here
+    rather than in the views for the same reason: this is the only place a re-invite Invitation
+    row is created, so a future caller cannot reintroduce either gap.
     """
     assert_batch_can_invite(candidate.batch)
+    assert_candidate_can_be_reinvited(candidate)
     return Invitation.objects.create(
         candidate=candidate,
         batch=candidate.batch,

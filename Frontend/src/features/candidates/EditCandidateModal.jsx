@@ -129,7 +129,21 @@ export default function EditCandidateModal({ candidate, onClose, onSaved }) {
           <div className="field"><label>Location</label><input value={form.location} onChange={(e) => set('location', e.target.value)} /></div>
           <div className="btn-row" style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
             <button className="btn" onClick={onClose}>Cancel</button>
-            <button className="btn" onClick={openResendConfirm}>📧 Send Invite Again</button>
+            {/* A candidate who already passed can't be re-invited - the server refuses it (see
+                invites.assert_candidate_can_be_reinvited), because a new link means a new
+                attempt and finalize_attempt would overwrite the pass. Disabled rather than
+                hidden so the reason is visible where the action used to be, instead of a
+                control quietly vanishing. Saving edits stays available. */}
+            <button
+              className="btn"
+              onClick={openResendConfirm}
+              disabled={candidate.result === 'pass'}
+              title={candidate.result === 'pass'
+                ? 'Already passed - a new link would let them sit the assessment again and replace this result'
+                : undefined}
+            >
+              📧 Send Invite Again
+            </button>
             <button className="btn primary" onClick={handleSave} disabled={saving}>
               <ButtonSpinner loading={saving}>💾 Save</ButtonSpinner>
             </button>

@@ -36,7 +36,7 @@ from api.services.email_templates import (
 )
 from api.services.excel_upload import generate_candidates_workbook
 from api.services.invites import (
-    BatchNotInvitableError,
+    BatchNotInvitableError, CandidateNotInvitableError,
     create_single_reinvite, partition_by_deliverable,
     send_notification_emails,
 )
@@ -279,7 +279,7 @@ class CandidateResendInviteView(APIView):
             # Only queues it - management/commands/process_email_queue.py is what actually
             # sends, on its own schedule.
             create_single_reinvite(candidate, request.user, link_from, link_until)
-        except BatchNotInvitableError as exc:
+        except (BatchNotInvitableError, CandidateNotInvitableError) as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         log_action(request, request.user, 'invite_sent', 'candidate', candidate.candidate_id,
                    details={'re_invite': True})
@@ -333,6 +333,7 @@ class CandidateBulkResendInviteView(APIView):
 
         invitations, blocked = [], None
         skipped_short_window = []
+        skipped_passed = []
         for candidate in sendable:
             # Checked per candidate, not once up front: a bulk selection could in principle
             # span batches with different exam durations, and a window that covers one batch's
@@ -349,10 +350,19 @@ class CandidateBulkResendInviteView(APIView):
                 # refusal applies to every candidate from that batch - report it once.
                 blocked = str(exc)
                 break
+            except CandidateNotInvitableError:
+                # Skipped, NOT fatal - unlike a batch refusal this is about this one person
+                # (they already passed), and the rest of the selection is still perfectly
+                # sendable. Aborting the whole request here would make one already-passed
+                # candidate silently cancel everyone else's link.
+                skipped_passed.append(candidate)
+                continue
 
         if not invitations:
             return Response(
                 {'detail': blocked or (
+                    'Every selected candidate has already passed this assessment, so no new '
+                    'links were sent.' if skipped_passed else
                     'The link window is shorter than the exam for every selected candidate.'
                     if skipped_short_window else 'No invitations could be sent.'
                 )},
@@ -371,11 +381,15 @@ class CandidateBulkResendInviteView(APIView):
         if skipped_short_window:
             detail += (f' {len(skipped_short_window)} skipped - the given window is shorter '
                        f'than their exam.')
+        if skipped_passed:
+            detail += (f' {len(skipped_passed)} skipped - already passed, and a new link would '
+                       f'replace that result.')
         if blocked:
             detail += f' Stopped early: {blocked}'
         return Response({
             'sent_count': len(invitations),
-            'skipped_count': len(skipped_no_email) + len(skipped_short_window),
+            'skipped_count': (len(skipped_no_email) + len(skipped_short_window)
+                              + len(skipped_passed)),
             'detail': detail,
         })
 
