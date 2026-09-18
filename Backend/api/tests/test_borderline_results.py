@@ -383,3 +383,76 @@ class TestBorderlineSurfacesToTheApi:
 
         assert response.data['borderline_count'] == 0
         assert response.data['pass_count'] == 1
+
+
+class TestLoweringACutoffTakesEffect:
+    """Reported live: a candidate showing "2/10, cutoff 20%, Not Cleared" after the cutoff was
+    lowered to 20 - which reads as the cutoff change having done nothing.
+
+    The cause was that the attempt had been TERMINATED, and regrade skipped every non-submitted
+    attempt outright. Candidate Details renders each section's CURRENT cutoff next to a Cleared
+    flag stored at submit time, so the two drifted apart and contradicted each other on screen.
+    """
+
+    def test_lowering_a_cutoff_clears_the_sections_it_should(self, make_graded_attempt):
+        attempt, candidate = make_graded_attempt(
+            {'logical': 2, 'quantitative': 3, 'verbal': 1, 'programming': 0})
+        assert attempt.logical_cleared is False
+
+        batch = attempt.invitation.batch
+        batch.logical_cutoff = Decimal('20.00')
+        batch.quantitative_cutoff = Decimal('20.00')
+        batch.save(update_fields=['logical_cutoff', 'quantitative_cutoff'])
+        exam_session.regrade_batch(batch)
+
+        attempt.refresh_from_db()
+        candidate.refresh_from_db()
+        # 2/10 is exactly 20%, and the cutoff is met at exactly the cutoff - a boundary that has
+        # to clear, or a TA setting 20% to admit a 2/10 finds it still rejected.
+        assert attempt.logical_cleared is True
+        assert attempt.quantitative_cleared is True
+        # Verbal and programming are still below their untouched 50%, so this stays a fail.
+        assert candidate.result == Candidate.Result.FAIL
+
+    def test_a_terminated_attempts_sections_are_recomputed_but_it_still_fails(
+        self, make_graded_attempt,
+    ):
+        attempt, candidate = make_graded_attempt(
+            {'logical': 2, 'quantitative': 3, 'verbal': 1, 'programming': 0},
+            outcome='terminated',
+        )
+        batch = attempt.invitation.batch
+        for field in ('logical_cutoff', 'quantitative_cutoff', 'verbal_cutoff',
+                      'programming_cutoff'):
+            setattr(batch, field, Decimal('0.00'))
+        batch.save()
+
+        exam_session.regrade_batch(batch)
+
+        attempt.refresh_from_db()
+        candidate.refresh_from_db()
+        # Every section now clears at a 0% cutoff, so the table agrees with the cutoff beside it...
+        assert attempt.logical_cleared is True
+        assert attempt.programming_cleared is True
+        # ...but the attempt was terminated for a proctoring violation, and no cutoff change can
+        # resurrect that. This is the half that must NOT move.
+        assert candidate.result == Candidate.Result.FAIL
+
+    def test_an_in_progress_attempt_is_still_skipped(
+        self, bank, ta_user, make_batch, make_candidate,
+    ):
+        batch = make_batch(ta_user, logical_questions=10, quantitative_questions=10,
+                           verbal_questions=10, programming_questions=10)
+        candidate = make_candidate(batch, ta_user)
+        invitation = Invitation.objects.create(
+            candidate=candidate, batch=batch, unique_link_token='in-progress-token',
+            link_expired_at=timezone.now() + timedelta(days=1), sent_by=ta_user,
+        )
+        attempt = ExamAttempt.objects.create(
+            candidate=candidate, invitation=invitation,
+            status=ExamAttempt.Status.IN_PROGRESS, started_at=timezone.now(),
+        )
+
+        assert exam_session.regrade_attempt(attempt, batch) is False
+        attempt.refresh_from_db()
+        assert attempt.logical_cleared is None

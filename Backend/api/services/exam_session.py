@@ -738,11 +738,17 @@ def graded_result(all_cleared, missed_by):
 def regrade_attempt(attempt, batch=None):
     """Re-evaluate an already-graded attempt against the batch's current cutoffs.
 
-    Only SUBMITTED attempts are re-graded: a TERMINATED attempt fails on proctoring grounds, so
-    lowering a cutoff must not resurrect it, and an IN_PROGRESS one has no scores yet.
+    IN_PROGRESS attempts are skipped - they have no scores yet.
+
+    A TERMINATED attempt has its section scores and Cleared flags recomputed, but its RESULT
+    stays FAIL: it failed on proctoring grounds, and lowering a cutoff must not resurrect it.
+    Those flags used to be skipped entirely, which made Candidate Details read as a
+    contradiction - the Section-wise Result table renders each section's CURRENT cutoff next to
+    a Cleared flag stored at submit time, so after a cutoff change it showed "2/10, cutoff 20%,
+    Not Cleared" and looked exactly like lowering the cutoff had done nothing at all.
 
     Deliberately does NOT re-mark ExamAnswer.is_correct - the answers and the answer key are not
-    what changed. Only the pass/fail verdict derived from them is recomputed.
+    what changed. Only the verdict derived from them is recomputed.
 
     A result a TA or Admin decided by hand (Candidate.result_decided_by, only ever set for a
     BORDERLINE candidate) is left alone - the attempt's own scores and section flags are still
@@ -752,7 +758,7 @@ def regrade_attempt(attempt, batch=None):
 
     Returns True if anything actually changed.
     """
-    if attempt.status != ExamAttempt.Status.SUBMITTED:
+    if attempt.status not in (ExamAttempt.Status.SUBMITTED, ExamAttempt.Status.TERMINATED):
         return False
 
     batch = batch or attempt.invitation.batch
@@ -762,7 +768,13 @@ def regrade_attempt(attempt, batch=None):
 
     candidate = attempt.candidate
     decided_by_hand = candidate.result_decided_by_id is not None
-    new_result = candidate.result if decided_by_hand else graded_result(all_cleared, missed_by)
+    terminated = attempt.status == ExamAttempt.Status.TERMINATED
+    if decided_by_hand:
+        new_result = candidate.result
+    elif terminated:
+        new_result = Candidate.Result.FAIL
+    else:
+        new_result = graded_result(all_cleared, missed_by)
     result_changed = candidate.result != new_result or candidate.overall_score != attempt.overall_score
 
     if changed:
@@ -774,12 +786,16 @@ def regrade_attempt(attempt, batch=None):
 
 
 def regrade_batch(batch):
-    """Re-grade every submitted attempt in a batch - called when its cutoffs change, so the
+    """Re-grade every finished attempt in a batch - called when its cutoffs change, so the
     pass/fail shown on Batch Details and Candidate Details reflects the new cutoffs immediately
     instead of the values stored at submit time. Returns the number of attempts affected.
+
+    Terminated attempts are included so their Section-wise Result table stops contradicting the
+    cutoff printed beside it (see regrade_attempt); their RESULT is still pinned to FAIL there.
     """
     attempts = ExamAttempt.objects.select_related('candidate', 'invitation__batch').filter(
-        invitation__batch=batch, status=ExamAttempt.Status.SUBMITTED,
+        invitation__batch=batch,
+        status__in=(ExamAttempt.Status.SUBMITTED, ExamAttempt.Status.TERMINATED),
     )
     return sum(1 for attempt in attempts if regrade_attempt(attempt, batch))
 
