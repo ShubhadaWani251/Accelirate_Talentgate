@@ -6,6 +6,7 @@ from rest_framework import serializers
 from api.models import AuditLog, Candidate, ExamAttempt, Invitation
 from api.serializers.common import format_aadhaar_last4
 from api.services import aadhaar, blob_storage, exam_session
+from api.services.candidate_profile import link_profile
 from api.services.email_templates import format_datetime
 from api.services.exam_session import termination_label
 
@@ -302,12 +303,15 @@ class CandidateListSerializer(serializers.ModelSerializer):
 class CandidateUpdateSerializer(serializers.ModelSerializer):
     """`batch` stays excluded - moving a candidate between batches has its own dedicated flow.
 
-    aadhaar_last4/date_of_birth ARE editable here even though they're the duplicate-detection
-    identity key (see services/candidate_profile.link_profile and services/duplicate_check.
-    run_duplicate_check) - saving a change through this endpoint does NOT re-run the duplicate
-    check or re-link the candidate's CandidateProfile, so a correction here can leave both
-    stale. Accepted tradeoff (TAs need to be able to fix a mistyped Aadhaar/DOB), not an
-    oversight.
+    aadhaar_last4/date_of_birth ARE editable here, and they are the identity key that decides
+    which real person a row belongs to (see services/candidate_profile.link_profile) - so a
+    change to either RE-LINKS the candidate's CandidateProfile.
+
+    This used to be skipped, and the consequence was visible on screen: a row edited from one
+    Aadhaar/DOB to another kept pointing at the profile for the OLD identity, so All Candidates
+    - which collapses to one row per profile - showed the same person two or three times, each
+    under a different stale profile. Correcting a mistyped Aadhaar is exactly the case this
+    endpoint exists for, and it was the case that broke the de-duplication.
     """
     # The model field has blank=False, so DRF would otherwise reject '' - some existing rows
     # were uploaded with a missing Aadhaar (see Candidate.ValidationStatus.MISSING_AADHAAR) and
@@ -321,6 +325,15 @@ class CandidateUpdateSerializer(serializers.ModelSerializer):
             'first_name', 'last_name', 'email', 'phone', 'aadhaar_last4', 'date_of_birth',
             'college_name', 'degree', 'stream', 'percentage', 'passing_out_year', 'location',
         ]
+
+    def update(self, instance, validated_data):
+        candidate = super().update(instance, validated_data)
+        # Unconditional rather than "only if the key changed": link_profile also mirrors the
+        # person-level fields (name, college, email...) onto the profile, so a plain name
+        # correction should reach it too. It is a get_or_create plus one save - cheap enough
+        # not to be worth guarding, and guarding it is how the bug above happened.
+        link_profile(candidate)
+        return candidate
 
 
 class CandidateDetailSerializer(serializers.ModelSerializer):
