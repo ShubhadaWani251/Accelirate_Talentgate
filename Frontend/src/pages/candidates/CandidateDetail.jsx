@@ -236,9 +236,9 @@ export default function CandidateDetail() {
             <div className="alert amber" style={{ marginTop: 12, textAlign: 'left' }}>
               <b>Borderline — this one is your call.</b>
               <div style={{ marginTop: 4 }}>
-                {candidate.full_name.split(' ')[0]} missed the cutoff by no more than 1 mark, in
-                at most 3 sections. The system does not pass or fail a result this close on its
-                own.
+                {candidate.full_name.split(' ')[0]} cleared at least 2 sections and missed the
+                rest by no more than 1 mark each. The system does not pass or fail a result this
+                close on its own.
               </div>
               {candidate.result_decided_by_name && (
                 <div style={{ marginTop: 6, color: 'var(--muted)' }}>

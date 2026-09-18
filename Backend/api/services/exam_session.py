@@ -647,31 +647,41 @@ def marks_needed_to_clear(available, cutoff):
     return int((Decimal(cutoff) * available / 100).to_integral_value(rounding=ROUND_CEILING))
 
 
-# A candidate who missed the cutoff by a hair, in a small enough number of sections, is put in
-# front of a human instead of being failed outright - see Candidate.Result.BORDERLINE.
+# A candidate who missed the cutoff by a hair, having genuinely cleared most of the paper, is
+# put in front of a human instead of being failed outright - see Candidate.Result.BORDERLINE.
 #
-# The rule, as specified: short by at most 1 mark, in at most 3 subjects. EVERY missed section
-# must be within that 1 mark. A candidate who is 1 short in two sections and 4 short in a third
-# is a clear fail, not a borderline case - they did not "just barely" miss, and putting them in
-# a TA's review queue would dilute the queue's meaning for the people who did.
+# Three conditions, ALL required:
+#   1. At least 2 sections actually CLEARED. This is the one that keeps the queue meaningful:
+#      without it, someone scoring 1/10, 2/10, 0/10, 0/10 against a 30% cutoff is "within a
+#      mark" in one section and technically near-missing in the rest, which is not a near miss
+#      at all - they did not demonstrate competence anywhere.
+#   2. EVERY missed section within 1 mark. Being 1 short in two sections and 4 short in a third
+#      is a clear fail; the 4-mark gap is not something a TA should be asked to wave through.
+#   3. At most 3 sections missed. Redundant while there are exactly 4 sections (clearing 2
+#      leaves at most 2 missed), kept explicit so the rule stays correct if that ever changes.
 BORDERLINE_MAX_SHORTFALL = 1
 BORDERLINE_MAX_SECTIONS = 3
+BORDERLINE_MIN_CLEARED = 2
 
 
-def is_borderline(missed_by):
-    """Whether {section_key: marks short} from _grade_sections is a borderline miss.
+def is_borderline(missed_by, cleared_count):
+    """Whether {section_key: marks short} plus the number of sections cleared is a borderline
+    miss.
 
-    False for an empty dict - a candidate who missed nothing passed outright and never needs a
-    human decision.
+    False for an empty `missed_by` - a candidate who missed nothing passed outright and never
+    needs a human decision.
     """
     if not missed_by or len(missed_by) > BORDERLINE_MAX_SECTIONS:
+        return False
+    if cleared_count < BORDERLINE_MIN_CLEARED:
         return False
     return all(short <= BORDERLINE_MAX_SHORTFALL for short in missed_by.values())
 
 
 def _grade_sections(attempt, answers, batch):
     """Recompute per-section scores/cleared and the overall totals from already-marked answers,
-    against the batch's CURRENT cutoffs. Returns (all_cleared, {section_key: marks short}).
+    against the batch's CURRENT cutoffs. Returns
+    (all_cleared, {section_key: marks short}, number of sections cleared).
 
     Split out of finalize_attempt so re-grading after a cutoff change (see regrade_batch) runs
     exactly the same arithmetic rather than a second, drifting copy of it.
@@ -692,6 +702,7 @@ def _grade_sections(attempt, answers, batch):
     marks_earned = marks_available = 0
     all_cleared = True
     missed_by = {}
+    cleared_count = 0
     marks_by_section = section_marks(answers)
     for section_key in SECTION_ORDER:
         earned, available = marks_by_section.get(section_key, (0, 0))
@@ -699,11 +710,15 @@ def _grade_sections(attempt, answers, batch):
         marks_available += available
 
         if available == 0:
+            # Not configured for this batch. Counts as neither cleared nor missed - there was
+            # nothing to sit.
             cleared = None
         else:
             needed = marks_needed_to_clear(available, getattr(batch, f'{section_key}_cutoff'))
             cleared = earned >= needed
-            if not cleared:
+            if cleared:
+                cleared_count += 1
+            else:
                 all_cleared = False
                 missed_by[section_key] = needed - earned
 
@@ -717,7 +732,7 @@ def _grade_sections(attempt, answers, batch):
         round(Decimal(marks_earned) / Decimal(marks_available) * 100, 2)
         if marks_available else Decimal('0.00')
     )
-    return all_cleared, missed_by
+    return all_cleared, missed_by, cleared_count
 
 
 def _write_candidate_result(candidate, result):
@@ -726,12 +741,13 @@ def _write_candidate_result(candidate, result):
     candidate.save(update_fields=['result', 'overall_score'])
 
 
-def graded_result(all_cleared, missed_by):
+def graded_result(all_cleared, missed_by, cleared_count):
     """The Candidate.Result a set of section outcomes earns, before any human decision."""
     if all_cleared:
         return Candidate.Result.PASS
     return (
-        Candidate.Result.BORDERLINE if is_borderline(missed_by) else Candidate.Result.FAIL
+        Candidate.Result.BORDERLINE if is_borderline(missed_by, cleared_count)
+        else Candidate.Result.FAIL
     )
 
 
@@ -763,7 +779,9 @@ def regrade_attempt(attempt, batch=None):
 
     batch = batch or attempt.invitation.batch
     before = [getattr(attempt, f) for f in GRADED_FIELDS]
-    all_cleared, missed_by = _grade_sections(attempt, _load_answers(attempt), batch)
+    all_cleared, missed_by, cleared_count = _grade_sections(
+        attempt, _load_answers(attempt), batch,
+    )
     changed = before != [getattr(attempt, f) for f in GRADED_FIELDS]
 
     candidate = attempt.candidate
@@ -774,7 +792,7 @@ def regrade_attempt(attempt, batch=None):
     elif terminated:
         new_result = Candidate.Result.FAIL
     else:
-        new_result = graded_result(all_cleared, missed_by)
+        new_result = graded_result(all_cleared, missed_by, cleared_count)
     result_changed = candidate.result != new_result or candidate.overall_score != attempt.overall_score
 
     if changed:
@@ -820,7 +838,7 @@ def finalize_attempt(attempt, outcome, reason=None):
         ExamAnswer.objects.bulk_update(answered, ['is_correct'])
 
     batch = attempt.invitation.batch
-    all_cleared, missed_by = _grade_sections(attempt, answers, batch)
+    all_cleared, missed_by, cleared_count = _grade_sections(attempt, answers, batch)
     attempt.total_answered = len(answered)
 
     now = timezone.now()
@@ -842,7 +860,8 @@ def finalize_attempt(attempt, outcome, reason=None):
     candidate.overall_score = attempt.overall_score
     _write_candidate_result(
         candidate,
-        graded_result(all_cleared, missed_by) if outcome == 'submitted' else Candidate.Result.FAIL,
+        graded_result(all_cleared, missed_by, cleared_count) if outcome == 'submitted'
+        else Candidate.Result.FAIL,
     )
 
     return attempt

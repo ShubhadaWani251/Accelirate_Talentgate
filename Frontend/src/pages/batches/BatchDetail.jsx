@@ -208,10 +208,10 @@ export default function BatchDetail() {
         <div className="stat-card"><div className="stat-num">{batch.total_candidates}</div><div className="stat-lbl">Candidates</div></div>
         <div className="stat-card"><div className="stat-num">{batch.pass_count}</div><div className="stat-lbl">Pass</div></div>
         <div className="stat-card"><div className="stat-num">{batch.fail_count}</div><div className="stat-lbl">Fail</div></div>
-        {/* Not just a statistic - it's a work queue. Every candidate counted here missed a
-            cutoff by at most 1 mark and is waiting on a TA to decide Pass or Fail from their
-            Candidate Details page; until someone does, they count as neither passed nor failed
-            in the two cards beside this one. */}
+        {/* Not just a statistic - it's a work queue. Every candidate counted here cleared at
+            least 2 sections and missed the rest by no more than 1 mark each, and is waiting on
+            a TA to decide Pass or Fail from their Candidate Details page; until someone does,
+            they count as neither passed nor failed in the two cards beside this one. */}
         <div className="stat-card"><div className="stat-num">{batch.borderline_count}</div><div className="stat-lbl">Borderline</div></div>
       </div>
 

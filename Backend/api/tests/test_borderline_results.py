@@ -109,27 +109,39 @@ class TestMarksNeededToClear:
 
 
 class TestIsBorderline:
-    def test_one_section_one_mark_short(self):
-        assert exam_session.is_borderline({'logical': 1}) is True
+    def test_three_cleared_and_one_section_one_mark_short(self):
+        assert exam_session.is_borderline({'logical': 1}, cleared_count=3) is True
 
-    def test_three_sections_each_one_mark_short(self):
+    def test_exactly_two_cleared_and_two_sections_one_mark_short(self):
+        # The boundary of the "cleared at least 2" rule.
         assert exam_session.is_borderline(
-            {'logical': 1, 'quantitative': 1, 'verbal': 1}) is True
+            {'logical': 1, 'quantitative': 1}, cleared_count=2) is True
 
-    def test_all_four_sections_is_too_many(self):
-        # The cap is 3 subjects. Missing every section, however narrowly, is not a near miss.
+    def test_only_one_section_cleared_is_not_borderline(self):
+        # Even with every miss inside a mark: clearing one section out of four is not a near
+        # miss, it is a fail that happened to be close in places.
         assert exam_session.is_borderline(
-            {'logical': 1, 'quantitative': 1, 'verbal': 1, 'programming': 1}) is False
+            {'logical': 1, 'quantitative': 1, 'verbal': 1}, cleared_count=1) is False
+
+    def test_nothing_cleared_is_not_borderline(self):
+        assert exam_session.is_borderline({'logical': 1}, cleared_count=0) is False
+
+    def test_all_four_sections_missed_is_too_many(self):
+        # Cannot happen once 2 must be cleared, but the cap is kept explicit so the rule stays
+        # correct if the number of sections ever changes.
+        assert exam_session.is_borderline(
+            {'logical': 1, 'quantitative': 1, 'verbal': 1, 'programming': 1},
+            cleared_count=0) is False
 
     def test_a_section_missed_by_more_than_one_mark_disqualifies_the_whole_thing(self):
-        # The decisive case. One section 1 short and another 4 short is a plain fail: EVERY
-        # missed section has to be within a mark, or the borderline queue fills with people who
-        # were not close.
-        assert exam_session.is_borderline({'logical': 1, 'quantitative': 4}) is False
+        # EVERY missed section has to be within a mark, or the borderline queue fills with
+        # people who were not close.
+        assert exam_session.is_borderline(
+            {'logical': 1, 'quantitative': 4}, cleared_count=2) is False
 
     def test_missing_nothing_is_not_borderline(self):
         # A candidate who cleared everything passed outright and never needs a human decision.
-        assert exam_session.is_borderline({}) is False
+        assert exam_session.is_borderline({}, cleared_count=4) is False
 
 
 class TestGradingProducesBorderline:
@@ -138,10 +150,29 @@ class TestGradingProducesBorderline:
             {'logical': 4, 'quantitative': 5, 'verbal': 5, 'programming': 5})
         assert candidate.result == Candidate.Result.BORDERLINE
 
-    def test_one_mark_short_in_three_sections(self, make_graded_attempt):
+    def test_two_cleared_and_two_sections_one_mark_short(self, make_graded_attempt):
+        _attempt, candidate = make_graded_attempt(
+            {'logical': 4, 'quantitative': 4, 'verbal': 5, 'programming': 5})
+        assert candidate.result == Candidate.Result.BORDERLINE
+
+    def test_only_one_section_cleared_is_a_fail(self, make_graded_attempt):
+        # Three sections each exactly 1 mark short, one cleared. Every miss is inside a mark and
+        # only 3 sections were missed, so the earlier rule called this BORDERLINE - the
+        # "cleared at least 2" requirement is the whole reason it is now a fail.
         _attempt, candidate = make_graded_attempt(
             {'logical': 4, 'quantitative': 4, 'verbal': 4, 'programming': 5})
-        assert candidate.result == Candidate.Result.BORDERLINE
+        assert candidate.result == Candidate.Result.FAIL
+
+    def test_the_reported_case_is_a_fail(self, make_graded_attempt):
+        """Reported live: 1/10, 2/10, 0/10, 0/10 against a 30% cutoff, queried as "how is this
+        borderline". It is not, on two independent counts - nothing was cleared, and two of the
+        sections are 3 marks short - and this pins that down.
+        """
+        _attempt, candidate = make_graded_attempt(
+            {'logical': 1, 'quantitative': 2, 'verbal': 0, 'programming': 0},
+            cutoff=Decimal('30.00'),
+        )
+        assert candidate.result == Candidate.Result.FAIL
 
     def test_one_mark_short_in_all_four_sections_is_a_fail(self, make_graded_attempt):
         _attempt, candidate = make_graded_attempt(

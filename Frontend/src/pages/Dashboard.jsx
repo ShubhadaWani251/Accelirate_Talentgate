@@ -168,7 +168,7 @@ export default function Dashboard() {
                     <td><span className={`pill ${STATUS_PILL[b.status] || 'gray'}`}>{b.status_display}</span></td>
                     <td>{b.pass_count}</td>
                     <td>{b.fail_count}</td>
-                    {/* Candidates who missed a cutoff by at most 1 mark and are waiting on a
+                    {/* Candidates who cleared most sections and missed the rest by a single mark, waiting on a
                         TA's pass/fail decision - they are counted in neither column above. */}
                     <td>{b.borderline_count}</td>
                     <td style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
