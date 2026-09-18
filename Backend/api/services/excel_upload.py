@@ -197,9 +197,9 @@ def generate_candidates_workbook(candidates, latest_attempt_fn, status_display_f
             candidate.location,
             status_display_fn(candidate),
             candidate.get_result_display(),
-            # Raw correct-answer counts per section, same fields the Result screen scores
-            # against - blank (not 0) when there's no attempt yet, so "never took it" stays
-            # visibly different from "scored zero".
+            # MARKS per section, the same fields the Result screen scores against (see
+            # exam_session._grade_sections) - blank (not 0) when there's no attempt yet, so
+            # "never took it" stays visibly different from "scored zero".
             attempt.logical_score if attempt else None,
             attempt.quantitative_score if attempt else None,
             attempt.verbal_score if attempt else None,

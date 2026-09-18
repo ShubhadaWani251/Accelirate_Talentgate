@@ -86,17 +86,24 @@ def _instructions_payload(invitation):
 
 
 def _result_payload(attempt):
+    """The candidate's own end-of-exam screen (ExamResult.jsx): section label and "score/total"
+    only, no pass/fail and no cutoff - see that component for why.
+
+    `score` and `total` are both MARKS, read off the attempt's own paper rather than the batch's
+    configured question counts. Those two only agree while every question is worth 1 mark; a
+    marks-weighted section would otherwise show a candidate something like "12/10".
+    """
     batch = attempt.invitation.batch
+    marks_by_section = exam_session.section_marks_for_attempt(attempt)
     sections = []
     for key in SECTION_ORDER:
-        total = getattr(batch, f'{key}_questions')
-        if total <= 0:
+        if getattr(batch, f'{key}_questions') <= 0:
             continue
         sections.append({
             'key': key,
             'label': SECTION_LABELS[key],
             'score': getattr(attempt, f'{key}_score'),
-            'total': total,
+            'total': marks_by_section.get(key, (0, 0))[1],
             'cutoff': float(getattr(batch, f'{key}_cutoff')),
             'cleared': getattr(attempt, f'{key}_cleared'),
         })
@@ -104,7 +111,11 @@ def _result_payload(attempt):
         'result': attempt.candidate.result,
         'total_correct': attempt.total_correct,
         'total_answered': attempt.total_answered,
-        'total_questions': sum(s['total'] for s in sections),
+        'total_marks_earned': attempt.total_marks_earned,
+        'total_marks': attempt.total_marks,
+        # Still a COUNT of questions, off the batch config - not `sum(s['total'])`, which is
+        # now a marks figure.
+        'total_questions': sum(getattr(batch, f'{key}_questions') for key in SECTION_ORDER),
         'sections': sections,
     }
 

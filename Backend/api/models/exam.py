@@ -94,11 +94,24 @@ class ExamAttempt(models.Model):
                               default=Status.IN_PROGRESS)
     termination_reason = models.CharField(max_length=255, null=True, blank=True)
 
-    # Scores
+    # Scores.
+    #
+    # UNITS, because three different ones live here: `total_answered` and `total_correct` are
+    # QUESTION COUNTS, the four `<section>_score` fields and `total_marks_earned` are MARKS, and
+    # `overall_score` is a PERCENTAGE. Marks and counts only coincide while every question is
+    # worth 1 (see Question.marks); the moment a 2-mark question is imported they diverge, which
+    # is exactly why the denominators below are stored per attempt.
     total_answered = models.SmallIntegerField(default=0)
     total_correct = models.SmallIntegerField(default=0)
     overall_score = models.DecimalField(max_digits=5, decimal_places=2,
                                         null=True, blank=True)
+    # Marks earned and marks available across the whole paper. `total_marks` is stored rather
+    # than derived from the batch's question counts because a stratified random draw
+    # (services/question_selection.py) can hand two candidates in one batch papers worth
+    # different totals once marks vary - so the denominator belongs to the attempt, not the
+    # batch configuration.
+    total_marks_earned = models.SmallIntegerField(default=0)
+    total_marks = models.SmallIntegerField(default=0)
     logical_score = models.SmallIntegerField(null=True, blank=True)
     quantitative_score = models.SmallIntegerField(null=True, blank=True)
     verbal_score = models.SmallIntegerField(null=True, blank=True)

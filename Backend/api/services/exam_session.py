@@ -600,10 +600,35 @@ def _load_answers(attempt):
 
 # Fields _grade_sections writes, for a targeted bulk_update on re-grade.
 GRADED_FIELDS = (
-    ['total_correct', 'overall_score']
+    ['total_correct', 'total_marks_earned', 'total_marks', 'overall_score']
     + [f'{key}_score' for key in SECTION_ORDER]
     + [f'{key}_cleared' for key in SECTION_ORDER]
 )
+
+
+def section_marks(answers):
+    """{section_key: (marks_earned, marks_available)} over a loaded answer list.
+
+    The denominator is the marks on THIS attempt's own paper, never the batch's configured
+    question count: with weighted marks those are different numbers, and a stratified random
+    draw can give two candidates in one batch papers worth different totals. Shared with the
+    read paths (views/exam._result_payload, serializers/candidates) so a score and the total it
+    is shown over can't be computed two different ways.
+    """
+    totals = {}
+    for answer in answers:
+        key = answer.question.section.section_key
+        earned, available = totals.get(key, (0, 0))
+        marks = answer.question.marks
+        totals[key] = (earned + (marks if answer.is_correct else 0), available + marks)
+    return totals
+
+
+def section_marks_for_attempt(attempt):
+    """section_marks() for a caller that doesn't already hold the attempt's answers - one
+    query, so it belongs on a detail/result view rather than inside a list loop.
+    """
+    return section_marks(_load_answers(attempt))
 
 
 def _grade_sections(attempt, answers, batch):
@@ -613,32 +638,44 @@ def _grade_sections(attempt, answers, batch):
     Split out of finalize_attempt so re-grading after a cutoff change (see regrade_batch) runs
     exactly the same arithmetic rather than a second, drifting copy of it.
 
-    NOTE on units: `<section>_score` and `total_correct` are RAW COUNTS of correct answers, while
-    `overall_score` is a PERCENTAGE. Mixing those two up is what previously made a 2-out-of-40
-    result render as "5/40" in the UI.
-    """
-    total_correct = 0
-    all_cleared = True
-    for section_key in SECTION_ORDER:
-        section_answers = [a for a in answers if a.question.section.section_key == section_key]
-        total = len(section_answers)
-        correct = sum(1 for a in section_answers if a.is_correct)
-        total_correct += correct
+    Scoring is MARKS-WEIGHTED: a question worth 2 contributes twice what a question worth 1
+    does, both to the section score and to the percentage the cutoff is applied to. It used to
+    count correct answers instead, which made Question.marks a field a TA could set on import
+    with no effect whatsoever on any result - the number was collected, validated, displayed in
+    the question bank, and then silently ignored. Every question in the bank is currently worth
+    1 mark, so this changes no existing result by a single point; it makes the field mean what
+    it says from the next weighted question onwards.
 
-        if total == 0:
+    NOTE on units: `<section>_score` and `total_marks_earned` are MARKS, `total_correct` is a
+    QUESTION COUNT (deliberately kept, it answers a different question - "how many did they get
+    right"), and `overall_score` is a PERCENTAGE. Mixing those up is what previously made a
+    2-out-of-40 result render as "5/40" in the UI.
+    """
+    marks_earned = marks_available = 0
+    all_cleared = True
+    marks_by_section = section_marks(answers)
+    for section_key in SECTION_ORDER:
+        earned, available = marks_by_section.get(section_key, (0, 0))
+        marks_earned += earned
+        marks_available += available
+
+        if available == 0:
             cleared = None
         else:
             cutoff = getattr(batch, f'{section_key}_cutoff')
-            cleared = (Decimal(correct) / Decimal(total) * 100) >= cutoff
+            cleared = (Decimal(earned) / Decimal(available) * 100) >= cutoff
             if not cleared:
                 all_cleared = False
 
-        setattr(attempt, f'{section_key}_score', correct)
+        setattr(attempt, f'{section_key}_score', earned)
         setattr(attempt, f'{section_key}_cleared', cleared)
 
-    attempt.total_correct = total_correct
+    attempt.total_correct = sum(1 for a in answers if a.is_correct)
+    attempt.total_marks_earned = marks_earned
+    attempt.total_marks = marks_available
     attempt.overall_score = (
-        round(Decimal(total_correct) / Decimal(len(answers)) * 100, 2) if answers else Decimal('0.00')
+        round(Decimal(marks_earned) / Decimal(marks_available) * 100, 2)
+        if marks_available else Decimal('0.00')
     )
     return all_cleared
 

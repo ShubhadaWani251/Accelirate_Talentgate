@@ -5,7 +5,7 @@ from rest_framework import serializers
 
 from api.models import AuditLog, Candidate, ExamAttempt, Invitation
 from api.serializers.common import format_aadhaar_last4
-from api.services import aadhaar, blob_storage
+from api.services import aadhaar, blob_storage, exam_session
 from api.services.email_templates import format_datetime
 from api.services.exam_session import termination_label
 
@@ -195,6 +195,7 @@ class CandidateListSerializer(serializers.ModelSerializer):
     programming_score = serializers.SerializerMethodField()
     overall_score = serializers.SerializerMethodField()
     total_correct = serializers.SerializerMethodField()
+    total_marks_earned = serializers.SerializerMethodField()
     overall_total = serializers.SerializerMethodField()
     has_attempt = serializers.SerializerMethodField()
     # Email delivery state for the latest invitation, so All Candidates can show which
@@ -214,7 +215,8 @@ class CandidateListSerializer(serializers.ModelSerializer):
             'college_name', 'degree', 'stream', 'percentage', 'passing_out_year', 'location',
             'aadhaar_last4', 'date_of_birth', 'status', 'status_display', 'result', 'result_display',
             'logical_score', 'quantitative_score', 'verbal_score', 'programming_score',
-            'overall_score', 'total_correct', 'overall_total', 'has_attempt',
+            'overall_score', 'total_correct', 'total_marks_earned', 'overall_total',
+            'has_attempt',
             'email_status', 'email_status_display', 'email_error', 'email_sent_at',
             'email_retry_count', 'link_valid_from', 'link_valid_until',
         ]
@@ -265,13 +267,30 @@ class CandidateListSerializer(serializers.ModelSerializer):
         return attempt.overall_score if attempt else candidate.overall_score
 
     def get_total_correct(self, candidate):
-        """RAW COUNT, so the Overall column can read "2/40" consistently with the per-section
-        columns beside it (which are also raw counts) rather than mixing in a percentage.
+        """QUESTION COUNT of correct answers. Not the Overall column's numerator - that's
+        total_marks_earned, which agrees with the per-section columns beside it. Kept because
+        "how many did they get right" is a separate, genuinely useful figure once marks are
+        weighted, and because it is what an export consumer would expect from this name.
         """
         attempt = _latest_attempt(candidate)
         return attempt.total_correct if attempt else None
 
+    def get_total_marks_earned(self, candidate):
+        """MARKS, the numerator for the Overall column's "x/y" - matches the per-section score
+        columns, which are marks too.
+        """
+        attempt = _latest_attempt(candidate)
+        return attempt.total_marks_earned if attempt else None
+
     def get_overall_total(self, candidate):
+        """MARKS available, off the attempt's own paper. Falls back to the batch's configured
+        question counts only when there's no attempt yet - no paper has been drawn at that
+        point, so its marks total doesn't exist, and with the default 1 mark per question the
+        count is the right expectation to show.
+        """
+        attempt = _latest_attempt(candidate)
+        if attempt and attempt.total_marks:
+            return attempt.total_marks
         batch = candidate.batch
         return (batch.logical_questions + batch.quantitative_questions
                 + batch.verbal_questions + batch.programming_questions)
@@ -319,6 +338,7 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
     overall_score = serializers.SerializerMethodField()
     overall_total = serializers.SerializerMethodField()
     total_correct = serializers.SerializerMethodField()
+    total_marks_earned = serializers.SerializerMethodField()
     evidence = serializers.SerializerMethodField()
     timeline = serializers.SerializerMethodField()
     email_status = serializers.SerializerMethodField()
@@ -337,7 +357,7 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
             'college_name', 'degree', 'stream', 'percentage', 'passing_out_year', 'location',
             'aadhaar_last4', 'date_of_birth', 'batch_id', 'batch_name', 'status', 'status_display',
             'result', 'result_display', 'overall_score', 'overall_total', 'total_correct',
-            'section_results',
+            'total_marks_earned', 'section_results',
             'evidence', 'timeline',
             'email_status', 'email_status_display', 'email_error', 'email_sent_at',
             'email_last_attempt_at', 'email_retry_count',
@@ -378,18 +398,30 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
         return attempt.overall_score if attempt else candidate.overall_score
 
     def get_total_correct(self, candidate):
-        """RAW COUNT of correct answers - this is the numerator for "x/overall_total".
-
-        Added because the UI was rendering overall_score (a percentage) over overall_total (a
-        question count), so 2 correct out of 40 displayed as "5/40" instead of "2/40".
+        """QUESTION COUNT of correct answers. Its own figure, no longer the numerator for
+        "x/overall_total" - see get_total_marks_earned, which is.
         """
         attempt = _latest_attempt(candidate)
         return attempt.total_correct if attempt else None
 
-    def get_overall_total(self, candidate):
-        """Denominator for the "14/40" reading on Candidate Details - one mark per question,
-        so it's the batch's four section counts added up.
+    def get_total_marks_earned(self, candidate):
+        """MARKS earned - the numerator for the "14/40" reading on Candidate Details.
+
+        Separate from overall_score, which is a PERCENTAGE: the UI once rendered that over
+        overall_total, so 2 out of 40 displayed as "5/40".
         """
+        attempt = _latest_attempt(candidate)
+        return attempt.total_marks_earned if attempt else None
+
+    def get_overall_total(self, candidate):
+        """MARKS available - the denominator for that "14/40" reading, taken from the
+        attempt's own paper rather than the batch's question counts, which are only the same
+        number while every question is worth 1 mark. Falls back to the counts when no attempt
+        exists yet, since there is no paper to total at that point.
+        """
+        attempt = _latest_attempt(candidate)
+        if attempt and attempt.total_marks:
+            return attempt.total_marks
         batch = candidate.batch
         return (batch.logical_questions + batch.quantitative_questions
                 + batch.verbal_questions + batch.programming_questions)
@@ -397,17 +429,26 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
     def get_section_results(self, candidate):
         attempt = _latest_attempt(candidate)
         batch = candidate.batch
+        # One extra query, on a single-candidate detail response only - never inside a list
+        # loop. Needed because the per-section denominator is the marks on this candidate's own
+        # paper, which lives on their ExamAnswer rows rather than on the attempt.
+        marks_by_section = (
+            exam_session.section_marks_for_attempt(attempt) if attempt else {}
+        )
         rows = []
         for key, label in SECTION_LABELS.items():
             score = getattr(attempt, f'{key}_score', None) if attempt else None
             cleared = getattr(attempt, f'{key}_cleared', None) if attempt else None
             rows.append({
                 'section': label,
+                # MARKS, matching `total` below - not a count of correct answers.
                 'score': score,
-                # Per-section denominator. Sent explicitly because the UI previously hardcoded
-                # "/10", which silently showed a wrong total for any batch not configured with
-                # exactly 10 questions per section.
-                'total': getattr(batch, f'{key}_questions'),
+                # Per-section denominator, in marks. Sent explicitly because the UI previously
+                # hardcoded "/10", which silently showed a wrong total for any batch not
+                # configured with exactly 10 questions per section. Falls back to the batch's
+                # question count when there's no attempt, where there is no paper to total.
+                'total': (marks_by_section.get(key, (0, 0))[1] if attempt
+                          else getattr(batch, f'{key}_questions')),
                 'cutoff': float(getattr(batch, f'{key}_cutoff')),
                 'cleared': cleared,
             })

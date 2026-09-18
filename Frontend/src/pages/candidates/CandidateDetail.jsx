@@ -195,10 +195,13 @@ export default function CandidateDetail() {
           </div>
           <div style={{ fontSize: 12.5, marginTop: 8 }}>
             <b>
-              {/* total_correct is the mark COUNT; overall_score is a PERCENTAGE. Rendering the
-                  percentage over the question count is what made 2-of-40 read as "5/40". */}
-              Overall: {candidate.total_correct != null
-                ? `${candidate.total_correct}/${candidate.overall_total} (${candidate.overall_score}%)`
+              {/* total_marks_earned and overall_total are both MARKS; overall_score is a
+                  PERCENTAGE. Rendering the percentage over the total is what made 2-of-40 read
+                  as "5/40". `total_correct` is a third unit again - a question count - and is
+                  deliberately not shown in this pair; it's served by the API for exports and
+                  would only read as a contradiction here once marks are weighted. */}
+              Overall: {candidate.total_marks_earned != null
+                ? `${candidate.total_marks_earned}/${candidate.overall_total} (${candidate.overall_score}%)`
                 : `—/${candidate.overall_total}`}{' '}
               · <span className={`pill ${RESULT_PILL[candidate.result] || 'gray'}`}>{candidate.result_display}</span>
             </b>
@@ -332,7 +335,19 @@ export default function CandidateDetail() {
       )}
 
       <div className="btn-row no-print" style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-        <button className="btn primary" onClick={openInviteConfirm} disabled={sending}>
+        {/* Refused server-side for a candidate who already passed (see
+            invites.assert_candidate_can_be_reinvited) - a new link is a new attempt, and
+            finalize_attempt would overwrite the pass with whatever the retake scored. Disabled
+            with the reason on hover rather than removed, so the rule is discoverable from the
+            place a TA looks for the action. */}
+        <button
+          className="btn primary"
+          onClick={openInviteConfirm}
+          disabled={sending || candidate.result === 'pass'}
+          title={candidate.result === 'pass'
+            ? 'Already passed - a new link would let them sit the assessment again and replace this result'
+            : undefined}
+        >
           <ButtonSpinner loading={sending}>Send Invite Link</ButtonSpinner>
         </button>
         <button className="btn" onClick={() => window.print()}>🖨 Export Candidate Details (PDF)</button>
