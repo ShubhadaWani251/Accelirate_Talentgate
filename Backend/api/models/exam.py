@@ -46,6 +46,12 @@ class ExamAttempt(models.Model):
         QR_LEGACY = 'qr_legacy', 'Legacy Unsigned QR'
         QR_SECURE = 'qr_secure', 'UIDAI Secure QR'
         OCR = 'ocr', 'OCR Fallback'
+        # A masked card ("XXXX XXXX 5991"), which is what UIDAI's e-Aadhaar and DigiLocker now
+        # download by default. Recorded distinctly from plain OCR because the evidence really is
+        # weaker - no full number means no Verhoeff checksum and no aadhaar_number_hash, so
+        # services.aadhaar.find_hash_conflicts cannot see these captures at all. See
+        # services.aadhaar._apply_masked_verdict for the full trade-off.
+        OCR_MASKED = 'ocr_masked', 'OCR (Masked Card)'
 
     # Automated reading of the id_photo captured above - see services/aadhaar.py. Gated
     # end-to-end by settings.AADHAAR_VERIFICATION_ENABLED, which defaults to ON (it is an
@@ -57,7 +63,7 @@ class ExamAttempt(models.Model):
         default=AadhaarVerificationStatus.PENDING,
     )
     aadhaar_verification_method = models.CharField(
-        max_length=9, choices=AadhaarVerificationMethod.choices,
+        max_length=12, choices=AadhaarVerificationMethod.choices,
         default=AadhaarVerificationMethod.NONE,
     )
     # Last 4 digits of whatever number was actually decoded off the photographed card - safe to

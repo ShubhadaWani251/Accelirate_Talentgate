@@ -71,9 +71,10 @@ function aadhaarFeedback(verdict) {
   return {
     feedback: {
       tone: 'red',
-      text: 'Your Aadhaar Card is not clearly visible — please retake the photo showing the '
-        + 'FRONT side, with your Aadhaar number and date of birth both clearly visible, and no '
-        + 'glare. The assessment cannot start until this is verified.',
+      text: 'Your Aadhaar Card could not be read — please retake the photo showing the FRONT '
+        + 'side, with the Aadhaar number and your date of birth both in frame and no glare. '
+        + "A masked card showing only the last 4 digits (XXXX XXXX 1234) is fine. The "
+        + 'assessment cannot start until this is verified.',
     },
     retakeDisabled: false,
     resolved: false,
@@ -255,7 +256,7 @@ export default function ExamIdVerify() {
               <PhotoCapture
                 stream={stream}
                 label="Aadhaar Card"
-                hint="Front side only — your Aadhaar number and date of birth must both be clearly visible"
+                hint="Front side only — the Aadhaar number and your date of birth must both be in frame. A masked card (XXXX XXXX 1234) is fine."
                 captured={idPhoto}
                 onCapture={onCaptureAadhaar}
                 verifying={aadhaarVerifying}

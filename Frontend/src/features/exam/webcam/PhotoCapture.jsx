@@ -134,9 +134,9 @@ export default function PhotoCapture({
         <div style={{ marginTop: 8 }}>
           <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 6 }}>
             Or upload your Aadhaar instead — an image (JPG/PNG) or the official e-Aadhaar PDF.
-            Make sure the Aadhaar number and date of birth are clearly visible. If your PDF is
-            password-protected, we will try to open it using your registered name and date of
-            birth.
+            Make sure the Aadhaar number and your date of birth are both in frame; a masked
+            card showing only the last 4 digits is fine. If your PDF is password-protected, we
+            will try to open it using your registered name and date of birth.
           </div>
           <input
             type="file"

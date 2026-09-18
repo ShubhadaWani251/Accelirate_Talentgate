@@ -25,7 +25,10 @@ Two paths, matching how differently they cost:
     for a card with no QR / an unreadable one, OCR the photo later and hunt the text for exactly
     one Verhoeff-valid 12-digit run, a date of birth, and Aadhaar-specific wording (see
     _looks_like_aadhaar_card - a document that isn't actually an Aadhaar card should never be
-    accepted just because it happens to contain a passing 12-digit number). Deferred because OCR
+    accepted just because it happens to contain a passing 12-digit number). Failing that, for a
+    MASKED card ("XXXX XXXX 5991") the last four digits alone - the default output of both UIDAI's
+    e-Aadhaar download and DigiLocker, where no full number is printed to checksum at all; see
+    _apply_masked_verdict for exactly what that costs. Deferred because OCR
     (a real ML engine or a hosted API call) is a fundamentally different cost than a QR decode,
     and this app's actual load pattern is batches of candidates starting in the same scheduled
     window - this codebase has no task queue (no Celery), so this reuses the exact
@@ -91,6 +94,36 @@ logger = logging.getLogger(__name__)
 # which spaces were "part of the number" and which weren't.
 _AADHAAR_RE = re.compile(r'(?<!\d)(\d{4})\s?(\d{4})\s?(\d{4})(?!\d)')
 
+# A MASKED Aadhaar number - "XXXX XXXX 5991" - where only the last four digits are printed at all.
+#
+# Not an edge case: this is what UIDAI's own e-Aadhaar download and DigiLocker now produce by
+# DEFAULT, so it is the normal card for any candidate who photographs a downloaded PDF or a phone
+# screen instead of a physical card. Confirmed against real captures this system rejected. There
+# is no full number here to checksum - see _apply_masked_verdict for what that costs and why it is
+# still worth accepting.
+#
+# The mask is written with X on both UIDAI's and DigiLocker's output; '*' is allowed too because
+# some third-party renderers use it, and lowercase because OCR routinely reads a boxy uppercase X
+# as one. The leading lookbehind keeps this from firing inside a word (a stray "MAXXXX..." in
+# noisy OCR text), and \s* rather than \s lets it survive OCR collapsing or inserting the spacing
+# between the mask groups.
+_MASKED_AADHAAR_RE = re.compile(r'(?<![0-9A-Za-z])[Xx*]{4}\s*[Xx*]{4}\s*(\d{4})(?!\d)')
+
+# A Virtual ID, printed directly under the Aadhaar number on a real physical card
+# ("VID : 9194 3855 4334 4604"). Removed from the text BEFORE hunting for the Aadhaar number,
+# because _AADHAAR_RE's digit-boundary anchoring does not exclude it: the VID's first three
+# groups are a 12-digit run whose next character is a space, so it is offered as a candidate like
+# any other. It then only has to pass Verhoeff by chance - roughly one card in ten - to become a
+# second DISTINCT valid candidate, which _extract_verhoeff_valid_number reads as unresolvable
+# ambiguity and rejects the whole card for. Stripping it beforehand is what keeps that from ever
+# being a contest.
+#
+# Stripped rather than excluded by a lookaround: the obvious lookaround ("not followed by another
+# space-separated group of four") would also reject the same number printed twice in a row, which
+# real cards do and which _extract_verhoeff_valid_number's dedupe exists specifically to handle.
+# V[I1L] because OCR reads that glyph as a one or an L about as often as an I.
+_VID_RE = re.compile(r'V[I1L]D\s*:?\s*(?:\d{4}\s*){3}\d{4}', re.IGNORECASE)
+
 # Matches DD-MM-YYYY / DD/MM/YYYY / DD.MM.YYYY - the shapes an Aadhaar card's printed date of
 # birth, or a QR's dob attribute, actually uses.
 _DOB_RE = re.compile(r'(\d{2})[-/.](\d{2})[-/.](\d{4})')
@@ -104,6 +137,15 @@ _DOB_RE = re.compile(r'(\d{2})[-/.](\d{2})[-/.](\d{4})')
 # multi-date rule below, which then found the card's own "issued" date alongside the real DOB
 # and returned None for both - the same failure mode this label-first rule exists to prevent.
 _LABELLED_DOB_RE = re.compile(r'D[O0]B\s*:?\s*(\d{2})[-/.](\d{2})[-/.](\d{4})', re.IGNORECASE)
+
+# The same label, but YYYY/MM/DD - what a DigiLocker-issued Aadhaar prints ("DOB: 2000/07/01"),
+# confirmed against a real capture. Kept as its own pattern rather than widened into the one
+# above because the two cannot be confused: a 4-2-2 date can never match the 2-2-4 pattern and
+# vice versa, so trying them in turn is unambiguous, whereas a single pattern accepting either
+# would have to guess which end held the year for a date like 01/02/2003.
+_LABELLED_DOB_YMD_RE = re.compile(
+    r'D[O0]B\s*:?\s*(\d{4})[-/.](\d{2})[-/.](\d{2})', re.IGNORECASE,
+)
 
 # A conservative, English-only marker set for "this document is actually an Aadhaar card," not
 # some other ID - used only by the OCR fallback path below. The QR path needs no equivalent check:
@@ -274,12 +316,13 @@ def _hash_full_number(full_number):
     ).hexdigest()
 
 
-def _apply_verdict(attempt, method, full_number, dob=None, dob_year=None):
-    """Shared by the fast (QR) and slow (OCR) paths: given a full number that already passed
-    Verhoeff, requires BOTH its last 4 digits AND a date of birth to match the candidate's on-file
+def _record_verdict(attempt, method, last4, number_hash, dob, dob_year):
+    """The comparison and the write, shared by every path that can produce a verdict.
+
+    Requires BOTH the last 4 digits AND a date of birth to match the candidate's on-file
     aadhaar_last4/date_of_birth before recording MATCH - see this module's own docstring for why
-    last-4-alone isn't trusted any more. `full_number` itself is never assigned to any attribute
-    on `attempt`.
+    last-4-alone isn't trusted. No full number is ever passed in or assigned to `attempt`; the
+    callers reduce it to these two values first.
 
     If the candidate's own on-file date_of_birth is blank, or neither `dob` nor `dob_year` could
     be decoded from this source, there simply isn't enough information to compare - no verdict is
@@ -292,7 +335,6 @@ def _apply_verdict(attempt, method, full_number, dob=None, dob_year=None):
     if not candidate.date_of_birth or (dob is None and dob_year is None):
         return False
 
-    last4 = full_number[-4:]
     last4_matches = bool(candidate.aadhaar_last4) and last4 == candidate.aadhaar_last4
     dob_matches = (
         dob == candidate.date_of_birth if dob is not None
@@ -306,13 +348,52 @@ def _apply_verdict(attempt, method, full_number, dob=None, dob_year=None):
     attempt.aadhaar_verification_status = status
     attempt.aadhaar_verification_method = method
     attempt.aadhaar_decoded_last4 = last4
-    attempt.aadhaar_number_hash = _hash_full_number(full_number)
+    attempt.aadhaar_number_hash = number_hash
     attempt.aadhaar_verified_at = timezone.now()
     attempt.save(update_fields=[
         'aadhaar_verification_status', 'aadhaar_verification_method',
         'aadhaar_decoded_last4', 'aadhaar_number_hash', 'aadhaar_verified_at',
     ])
     return True
+
+
+def _apply_verdict(attempt, method, full_number, dob=None, dob_year=None):
+    """Verdict from a FULL 12-digit number that already passed Verhoeff - the QR paths and the
+    OCR path for an unmasked card. `full_number` is reduced to its last 4 and its one-way hash
+    here and never assigned to any attribute on `attempt`.
+    """
+    return _record_verdict(
+        attempt, method, full_number[-4:], _hash_full_number(full_number), dob, dob_year,
+    )
+
+
+def _apply_masked_verdict(attempt, last4, dob):
+    """Verdict from a MASKED card ("XXXX XXXX 5991"), where no full number exists to read.
+
+    Two things are unavoidably weaker here, both worth stating plainly:
+
+      - No Verhoeff checksum. On the full-number path the checksum is a strong filter against
+        some unrelated 12-digit run being mistaken for an Aadhaar number; four digits behind a
+        mask carry no such self-check. What remains is still substantial: the text must carry an
+        Aadhaar-specific marker (_looks_like_aadhaar_card), the mask pattern itself is a shape no
+        ordinary document produces, and the last 4 must match THIS candidate's on-file value.
+      - No aadhaar_number_hash, so find_hash_conflicts cannot see a masked capture at all. That
+        signal is post-hoc and advisory, never a gate, so its absence narrows what a TA is shown
+        rather than letting anything through - but a TA reading a conflict list should know it
+        only covers unmasked captures. This is why the method is recorded distinctly rather than
+        as plain OCR.
+
+    Requires a full `dob`, never a bare year: a masked card always prints the complete date, so
+    accepting a year-only match here would weaken the pairing for no practical gain. Passing
+    dob=None leaves the attempt PENDING via _record_verdict's own guard.
+
+    The alternative was to keep rejecting these, which is what the system did until now - and
+    since a masked download is UIDAI's and DigiLocker's DEFAULT output, that rejected candidates
+    holding a perfectly genuine card and left them unable to start at all.
+    """
+    return _record_verdict(
+        attempt, ExamAttempt.AadhaarVerificationMethod.OCR_MASKED, last4, None, dob, None,
+    )
 
 
 def verify_identity_photo(attempt, id_photo_bytes):
@@ -378,13 +459,7 @@ def try_ocr_inline(attempt, id_photo_bytes):
     if not _ocr_semaphore.acquire(blocking=False):
         return False
     try:
-        text = _ocr_text(id_photo_bytes)
-        number = _extract_verhoeff_valid_number(text)
-        if number is None or not _looks_like_aadhaar_card(text):
-            return False
-        return _apply_verdict(
-            attempt, ExamAttempt.AadhaarVerificationMethod.OCR, number, dob=_extract_dob(text),
-        )
+        return verdict_from_ocr_text(attempt, _ocr_text(id_photo_bytes))
     except Exception:
         logger.exception('Inline Aadhaar OCR failed for attempt %s', attempt.pk)
         return False
@@ -414,13 +489,7 @@ def run_ocr_fallback(attempt):
         read_url = blob_storage.fresh_read_url(attempt.aadhaar_capture_url)
         image_bytes = requests.get(read_url, timeout=15).content
 
-        text = _ocr_text(image_bytes)
-        number = _extract_verhoeff_valid_number(text)
-        if number is None or not _looks_like_aadhaar_card(text):
-            return 'still_unreadable'
-        applied = _apply_verdict(
-            attempt, ExamAttempt.AadhaarVerificationMethod.OCR, number, dob=_extract_dob(text),
-        )
+        applied = verdict_from_ocr_text(attempt, _ocr_text(image_bytes))
         return 'verified' if applied else 'still_unreadable'
     except Exception:
         logger.exception('Aadhaar OCR fallback failed for attempt %s', attempt.pk)
@@ -481,9 +550,51 @@ def _extract_verhoeff_valid_number(text):
     the real number, or two genuine printings of the same number) into one indistinguishable
     digit run.
     """
-    candidates = {''.join(m) for m in _AADHAAR_RE.findall(text)}
+    searchable = _VID_RE.sub(' ', text)
+    candidates = {''.join(m) for m in _AADHAAR_RE.findall(searchable)}
     valid_candidates = {c for c in candidates if verhoeff_is_valid(c)}
     return next(iter(valid_candidates)) if len(valid_candidates) == 1 else None
+
+
+def _extract_masked_last4(text):
+    """The last 4 digits off exactly one DISTINCT masked Aadhaar number in `text`, or None.
+
+    Same "exactly one distinct candidate, else it's ambiguous" discipline as the full-number
+    function above, and for the same reason: two different masked suffixes in one image means
+    two cards are in frame, and guessing which one belongs to the candidate is not something
+    this should do. Two printings of the SAME suffix dedupe to one and are accepted, again
+    matching the full-number path - an e-Aadhaar prints its masked number more than once.
+    """
+    candidates = set(_MASKED_AADHAAR_RE.findall(text))
+    return next(iter(candidates)) if len(candidates) == 1 else None
+
+
+def verdict_from_ocr_text(attempt, text):
+    """Turn OCR'd card text into a verdict, or return False if it cannot be read.
+
+    Shared by try_ocr_inline and run_ocr_fallback so the two cannot drift - they had already
+    grown identical copies of this sequence, and the masked path would have had to be added to
+    both.
+
+    Order matters: a full, checksum-verified number is strictly stronger evidence than a masked
+    suffix and also produces the cross-attempt hash, so it is always preferred when the card
+    shows one. The masked read is the fallback for a card that never printed one.
+    """
+    if not _looks_like_aadhaar_card(text):
+        return False
+
+    full_number = _extract_verhoeff_valid_number(text)
+    if full_number is not None:
+        return _apply_verdict(
+            attempt, ExamAttempt.AadhaarVerificationMethod.OCR, full_number,
+            dob=_extract_dob(text),
+        )
+
+    masked_last4 = _extract_masked_last4(text)
+    if masked_last4 is not None:
+        return _apply_masked_verdict(attempt, masked_last4, _extract_dob(text))
+
+    return False
 
 
 def _looks_like_aadhaar_card(text):
@@ -517,6 +628,15 @@ def _extract_dob(text):
             return date(int(year), int(month), int(day))
         except ValueError:
             pass  # fall through - the label matched but the digits don't form a real date
+
+    # Same label, the other way round - a DigiLocker Aadhaar prints "DOB: 2000/07/01".
+    labelled_ymd = _LABELLED_DOB_YMD_RE.search(text)
+    if labelled_ymd:
+        year, month, day = labelled_ymd.groups()
+        try:
+            return date(int(year), int(month), int(day))
+        except ValueError:
+            pass
 
     candidates = []
     for day, month, year in _DOB_RE.findall(text):
