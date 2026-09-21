@@ -111,14 +111,9 @@ export default function ReviewStep({ batch, onFinalized, onSavedAsDraft }) {
       exam_duration_minutes: batch.exam_duration_minutes,
       // Per-section, not just the sum - InviteConfirmationStep displays these in the same
       // per-section grid as the admin's Configure Default Batch screen, not a single total.
-      logical_questions: batch.logical_questions,
-      quantitative_questions: batch.quantitative_questions,
-      verbal_questions: batch.verbal_questions,
-      programming_questions: batch.programming_questions,
-      logical_cutoff: batch.logical_cutoff,
-      quantitative_cutoff: batch.quantitative_cutoff,
-      verbal_cutoff: batch.verbal_cutoff,
-      programming_cutoff: batch.programming_cutoff,
+      // Passed straight through as the batch's own section rows, so a batch running three
+      // sections (or a newly added one) carries exactly what it has.
+      sections: batch.sections || [],
       ai_proctoring_enabled: batch.ai_proctoring_enabled,
       selected_candidate_ids: selectedIds,
       selected_count: selectedIds.length,

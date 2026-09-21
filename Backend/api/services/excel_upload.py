@@ -2,7 +2,7 @@ from django.db import transaction
 from openpyxl import Workbook, load_workbook
 from api.services.xlsx_safety import harden_workbook
 
-from api.models import Candidate
+from api.models import Candidate, QuestionBankSection
 from api.services.candidate_validation import (
     candidate_identity_key, clamp_aadhaar_to_last4, identity_key, parse_dob_text,
     revalidate_batch_candidates,
@@ -160,11 +160,20 @@ def generate_validation_report_workbook(candidates):
     return harden_workbook(wb)
 
 
-EXPORT_COLUMNS = [
+# Everything to the left of the per-section score columns. The section columns themselves are
+# built at export time from QuestionBankSection, so an added section appears in the export
+# without a code change - and a retired one stops appearing.
+EXPORT_COLUMNS_BEFORE_SECTIONS = [
     'Name', 'Email', 'Mobile', 'Date of Birth', 'Batch Name', 'College', 'Degree', 'Stream',
     'Percentage', 'Passing Out Year', 'Location', 'Status', 'Result',
-    'Logical Score', 'Quantitative Score', 'Verbal Score', 'Programming Score', 'Overall Score',
 ]
+EXPORT_COLUMNS_AFTER_SECTIONS = ['Overall Score']
+
+
+def export_columns(sections):
+    return (EXPORT_COLUMNS_BEFORE_SECTIONS
+            + [f'{section.section_name} Score' for section in sections]
+            + EXPORT_COLUMNS_AFTER_SECTIONS)
 
 
 def generate_candidates_workbook(candidates, latest_attempt_fn, status_display_fn=None):
@@ -176,13 +185,19 @@ def generate_candidates_workbook(candidates, latest_attempt_fn, status_display_f
     """
     if status_display_fn is None:
         status_display_fn = lambda c: c.get_status_display()  # noqa: E731
+    # Every section, not just the ones a given candidate's batch used - this export lists people
+    # from different batches side by side, so the column set has to be the same for every row.
+    sections = list(QuestionBankSection.objects.all())
     wb = Workbook()
     ws = wb.active
     ws.title = 'Candidates'
-    ws.append(EXPORT_COLUMNS)
+    ws.append(export_columns(sections))
     for candidate in candidates:
         attempt = latest_attempt_fn(candidate)
         overall_score = attempt.overall_score if attempt else candidate.overall_score
+        scores = (
+            {row.section_id: row.score for row in attempt.section_scores.all()} if attempt else {}
+        )
         ws.append([
             candidate.full_name,
             candidate.email,
@@ -197,13 +212,14 @@ def generate_candidates_workbook(candidates, latest_attempt_fn, status_display_f
             candidate.location,
             status_display_fn(candidate),
             candidate.get_result_display(),
-            # MARKS per section, the same fields the Result screen scores against (see
-            # exam_session._grade_sections) - blank (not 0) when there's no attempt yet, so
-            # "never took it" stays visibly different from "scored zero".
-            attempt.logical_score if attempt else None,
-            attempt.quantitative_score if attempt else None,
-            attempt.verbal_score if attempt else None,
-            attempt.programming_score if attempt else None,
+            *[
+                # MARKS per section, the same figure the Result screen scores against (see
+                # exam_session._grade_sections). Blank (not 0) when this candidate's batch did
+                # not include the section, or they have no attempt yet - so "never sat it" stays
+                # visibly different from "scored zero".
+                scores.get(section.section_id)
+                for section in sections
+            ],
             float(overall_score) if overall_score is not None else None,
         ])
     return harden_workbook(wb)

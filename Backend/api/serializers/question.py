@@ -46,13 +46,80 @@ class QuestionBankSectionSerializer(serializers.ModelSerializer):
     total_questions = serializers.IntegerField(read_only=True, default=None)
     active_questions = serializers.IntegerField(read_only=True, default=None)
     inactive_questions = serializers.IntegerField(read_only=True, default=None)
+    # True once any batch has used this section. The UI needs it to explain why a section can be
+    # retired but not deleted - the batches that used it, and the candidates scored under it,
+    # are what stop it going away.
+    in_use = serializers.SerializerMethodField()
 
     class Meta:
         model = QuestionBankSection
         fields = [
             'section_id', 'section_name', 'section_key', 'min_required_active',
+            'display_order', 'is_active', 'in_use',
             'total_questions', 'active_questions', 'inactive_questions',
         ]
+        # section_key is DERIVED from the name on create (see SectionCreateSerializer) and is
+        # never editable afterwards: it is the stable identifier every score row, filter param
+        # and export column is keyed on, so renaming it would orphan all of them. The display
+        # NAME stays editable.
+        read_only_fields = ['section_id', 'section_key']
+
+    def get_in_use(self, section):
+        return section.batch_sections.exists()
+
+
+class SectionCreateSerializer(serializers.ModelSerializer):
+    """Creating a section from Question Bank Management.
+
+    Only a name is required. section_key is generated from it rather than asked for: it is an
+    internal identifier an Admin has no reason to choose, and letting one be typed invites a key
+    that collides with an existing one or contains characters the query params and export
+    columns keyed on it cannot carry.
+    """
+
+    class Meta:
+        model = QuestionBankSection
+        fields = ['section_name', 'description', 'min_required_active', 'display_order']
+
+    def validate_section_name(self, value):
+        value = ' '.join((value or '').split())
+        if not value:
+            raise serializers.ValidationError('A section name is required.')
+        if QuestionBankSection.objects.filter(section_name__iexact=value).exists():
+            raise serializers.ValidationError('A section with this name already exists.')
+        if not _section_key_from_name(value):
+            raise serializers.ValidationError(
+                'The name must contain at least one letter or number.'
+            )
+        return value
+
+    def create(self, validated_data):
+        validated_data['section_key'] = _unique_section_key(validated_data['section_name'])
+        return super().create(validated_data)
+
+
+def _section_key_from_name(name):
+    """A lowercase, underscore-separated key from a display name: 'Data Interpretation' ->
+    'data_interpretation'. Restricted to [a-z0-9_] because this value becomes a query-parameter
+    name (`<key>_min`) and a dict key in the API's per-section score map.
+    """
+    return re.sub(r'[^a-z0-9]+', '_', (name or '').lower()).strip('_')[:30]
+
+
+def _unique_section_key(name):
+    """`_section_key_from_name`, suffixed if that key is taken.
+
+    Two different display names can reduce to the same key ('Data Interpretation' and
+    'Data-Interpretation'), and section_key is unique - without this the second create would
+    fail with a database integrity error instead of simply getting its own key.
+    """
+    base = _section_key_from_name(name)
+    key, suffix = base, 2
+    while QuestionBankSection.objects.filter(section_key=key).exists():
+        tail = f'_{suffix}'
+        key = f'{base[:30 - len(tail)]}{tail}'
+        suffix += 1
+    return key
 
 
 class QuestionSerializer(serializers.ModelSerializer):

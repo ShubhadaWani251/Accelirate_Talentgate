@@ -26,7 +26,7 @@ from api.serializers.exam import AnswerSerializer, EmailVerifySerializer, Termin
 from api.services import aadhaar, aadhaar_pdf, blob_storage, exam_session, seb
 from api.services.image_validation import InvalidImageUpload, validate_identity_photo
 from api.services.exam_session import TerminationReason
-from api.services.question_selection import SECTION_LABELS, SECTION_ORDER, InsufficientQuestionsError
+from api.services.question_selection import InsufficientQuestionsError, batch_sections
 from api.services.tokens import issue_attempt_token
 from api.utils.net import get_client_ip, ratelimit_attempt_key, ratelimit_token_key
 
@@ -65,17 +65,16 @@ def _open_invitation_or_error(token):
 
 def _instructions_payload(invitation):
     batch = invitation.batch
-    sections = []
-    for key in SECTION_ORDER:
-        count = getattr(batch, f'{key}_questions')
-        if count <= 0:
-            continue
-        sections.append({
-            'key': key,
-            'label': SECTION_LABELS[key],
-            'question_count': count,
-            'cutoff': float(getattr(batch, f'{key}_cutoff')),
-        })
+    sections = [
+        {
+            'key': bs.section.section_key,
+            'label': bs.section.section_name,
+            'question_count': bs.question_count,
+            'cutoff': float(bs.cutoff),
+        }
+        for bs in batch_sections(batch)
+        if bs.question_count > 0
+    ]
     return {
         'batch_name': batch.batch_name,
         'candidate_name': invitation.candidate.full_name,
@@ -89,24 +88,26 @@ def _result_payload(attempt):
     """The candidate's own end-of-exam screen (ExamResult.jsx): section label and "score/total"
     only, no pass/fail and no cutoff - see that component for why.
 
-    `score` and `total` are both MARKS, read off the attempt's own paper rather than the batch's
-    configured question counts. Those two only agree while every question is worth 1 mark; a
-    marks-weighted section would otherwise show a candidate something like "12/10".
+    `score` and `total` are both MARKS, read off the attempt's own AttemptSectionScore rows
+    rather than the batch's configured question counts. Those two only agree while every
+    question is worth 1 mark; a marks-weighted section would otherwise show a candidate
+    something like "12/10".
     """
     batch = attempt.invitation.batch
-    marks_by_section = exam_session.section_marks_for_attempt(attempt)
-    sections = []
-    for key in SECTION_ORDER:
-        if getattr(batch, f'{key}_questions') <= 0:
-            continue
-        sections.append({
-            'key': key,
-            'label': SECTION_LABELS[key],
-            'score': getattr(attempt, f'{key}_score'),
-            'total': marks_by_section.get(key, (0, 0))[1],
-            'cutoff': float(getattr(batch, f'{key}_cutoff')),
-            'cleared': getattr(attempt, f'{key}_cleared'),
-        })
+    cutoff_by_section = {bs.section_id: float(bs.cutoff) for bs in batch_sections(batch)}
+    sections = [
+        {
+            'key': row.section.section_key,
+            'label': row.section.section_name,
+            'score': row.score,
+            'total': row.total_marks,
+            # 0.0 for a section since removed from the batch - the score still shown, with no
+            # cutoff to claim it was judged against one that no longer exists.
+            'cutoff': cutoff_by_section.get(row.section_id, 0.0),
+            'cleared': row.cleared,
+        }
+        for row in attempt.section_scores.select_related('section').all()
+    ]
     return {
         'result': attempt.candidate.result,
         'total_correct': attempt.total_correct,
@@ -114,8 +115,8 @@ def _result_payload(attempt):
         'total_marks_earned': attempt.total_marks_earned,
         'total_marks': attempt.total_marks,
         # Still a COUNT of questions, off the batch config - not `sum(s['total'])`, which is
-        # now a marks figure.
-        'total_questions': sum(getattr(batch, f'{key}_questions') for key in SECTION_ORDER),
+        # a marks figure.
+        'total_questions': sum(bs.question_count for bs in batch_sections(batch)),
         'sections': sections,
     }
 

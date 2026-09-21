@@ -11,10 +11,13 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 import zipfile
 
-from api.models import Question, QuestionBankSection
+from api.models import Question, QuestionBankSection, Setting
 from api.pagination import StandardResultsPagination
-from api.permissions import IsAdmin
-from api.serializers.question import QuestionBankSectionSerializer, QuestionSerializer
+from api.permissions import IsAdmin, IsAdminOrTA
+from api.serializers.question import (
+    QuestionBankSectionSerializer, QuestionSerializer, SectionCreateSerializer,
+)
+from api.services import batch_defaults
 from api.services.audit import log_action
 from api.services.question_bank import (
     generate_question_template_workbook,
@@ -32,24 +35,155 @@ def _get_question_or_404(question_id):
         raise Http404
 
 
+def _sections_with_counts():
+    """Sections, each carrying its own total / active / inactive question counts.
+
+    Counted here rather than in the browser because the question list is paginated - the
+    frontend only ever holds one page, so it cannot total a section from what it has. One
+    aggregate query with conditional Counts, not three queries per section.
+    """
+    return QuestionBankSection.objects.annotate(
+        total_questions=Count('question'),
+        active_questions=Count('question', filter=Q(question__status=Question.Status.ACTIVE)),
+        inactive_questions=Count(
+            'question', filter=Q(question__status=Question.Status.INACTIVE)
+        ),
+        # order_by is REQUIRED here, not decoration: annotate() folds a model's Meta.ordering
+        # into the GROUP BY, which reorders the result - this endpoint was returning logical,
+        # verbal, quantitative, programming instead of the configured 0,1,2,3. Restating it
+        # explicitly is Django's own documented way out of that.
+    ).order_by('display_order', 'section_name')
+
+
 class QuestionSectionListView(APIView):
-    permission_classes = [IsAdmin]
+    def get_permissions(self):
+        """Reading the section list is IsAdminOrTA; adding one is IsAdmin.
+
+        A TA needs the list to render All Candidates at all - the score columns are one per
+        section now, so without it the table has no headers. The list carries nothing sensitive
+        (section names and question counts), unlike the question bank itself, which stays
+        admin-only in every other view on this screen.
+        """
+        return [IsAdminOrTA()] if self.request.method == 'GET' else [IsAdmin()]
 
     def get(self, request):
-        """Sections, each carrying its own total / active / inactive question counts.
+        return Response(QuestionBankSectionSerializer(_sections_with_counts(), many=True).data)
 
-        Counted here rather than in the browser because the question list is paginated - the
-        frontend only ever holds one page, so it cannot total a section from what it has. One
-        aggregate query with conditional Counts, not three queries per section.
+    def post(self, request):
+        """Add a section. Admin-only, like every other write on this screen.
+
+        A new section is immediately available to every NEW batch, appears as its own column in
+        the All Candidates and Batch Details tables and in the Excel export, and gets its own
+        card on this screen - all without a code change, because nothing downstream names
+        sections any more. It does NOT touch existing batches: those are snapshotted at creation
+        (see models.BatchSection), so a drive already underway is never reshaped underneath its
+        candidates.
         """
-        sections = QuestionBankSection.objects.annotate(
-            total_questions=Count('question'),
-            active_questions=Count('question', filter=Q(question__status=Question.Status.ACTIVE)),
-            inactive_questions=Count(
-                'question', filter=Q(question__status=Question.Status.INACTIVE)
-            ),
+        serializer = SectionCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        section = serializer.save()
+        log_action(request, request.user, 'create', 'question_section', section.section_id,
+                   details={'section_name': section.section_name,
+                            'section_key': section.section_key})
+        return Response(
+            QuestionBankSectionSerializer(
+                _sections_with_counts().get(pk=section.pk),
+            ).data,
+            status=status.HTTP_201_CREATED,
         )
-        return Response(QuestionBankSectionSerializer(sections, many=True).data)
+
+
+class QuestionSectionDetailView(APIView):
+    """Delete or restore one section. Admin-only.
+
+    Deleting a section means one thing: it stops appearing in any NEW batch, and every batch that
+    already ran it - along with every score recorded under it - is left exactly as it was. A
+    candidate's result has to keep describing the exam they actually sat.
+
+    That single promise is delivered two ways, depending on whether there is any history to keep:
+
+      - Nothing depends on the section (no questions, no batch ever used it): the row is removed
+        outright. There is no past to preserve and a tombstone would just be clutter.
+      - Anything does depend on it: the row is RETIRED (is_active=False) instead. Question,
+        BatchSection and AttemptSectionScore all reference it with PROTECT, so a real delete
+        would have to either take the question bank's content with it or rewrite what a cohort
+        was assessed on.
+
+    The response says which happened, but the admin is never asked to choose - from their side
+    it is one action with one meaning.
+    """
+    permission_classes = [IsAdmin]
+
+    def _get_or_404(self, section_id):
+        try:
+            return QuestionBankSection.objects.get(pk=section_id)
+        except QuestionBankSection.DoesNotExist:
+            raise Http404
+
+    def delete(self, request, section_id):
+        section = self._get_or_404(section_id)
+        name, key = section.section_name, section.section_key
+
+        question_count = section.question_set.count()
+        batch_count = section.batch_sections.values('batch_id').distinct().count()
+
+        if question_count or batch_count:
+            section.is_active = False
+            section.save(update_fields=['is_active'])
+            # Drafts follow the defaults (see batch_defaults.resync_draft_batches), and this
+            # section has just left them - so it has to leave the drafts too, or a draft created
+            # this morning would still run a section that no longer exists anywhere else.
+            batch_defaults.resync_draft_batches()
+            log_action(request, request.user, 'update', 'question_section', section_id,
+                       details={'section_name': name, 'retired': True,
+                                'question_count': question_count, 'batch_count': batch_count})
+            kept = []
+            if question_count:
+                kept.append(f'{question_count} question{"" if question_count == 1 else "s"}')
+            if batch_count:
+                kept.append(f'{batch_count} batch{"" if batch_count == 1 else "es"}')
+            return Response({
+                'removed': False,
+                'detail': f'"{name}" will not appear in any new batch. Its '
+                          f'{" and ".join(kept)} already using it are unchanged.',
+                'question_count': question_count,
+                'batch_count': batch_count,
+            })
+
+        section.delete()
+        # The section's own defaults rows go with it, or they would sit in the Setting table
+        # forever and silently reapply if a section with the same derived key were added later.
+        Setting.objects.filter(
+            setting_group=batch_defaults.SETTING_GROUP,
+            setting_key__startswith=f'{batch_defaults.SETTING_GROUP}.section.{key}.',
+        ).delete()
+        log_action(request, request.user, 'delete', 'question_section', section_id,
+                   details={'section_name': name, 'section_key': key})
+        return Response({'removed': True, 'detail': f'"{name}" deleted.'})
+
+    def patch(self, request, section_id):
+        """Retire (is_active=False) or restore a section.
+
+        A retired section disappears from Configure Default Batch and never reaches a new batch,
+        while every batch that already ran it, and every score recorded under it, stays exactly
+        as it was. This is the answer for a section that can no longer be deleted.
+        """
+        section = self._get_or_404(section_id)
+        is_active = request.data.get('is_active')
+        if not isinstance(is_active, bool):
+            return Response({'is_active': 'Send true or false.'},
+                             status=status.HTTP_400_BAD_REQUEST)
+
+        section.is_active = is_active
+        section.save(update_fields=['is_active'])
+        # Same reason as the delete path above - a draft has had nothing sent to its candidates,
+        # so it tracks whatever the org currently runs.
+        batch_defaults.resync_draft_batches()
+        log_action(request, request.user, 'update', 'question_section', section.section_id,
+                   details={'section_name': section.section_name, 'is_active': is_active})
+        return Response(
+            QuestionBankSectionSerializer(_sections_with_counts().get(pk=section.pk)).data,
+        )
 
 
 class QuestionListCreateView(APIView):

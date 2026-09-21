@@ -12,13 +12,6 @@ import ToggleSwitch from '../../components/common/ToggleSwitch';
 // Same four sections, same order, as ConfigureDefaultBatch.jsx and ConfigureBatchStep.jsx - the
 // grid below is deliberately built to look like those screens, since this is showing exactly
 // the values one of them produced.
-const SECTIONS = [
-  { key: 'logical', label: 'Logical & Analytical' },
-  { key: 'quantitative', label: 'Quantitative' },
-  { key: 'verbal', label: 'Verbal Ability' },
-  { key: 'programming', label: 'Programming' },
-];
-
 const schema = yup.object({
   link_valid_from: yup.string().required('Required'),
   link_valid_until: yup.string().required('Required')
@@ -142,22 +135,20 @@ export default function InviteConfirmationStep({ summary, onBack, onSent }) {
           <input id="review_exam_duration_minutes" value={summary.exam_duration_minutes} readOnly />
         </div>
 
+        {/* One column per section THIS batch runs, from its own rows - not a fixed four. */}
         <div className="grid-4">
-          {SECTIONS.map((s) => (
-            <div key={s.key} className="field">
-              <label htmlFor={`review_${s.key}_questions`}>{s.label} Questions</label>
-              <input id={`review_${s.key}_questions`}
-                value={summary[`${s.key}_questions`]} readOnly />
-            </div>
-          ))}
-        </div>
+          {(summary.sections || []).map((s) => (
+            <div key={s.section_key} className="field">
+              <label htmlFor={`review_${s.section_key}_questions`}>
+                {s.section_name} Questions
+              </label>
+              <input id={`review_${s.section_key}_questions`}
+                value={s.question_count} readOnly />
 
-        <div className="grid-4">
-          {SECTIONS.map((s) => (
-            <div key={s.key} className="field">
-              <label htmlFor={`review_${s.key}_cutoff`}>{s.label} Cutoff (%)</label>
-              <input id={`review_${s.key}_cutoff`}
-                value={summary[`${s.key}_cutoff`]} readOnly />
+              <label htmlFor={`review_${s.section_key}_cutoff`} style={{ marginTop: 10 }}>
+                {s.section_name} Cutoff (%)
+              </label>
+              <input id={`review_${s.section_key}_cutoff`} value={s.cutoff} readOnly />
             </div>
           ))}
         </div>

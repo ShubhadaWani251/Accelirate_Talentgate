@@ -70,6 +70,8 @@ urlpatterns = [
 
     path('questions/', views.QuestionListCreateView.as_view(), name='question-list-create'),
     path('questions/sections/', views.QuestionSectionListView.as_view(), name='question-sections'),
+    path('questions/sections/<int:section_id>/', views.QuestionSectionDetailView.as_view(),
+         name='question-section-detail'),
     path('questions/template/', views.QuestionTemplateDownloadView.as_view(), name='question-template'),
     path('questions/upload/', views.QuestionBulkUploadView.as_view(), name='question-upload'),
     path('questions/validate-rows/', views.QuestionRowValidationView.as_view(),

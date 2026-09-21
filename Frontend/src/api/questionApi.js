@@ -2,6 +2,25 @@ import axiosClient from './axiosClient';
 
 export const getSections = () => axiosClient.get('/questions/sections/').then((r) => r.data);
 
+// Adds an exam section. Only a name is needed - the server derives the stable section_key from
+// it, because that key is what every score row, filter param and export column is keyed on and
+// is not something an Admin should be choosing. A new section reaches new batches, the candidate
+// tables, the Excel export and Configure Default Batch immediately; it never touches a batch
+// that already exists, since each one snapshots its sections at creation.
+export const createSection = (payload) =>
+  axiosClient.post('/questions/sections/', payload).then((r) => r.data);
+
+// Only succeeds while nothing depends on the section. The server refuses with a 400 carrying
+// the question/batch counts once it holds questions or a batch has run it - deleting then would
+// either take the question bank's content with it or erase what a cohort was assessed on.
+export const deleteSection = (id) =>
+  axiosClient.delete(`/questions/sections/${id}/`).then((r) => r.data);
+
+// Retire (false) or restore (true). A retired section stays out of new batches while every
+// existing batch and score under it is untouched - the answer for one that can't be deleted.
+export const setSectionActive = (id, isActive) =>
+  axiosClient.patch(`/questions/sections/${id}/`, { is_active: isActive }).then((r) => r.data);
+
 // Returns the paginated envelope {count, next, previous, results}.
 export const listQuestions = (filters = {}) => {
   const params = {};

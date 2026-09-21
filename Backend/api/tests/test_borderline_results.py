@@ -23,18 +23,31 @@ from api.services.candidate_history import build_candidate_history
 pytestmark = pytest.mark.django_db
 
 SECTIONS = ['logical', 'quantitative', 'verbal', 'programming']
+def set_cutoff(batch, value, *section_keys):
+    """Revise a batch's cutoff for one or more sections.
+
+    A cutoff lives on the batch's BatchSection row now, not on a Batch column - so a test that
+    revises one has to go through the same place the application does.
+    """
+    from api.models import BatchSection
+    BatchSection.objects.filter(
+        batch=batch, section__section_key__in=section_keys,
+    ).update(cutoff=value)
+
+
+def section_score(attempt, section_key):
+    """The AttemptSectionScore row for one section of an attempt, or None."""
+    return attempt.section_scores.filter(section__section_key=section_key).first()
 
 
 @pytest.fixture
-def bank():
+def bank(get_section):
     """Ten 1-mark questions in each of the four sections, so "1 mark" and "1 question" coincide
     and a scenario reads as the number of right answers it is.
     """
     questions = {}
     for key in SECTIONS:
-        section = QuestionBankSection.objects.create(
-            section_name=key.title(), section_key=key,
-        )
+        section = get_section(key)
         questions[key] = [
             Question.objects.create(
                 question_code=f'Q-{key[:4].upper()}-{n}', section=section,
@@ -321,8 +334,7 @@ class TestADecisionSurvivesARegrade:
 
         # Raise the cutoff so the machine would now score this a clear fail.
         batch = attempt.invitation.batch
-        batch.logical_cutoff = Decimal('90.00')
-        batch.save(update_fields=['logical_cutoff'])
+        set_cutoff(batch, Decimal('90.00'), 'logical')
         exam_session.regrade_batch(batch)
 
         candidate.refresh_from_db()
@@ -331,7 +343,7 @@ class TestADecisionSurvivesARegrade:
         assert candidate.result == Candidate.Result.PASS
         # ...but the attempt's own section flags are still recomputed, so the TA can see the
         # new picture and decide again if they want to.
-        assert attempt.logical_cleared is False
+        assert section_score(attempt, 'logical').cleared is False
 
     def test_an_undecided_candidate_is_still_regraded_normally(self, make_graded_attempt):
         attempt, candidate = make_graded_attempt(
@@ -339,8 +351,7 @@ class TestADecisionSurvivesARegrade:
         assert candidate.result == Candidate.Result.BORDERLINE
 
         batch = attempt.invitation.batch
-        batch.logical_cutoff = Decimal('40.00')
-        batch.save(update_fields=['logical_cutoff'])
+        set_cutoff(batch, Decimal('40.00'), 'logical')
         exam_session.regrade_batch(batch)
 
         candidate.refresh_from_db()
@@ -428,20 +439,18 @@ class TestLoweringACutoffTakesEffect:
     def test_lowering_a_cutoff_clears_the_sections_it_should(self, make_graded_attempt):
         attempt, candidate = make_graded_attempt(
             {'logical': 2, 'quantitative': 3, 'verbal': 1, 'programming': 0})
-        assert attempt.logical_cleared is False
+        assert section_score(attempt, 'logical').cleared is False
 
         batch = attempt.invitation.batch
-        batch.logical_cutoff = Decimal('20.00')
-        batch.quantitative_cutoff = Decimal('20.00')
-        batch.save(update_fields=['logical_cutoff', 'quantitative_cutoff'])
+        set_cutoff(batch, Decimal('20.00'), 'logical', 'quantitative')
         exam_session.regrade_batch(batch)
 
         attempt.refresh_from_db()
         candidate.refresh_from_db()
         # 2/10 is exactly 20%, and the cutoff is met at exactly the cutoff - a boundary that has
         # to clear, or a TA setting 20% to admit a 2/10 finds it still rejected.
-        assert attempt.logical_cleared is True
-        assert attempt.quantitative_cleared is True
+        assert section_score(attempt, 'logical').cleared is True
+        assert section_score(attempt, 'quantitative').cleared is True
         # Verbal and programming are still below their untouched 50%, so this stays a fail.
         assert candidate.result == Candidate.Result.FAIL
 
@@ -453,18 +462,15 @@ class TestLoweringACutoffTakesEffect:
             outcome='terminated',
         )
         batch = attempt.invitation.batch
-        for field in ('logical_cutoff', 'quantitative_cutoff', 'verbal_cutoff',
-                      'programming_cutoff'):
-            setattr(batch, field, Decimal('0.00'))
-        batch.save()
+        set_cutoff(batch, Decimal('0.00'), *SECTIONS)
 
         exam_session.regrade_batch(batch)
 
         attempt.refresh_from_db()
         candidate.refresh_from_db()
         # Every section now clears at a 0% cutoff, so the table agrees with the cutoff beside it...
-        assert attempt.logical_cleared is True
-        assert attempt.programming_cleared is True
+        assert section_score(attempt, 'logical').cleared is True
+        assert section_score(attempt, 'programming').cleared is True
         # ...but the attempt was terminated for a proctoring violation, and no cutoff change can
         # resurrect that. This is the half that must NOT move.
         assert candidate.result == Candidate.Result.FAIL
@@ -486,4 +492,4 @@ class TestLoweringACutoffTakesEffect:
 
         assert exam_session.regrade_attempt(attempt, batch) is False
         attempt.refresh_from_db()
-        assert attempt.logical_cleared is None
+        assert section_score(attempt, 'logical') is None

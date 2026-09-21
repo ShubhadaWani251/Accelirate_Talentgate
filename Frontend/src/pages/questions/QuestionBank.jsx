@@ -4,6 +4,8 @@ import toast from 'react-hot-toast';
 import * as questionApi from '../../api/questionApi';
 import PaginationControls from '../../components/common/PaginationControls';
 import QuestionFormModal from '../../features/questions/QuestionFormModal';
+import AddSectionModal from '../../features/questions/AddSectionModal';
+import DeleteSectionModal from '../../features/questions/DeleteSectionModal';
 import { ListPageSkeleton, SkeletonTableRows } from '../../components/loading/Skeleton';
 import { extractErrorMessage } from '../../utils/passwordSchema';
 
@@ -23,6 +25,8 @@ export default function QuestionBank() {
   // and skeleton just the table rows.
   const [firstLoad, setFirstLoad] = useState(true);
   const [editing, setEditing] = useState(null); // question object, or 'new'
+  const [addingSection, setAddingSection] = useState(false);
+  const [deletingSection, setDeletingSection] = useState(null);
 
   useEffect(() => {
     questionApi.getSections().then(setSections).catch((err) => toast.error(extractErrorMessage(err)));
@@ -63,7 +67,12 @@ export default function QuestionBank() {
 
   return (
     <div>
-      <h3>Question Bank Management</h3>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <h3 style={{ marginRight: 'auto' }}>Question Bank Management</h3>
+        <button className="btn primary" onClick={() => setAddingSection(true)}>
+          + Add Section
+        </button>
+      </div>
 
       {/* Counts come from the API, not from the loaded page: the question list is paginated, so
           the browser only ever holds one page and could not total a section itself. Clicking a
@@ -71,25 +80,52 @@ export default function QuestionBank() {
           sidebar provides, which is what makes them worth the vertical space. */}
       <div className="grid-4" style={{ marginBottom: 16 }}>
         {sections.map((sec) => (
-          <button
+          // A div wrapping two buttons, not one big <button>: a delete control nested inside a
+          // button is invalid HTML and browsers handle the nested click inconsistently.
+          <div
             key={sec.section_id}
-            type="button"
             className={`stat-card qb-stat-card ${sectionKey === sec.section_key ? 'active' : ''}`}
-            onClick={() => setSectionKey(sec.section_key)}
-            style={{ textAlign: 'left', cursor: 'pointer', border: 'none', width: '100%' }}
+            style={{ position: 'relative', textAlign: 'left' }}
           >
-            <div className="stat-lbl" style={{ fontWeight: 600 }}>{sec.section_name}</div>
-            <div className="stat-num" style={{ fontSize: 26 }}>{sec.total_questions ?? '—'}</div>
-            <div className="stat-lbl">Total questions</div>
-            <div style={{ display: 'flex', gap: 10, marginTop: 6, fontSize: 11.5 }}>
-              <span style={{ color: 'var(--brand-green, #1a7f37)' }}>
-                Active: <b>{sec.active_questions ?? '—'}</b>
-              </span>
-              <span style={{ color: 'var(--muted)' }}>
-                Inactive: <b>{sec.inactive_questions ?? '—'}</b>
-              </span>
-            </div>
-          </button>
+            <button
+              type="button"
+              onClick={() => setSectionKey(sec.section_key)}
+              style={{
+                textAlign: 'left', cursor: 'pointer', border: 'none', width: '100%',
+                background: 'none', padding: 0, font: 'inherit', color: 'inherit',
+              }}
+            >
+              <div className="stat-lbl" style={{ fontWeight: 600, paddingRight: 24 }}>
+                {sec.section_name}
+                {!sec.is_active && (
+                  <span className="pill gray" style={{ marginLeft: 6 }}>Retired</span>
+                )}
+              </div>
+              <div className="stat-num" style={{ fontSize: 26 }}>{sec.total_questions ?? '—'}</div>
+              <div className="stat-lbl">Total questions</div>
+              <div style={{ display: 'flex', gap: 10, marginTop: 6, fontSize: 11.5 }}>
+                <span style={{ color: 'var(--brand-green, #1a7f37)' }}>
+                  Active: <b>{sec.active_questions ?? '—'}</b>
+                </span>
+                <span style={{ color: 'var(--muted)' }}>
+                  Inactive: <b>{sec.inactive_questions ?? '—'}</b>
+                </span>
+              </div>
+            </button>
+            <button
+              type="button"
+              title={`Delete ${sec.section_name}`}
+              aria-label={`Delete ${sec.section_name}`}
+              onClick={() => setDeletingSection(sec)}
+              style={{
+                position: 'absolute', top: 8, right: 8, border: 'none', background: 'none',
+                cursor: 'pointer', fontSize: 14, lineHeight: 1, color: 'var(--muted)',
+                padding: 4,
+              }}
+            >
+              🗑
+            </button>
+          </div>
         ))}
       </div>
       
@@ -225,6 +261,34 @@ export default function QuestionBank() {
           defaultSectionId={selectedSection?.section_id}
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); refresh(page); }}
+        />
+      )}
+
+      {deletingSection && (
+        <DeleteSectionModal
+          section={deletingSection}
+          onClose={() => setDeletingSection(null)}
+          onChanged={() => {
+            setDeletingSection(null);
+            questionApi.getSections().then(setSections).catch(() => {});
+            // The table may have been filtered to a section that no longer exists.
+            if (sectionKey === deletingSection.section_key) setSectionKey('');
+            refresh(1);
+          }}
+        />
+      )}
+
+      {addingSection && (
+        <AddSectionModal
+          onClose={() => setAddingSection(false)}
+          onCreated={(section) => {
+            setAddingSection(false);
+            // Re-fetched rather than appended: the server assigns the section's key and
+            // display_order, and the list is ordered by that - appending locally would put the
+            // new card in the wrong place until the next reload.
+            questionApi.getSections().then(setSections).catch(() => {});
+            setSectionKey(section.section_key);
+          }}
         />
       )}
     </div>

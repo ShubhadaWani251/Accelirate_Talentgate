@@ -9,13 +9,7 @@ from api.services import aadhaar, blob_storage, exam_session
 from api.services.candidate_profile import link_profile
 from api.services.email_templates import format_datetime
 from api.services.exam_session import termination_label
-
-SECTION_LABELS = {
-    'logical': 'Logical & Analytical',
-    'quantitative': 'Quantitative',
-    'verbal': 'Verbal Ability',
-    'programming': 'Programming',
-}
+from api.services.question_selection import batch_sections
 
 # Maps an in-flight ExamAttempt's own status onto the equivalent Candidate.Status value/label -
 # nothing in the codebase yet writes IN_PROGRESS/COMPLETED/TERMINATED back onto Candidate.status
@@ -190,10 +184,7 @@ class CandidateListSerializer(serializers.ModelSerializer):
     status = serializers.SerializerMethodField()
     status_display = serializers.SerializerMethodField()
     result_display = serializers.CharField(source='get_result_display', read_only=True)
-    logical_score = serializers.SerializerMethodField()
-    quantitative_score = serializers.SerializerMethodField()
-    verbal_score = serializers.SerializerMethodField()
-    programming_score = serializers.SerializerMethodField()
+    section_scores = serializers.SerializerMethodField()
     overall_score = serializers.SerializerMethodField()
     total_correct = serializers.SerializerMethodField()
     total_marks_earned = serializers.SerializerMethodField()
@@ -215,7 +206,7 @@ class CandidateListSerializer(serializers.ModelSerializer):
             'candidate_id', 'full_name', 'email', 'phone', 'batch_id', 'batch_name',
             'college_name', 'degree', 'stream', 'percentage', 'passing_out_year', 'location',
             'aadhaar_last4', 'date_of_birth', 'status', 'status_display', 'result', 'result_display',
-            'logical_score', 'quantitative_score', 'verbal_score', 'programming_score',
+            'section_scores',
             'overall_score', 'total_correct', 'total_marks_earned', 'overall_total',
             'has_attempt',
             'email_status', 'email_status_display', 'email_error', 'email_sent_at',
@@ -246,21 +237,19 @@ class CandidateListSerializer(serializers.ModelSerializer):
     def get_status_display(self, candidate):
         return _effective_status(candidate)[1]
 
-    def get_logical_score(self, candidate):
-        attempt = _latest_attempt(candidate)
-        return attempt.logical_score if attempt else None
+    def get_section_scores(self, candidate):
+        """{section_key: marks earned} for this candidate's latest attempt.
 
-    def get_quantitative_score(self, candidate):
+        A map rather than the four fixed `<section>_score` columns this replaced: All Candidates
+        lists people from DIFFERENT batches side by side, and those batches can use different
+        sections. The table renders one column per section that exists (see the sections
+        endpoint) and shows nothing for a candidate whose own batch never included it - which is
+        the honest reading, and impossible to express with a fixed set of columns.
+        """
         attempt = _latest_attempt(candidate)
-        return attempt.quantitative_score if attempt else None
-
-    def get_verbal_score(self, candidate):
-        attempt = _latest_attempt(candidate)
-        return attempt.verbal_score if attempt else None
-
-    def get_programming_score(self, candidate):
-        attempt = _latest_attempt(candidate)
-        return attempt.programming_score if attempt else None
+        if not attempt:
+            return {}
+        return {row.section.section_key: row.score for row in attempt.section_scores.all()}
 
     def get_overall_score(self, candidate):
         """PERCENTAGE - see CandidateDetailSerializer.get_overall_score."""
@@ -459,30 +448,30 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
                 + batch.verbal_questions + batch.programming_questions)
 
     def get_section_results(self, candidate):
+        """One row per section of THIS candidate's batch, in the batch's own order.
+
+        Driven by BatchSection rather than a fixed list of four, so a batch using three sections
+        shows three rows and one using a newly added section shows it without a code change.
+        """
         attempt = _latest_attempt(candidate)
-        batch = candidate.batch
-        # One extra query, on a single-candidate detail response only - never inside a list
-        # loop. Needed because the per-section denominator is the marks on this candidate's own
-        # paper, which lives on their ExamAnswer rows rather than on the attempt.
-        marks_by_section = (
-            exam_session.section_marks_for_attempt(attempt) if attempt else {}
+        scores_by_section = (
+            {row.section_id: row for row in attempt.section_scores.all()} if attempt else {}
         )
         rows = []
-        for key, label in SECTION_LABELS.items():
-            score = getattr(attempt, f'{key}_score', None) if attempt else None
-            cleared = getattr(attempt, f'{key}_cleared', None) if attempt else None
+        for batch_section in batch_sections(candidate.batch):
+            score_row = scores_by_section.get(batch_section.section_id)
             rows.append({
-                'section': label,
+                'section': batch_section.section.section_name,
                 # MARKS, matching `total` below - not a count of correct answers.
-                'score': score,
-                # Per-section denominator, in marks. Sent explicitly because the UI previously
-                # hardcoded "/10", which silently showed a wrong total for any batch not
-                # configured with exactly 10 questions per section. Falls back to the batch's
-                # question count when there's no attempt, where there is no paper to total.
-                'total': (marks_by_section.get(key, (0, 0))[1] if attempt
-                          else getattr(batch, f'{key}_questions')),
-                'cutoff': float(getattr(batch, f'{key}_cutoff')),
-                'cleared': cleared,
+                'score': score_row.score if score_row else None,
+                # Per-section denominator, in marks off this candidate's own paper. Sent
+                # explicitly because the UI once hardcoded "/10", which silently showed a wrong
+                # total for any batch not configured with exactly 10 questions per section.
+                # Falls back to the configured question count when there is no attempt, where
+                # no paper has been drawn to total.
+                'total': score_row.total_marks if score_row else batch_section.question_count,
+                'cutoff': float(batch_section.cutoff),
+                'cleared': score_row.cleared if score_row else None,
             })
         return rows
 

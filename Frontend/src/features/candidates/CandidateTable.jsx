@@ -22,8 +22,11 @@ const EMAIL_PILL = {
 // candidates (All Candidates, Batch Details) needs both and they share selection state.
 export default function CandidateTable({
   candidates, loading, selected, onToggleRow, onToggleSelectAll, onEdit, onOpenNotify, onOpenExport,
-  onOpenCertification, onOpenInvite,
+  onOpenCertification, onOpenInvite, sections = [],
 }) {
+  // 19 fixed columns plus one per section - the count is no longer a constant, and the skeleton
+  // and empty-state row have to match the header or the table renders visibly ragged.
+  const columnCount = 19 + sections.length;
   // Only checked rows are emailed, so an empty selection is a mistake worth naming rather
   // than a silently dead button.
   function requireSelection(action) {
@@ -73,15 +76,20 @@ export default function CandidateTable({
               <th></th><th>Name</th><th>Email</th><th>Mobile</th><th>Batch Name</th><th>College</th><th>Degree</th>
               <th>Stream</th><th>Percentage</th><th>Passing Out Year</th><th>Location</th><th>Aadhaar Last 4</th>
               <th>Date of Birth</th>
-              <th>Status</th><th>Email Status</th><th>Logical</th><th>Quant.</th><th>Verbal</th><th>Programming</th>
+              <th>Status</th><th>Email Status</th>
+              {/* One column per section that EXISTS, not per section this page's candidates
+                  happen to use: All Candidates lists people from different batches side by side,
+                  and those batches can run different sections. A candidate whose own batch never
+                  included a section shows a dash for it, which is the honest reading. */}
+              {sections.map((s) => <th key={s.section_key}>{s.section_name}</th>)}
               <th>Overall</th><th>Result</th><th>History</th><th>Edit</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <SkeletonTableRows rows={6} columns={23} />
+              <SkeletonTableRows rows={6} columns={columnCount} />
             ) : candidates.length === 0 ? (
-              <tr><td colSpan={23}>No candidates found.</td></tr>
+              <tr><td colSpan={columnCount}>No candidates found.</td></tr>
             ) : (
               candidates.map((c) => (
                 <tr key={c.candidate_id}>
@@ -112,10 +120,9 @@ export default function CandidateTable({
                       </div>
                     )}
                   </td>
-                  <td>{c.logical_score ?? '—'}</td>
-                  <td>{c.quantitative_score ?? '—'}</td>
-                  <td>{c.verbal_score ?? '—'}</td>
-                  <td>{c.programming_score ?? '—'}</td>
+                  {sections.map((s) => (
+                    <td key={s.section_key}>{c.section_scores?.[s.section_key] ?? '—'}</td>
+                  ))}
                   {/* Marks, matching the per-section columns beside it. total_correct is a
                       question COUNT and overall_score a PERCENTAGE - either one here would put
                       a different unit next to those columns. */}

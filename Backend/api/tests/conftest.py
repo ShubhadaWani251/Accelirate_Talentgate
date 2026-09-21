@@ -77,9 +77,42 @@ def other_ta_user(make_user):
     return make_user(role='ta', email='ta2@accelirate.com')
 
 
+# The four sections every batch had before sections became data (BatchSection), with the order
+# candidates have always sat them in. Tests still configure a batch the old way - make_batch(...,
+# logical_questions=2) - and the fixture below turns that into the section rows the application
+# now reads, so the whole suite did not have to be rewritten alongside the schema.
+STANDARD_SECTIONS = [
+    ('logical', 'Logical & Analytical'),
+    ('quantitative', 'Quantitative'),
+    ('verbal', 'Verbal Ability'),
+    ('programming', 'Programming'),
+]
+
+
 @pytest.fixture
-def make_batch(db):
-    from api.models import Batch
+def get_section(db):
+    """get_or_create for a QuestionBankSection by key, shared so a test and make_batch can each
+    ask for the same section without racing to create it (section_key is unique, so whichever
+    ran second would otherwise hit an IntegrityError).
+    """
+    from api.models import QuestionBankSection
+    names = dict(STANDARD_SECTIONS)
+    order = {key: i for i, (key, _name) in enumerate(STANDARD_SECTIONS)}
+
+    def _get(section_key, section_name=None):
+        return QuestionBankSection.objects.get_or_create(
+            section_key=section_key,
+            defaults={
+                'section_name': section_name or names.get(section_key, section_key.title()),
+                'display_order': order.get(section_key, 100),
+            },
+        )[0]
+    return _get
+
+
+@pytest.fixture
+def make_batch(db, get_section):
+    from api.models import Batch, BatchSection
     counter = {'n': 0}
 
     def _make(owner, status=Batch.Status.IN_PROGRESS, created_at=None, **kwargs):
@@ -101,6 +134,21 @@ def make_batch(db):
         )
         params.update(kwargs)
         batch = Batch.objects.create(**params)
+
+        # Translate the legacy per-section kwargs into the BatchSection rows the application
+        # actually reads. A section configured with zero questions gets no row at all, matching
+        # what the 0035 migration did with existing batches: the columns could not say "this
+        # batch does not use programming" except as a zero.
+        for section_key, _name in STANDARD_SECTIONS:
+            count = params.get(f'{section_key}_questions', 0) or 0
+            if count <= 0:
+                continue
+            BatchSection.objects.create(
+                batch=batch, section=get_section(section_key), question_count=count,
+                # Read off the column rather than params, so a test that passes no cutoff picks
+                # up the model default instead of borrowing another section's value.
+                cutoff=getattr(batch, f'{section_key}_cutoff'),
+            )
         if created_at is not None:
             # created_at is auto_now_add and cannot be passed to create(). Written straight to
             # the row afterwards, because the entire draft-expiry rule keys off this value and

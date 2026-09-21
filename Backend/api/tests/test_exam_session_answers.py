@@ -16,9 +16,8 @@ pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture
-def section():
-    return QuestionBankSection.objects.create(section_name='Logical & Analytical Reasoning',
-                                              section_key='logical')
+def section(get_section):
+    return get_section('logical', 'Logical & Analytical Reasoning')
 
 
 @pytest.fixture

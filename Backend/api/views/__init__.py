@@ -42,6 +42,7 @@ from .audit import AuditLogFilterOptionsView, AuditLogListView
 from .dashboard import DashboardSummaryView
 from .questions import (
     QuestionSectionListView,
+    QuestionSectionDetailView,
     QuestionListCreateView,
     QuestionDetailView,
     QuestionTemplateDownloadView,
@@ -84,7 +85,8 @@ __all__ = [
     'CandidateNotifyView', 'CandidateCertificationView', 'NotificationTemplateListView',
     'CandidateExportView',
     'CandidateEvidenceZipView', 'DashboardSummaryView',
-    'QuestionSectionListView', 'QuestionListCreateView', 'QuestionDetailView',
+    'QuestionSectionListView', 'QuestionSectionDetailView',
+    'QuestionListCreateView', 'QuestionDetailView',
     'QuestionTemplateDownloadView', 'QuestionBulkUploadView', 'QuestionRowValidationView',
     'UserListCreateView', 'UserDetailView',
     'ActiveQuestionExportView',

@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import * as candidateApi from '../../api/candidateApi';
 import * as batchApi from '../../api/batchApi';
+import * as questionApi from '../../api/questionApi';
 import CandidateFilters from '../../features/candidates/CandidateFilters';
 import { EMPTY_CANDIDATE_FILTERS } from '../../features/candidates/candidateFilterDefaults';
 import CandidateTable from '../../features/candidates/CandidateTable';
@@ -25,6 +26,10 @@ export default function AllCandidates() {
   const [page, setPage] = useState(1);
   const [pageMeta, setPageMeta] = useState({ count: 0, next: null, previous: null });
   const [batches, setBatches] = useState([]);
+  // Every section that exists, for the table's score columns. All Candidates spans
+  // batches that can run different sections, so the column set is the global one
+  // rather than any single batch's.
+  const [sections, setSections] = useState([]);
   const [loading, setLoading] = useState(true);
   // First paint only. Later loads (filter/page changes) keep the page chrome and show skeleton
   // rows inside the table instead - re-skeletoning the whole page for a filter change would
@@ -57,6 +62,11 @@ export default function AllCandidates() {
     batchApi.listBatches('', { pageSize: 200, status: 'all' })
       .then((data) => setBatches(data.results))
       .catch((err) => toast.error(extractErrorMessage(err)));
+
+    // Section list drives the table's score columns. A failure here is not worth a toast on top
+    // of whatever else failed - the table simply renders without section columns rather than
+    // blocking the page.
+    questionApi.getSections().then(setSections).catch(() => {});
   }, []);
 
   async function refresh(f = filters, p = page) {
@@ -174,6 +184,7 @@ export default function AllCandidates() {
         onOpenNotify={() => setNotifyOpen(true)}
         onOpenExport={() => setExportOpen(true)}
         onOpenInvite={() => setInviteConfirmOpen(true)}
+        sections={sections}
         onOpenCertification={() => setCertificationOpen(true)}
       />
 

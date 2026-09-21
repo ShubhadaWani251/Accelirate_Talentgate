@@ -1,29 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
-import { yupResolver } from '@hookform/resolvers/yup';
-import * as yup from 'yup';
 import toast from 'react-hot-toast';
 import * as batchApi from '../../api/batchApi';
 import { toDatetimeLocalValue } from '../../utils/datetime';
 import { extractErrorMessage } from '../../utils/passwordSchema';
 import { ButtonSpinner } from '../../components/loading/Spinner';
-
-const SECTIONS = [
-  { key: 'logical', label: 'Logical & Analytical' },
-  { key: 'quantitative', label: 'Quantitative' },
-  { key: 'verbal', label: 'Verbal Ability' },
-  { key: 'programming', label: 'Programming' },
-];
-
-// Only the cutoffs are ever actually submitted from this form (see onSubmit) - everything else
-// here is read-only display. No validation is declared for the display-only fields; the cutoff
-// bounds still are, since those are real input.
-const schema = yup.object({
-  logical_cutoff: yup.number().typeError('Required').min(0).max(100).required(),
-  quantitative_cutoff: yup.number().typeError('Required').min(0).max(100).required(),
-  verbal_cutoff: yup.number().typeError('Required').min(0).max(100).required(),
-  programming_cutoff: yup.number().typeError('Required').min(0).max(100).required(),
-});
 
 // Read-only display of one batch's configuration, from its own Details page - the exam
 // schedule, question counts and cutoffs it was created with (services/batch_defaults.py sets
@@ -50,12 +31,13 @@ export default function ConfigureBatchStep({
 }) {
   const cutoffsOnly = readOnly && !locked && canEditCutoffs;
   const [submitting, setSubmitting] = useState(false);
-  const {
-    register,
-    handleSubmit,
-    reset,
-    formState: { errors },
-  } = useForm({ resolver: yupResolver(schema) });
+  // Cutoffs are per-section rows now, not four fixed fields, so they are held as local state
+  // keyed by section - the field set isn't known until the batch loads. react-hook-form still
+  // drives the read-only display fields above.
+  const [cutoffs, setCutoffs] = useState({});
+  const [cutoffErrors, setCutoffErrors] = useState({});
+  const { register, reset } = useForm();
+  const sections = existingBatch.sections || [];
 
   useEffect(() => {
     reset({
@@ -63,16 +45,30 @@ export default function ConfigureBatchStep({
       link_valid_from: toDatetimeLocalValue(existingBatch.link_valid_from),
       link_valid_until: toDatetimeLocalValue(existingBatch.link_valid_until),
     });
+    setCutoffs(Object.fromEntries(
+      (existingBatch.sections || []).map((s) => [s.section_key, String(s.cutoff)]),
+    ));
   }, [existingBatch, reset]);
 
-  async function onSubmit(values) {
+  async function onSubmit(event) {
+    event.preventDefault();
+    const found = {};
+    sections.forEach((s) => {
+      const value = Number(cutoffs[s.section_key]);
+      if (cutoffs[s.section_key] === '' || !(value >= 0 && value <= 100)) {
+        found[s.section_key] = 'Must be between 0 and 100.';
+      }
+    });
+    setCutoffErrors(found);
+    if (Object.keys(found).length > 0) return;
+
     setSubmitting(true);
     try {
       const batch = await batchApi.updateBatch(existingBatch.batch_id, {
-        logical_cutoff: values.logical_cutoff,
-        quantitative_cutoff: values.quantitative_cutoff,
-        verbal_cutoff: values.verbal_cutoff,
-        programming_cutoff: values.programming_cutoff,
+        section_cutoffs: sections.map((s) => ({
+          section_key: s.section_key,
+          cutoff: Number(cutoffs[s.section_key]),
+        })),
       });
       onCreated(batch);
     } catch (err) {
@@ -96,7 +92,7 @@ export default function ConfigureBatchStep({
                 + 'can only be changed by an admin.'}
         </div>
       )}
-      <form onSubmit={handleSubmit(onSubmit)} noValidate>
+      <form onSubmit={onSubmit} noValidate>
         <fieldset disabled style={{ border: 'none', padding: 0, margin: 0 }}>
           <div className="field" style={{ maxWidth: 420 }}>
             <label htmlFor="batch_name">Batch Name</label>
@@ -120,10 +116,10 @@ export default function ConfigureBatchStep({
           </div>
 
           <div className="grid-4">
-            {SECTIONS.map((s) => (
-              <div key={s.key} className="field">
-                <label htmlFor={`${s.key}_questions`}>{s.label} Questions</label>
-                <input id={`${s.key}_questions`} type="number" {...register(`${s.key}_questions`)} />
+            {sections.map((s) => (
+              <div key={s.section_key} className="field">
+                <label>{s.section_name} Questions</label>
+                <input type="number" value={s.question_count} readOnly />
               </div>
             ))}
           </div>
@@ -133,13 +129,18 @@ export default function ConfigureBatchStep({
             this viewer isn't allowed to touch cutoffs at all (a TA, on a finalized batch). */}
         <fieldset disabled={locked || !canEditCutoffs} style={{ border: 'none', padding: 0, margin: 0 }}>
           <div className="grid-4">
-            {SECTIONS.map((s) => (
-              <div key={s.key} className="field">
-                <label htmlFor={`${s.key}_cutoff`}>{s.label} Cutoff (%)</label>
-                <input id={`${s.key}_cutoff`} type="number" step="0.01"
-                  className={errors[`${s.key}_cutoff`] ? 'has-error' : ''}
-                  {...register(`${s.key}_cutoff`)} />
-                {errors[`${s.key}_cutoff`] && <div className="field-error">{errors[`${s.key}_cutoff`].message}</div>}
+            {sections.map((s) => (
+              <div key={s.section_key} className="field">
+                <label htmlFor={`${s.section_key}_cutoff`}>{s.section_name} Cutoff (%)</label>
+                <input id={`${s.section_key}_cutoff`} type="number" step="0.01"
+                  className={cutoffErrors[s.section_key] ? 'has-error' : ''}
+                  value={cutoffs[s.section_key] ?? ''}
+                  onChange={(e) => setCutoffs(
+                    (prev) => ({ ...prev, [s.section_key]: e.target.value }),
+                  )} />
+                {cutoffErrors[s.section_key] && (
+                  <div className="field-error">{cutoffErrors[s.section_key]}</div>
+                )}
               </div>
             ))}
           </div>

@@ -1,5 +1,6 @@
 from django.db import models
 from django.utils import timezone
+from .question import QuestionBankSection
 from .users import User
 
 
@@ -23,7 +24,13 @@ class Batch(models.Model):
     link_valid_from = models.DateTimeField(null=True, blank=True)
     link_valid_until = models.DateTimeField(null=True, blank=True)
 
-    # Exam configuration
+    # Exam configuration.
+    #
+    # Which sections this batch uses, and how many questions and what cutoff each one gets, live
+    # in BatchSection rows below - NOT here. The eight columns that follow are DEPRECATED: they
+    # are the pre-BatchSection storage, kept only so migration 0035's backfill has a source and
+    # so a rollback has somewhere to land. Nothing reads them any more; read `batch.sections`.
+    # They are dropped in a separate, later migration once this has run cleanly in production.
     logical_questions = models.SmallIntegerField(default=10)
     quantitative_questions = models.SmallIntegerField(default=10)
     verbal_questions = models.SmallIntegerField(default=10)
@@ -63,3 +70,41 @@ class Batch(models.Model):
 
     def __str__(self):
         return self.batch_name
+
+
+class BatchSection(models.Model):
+    """One row per section a batch actually uses, with that batch's own question count and
+    cutoff for it.
+
+    Replaces Batch's eight `<section>_questions`/`<section>_cutoff` columns. Those could only
+    ever describe the four sections someone had written columns for; a batch that wants three
+    sections, or five, or a newly added one, has no way to say so in a fixed set of columns.
+
+    Rows are a SNAPSHOT taken when the batch is created (from the org-wide defaults) and are
+    frozen once the batch leaves Draft, exactly as the columns were - the cutoff stays editable
+    afterwards so a TA can revise it against a scored cohort, and that is the only field that
+    does. Changing the org defaults never reaches an existing batch.
+    """
+    batch_section_id = models.BigAutoField(primary_key=True)
+    batch = models.ForeignKey(Batch, on_delete=models.CASCADE, db_column='batch_id',
+                              related_name='sections')
+    # PROTECT, not CASCADE: a section that any batch has ever used must not be deletable, or the
+    # deletion silently rewrites what those candidates were assessed on. Retiring a section is
+    # QuestionBankSection.is_active instead.
+    section = models.ForeignKey(QuestionBankSection, on_delete=models.PROTECT,
+                                db_column='section_id', related_name='batch_sections')
+    question_count = models.SmallIntegerField(default=10)
+    cutoff = models.DecimalField(max_digits=5, decimal_places=2, default=70.00)
+
+    class Meta:
+        db_table = 'batch_sections'
+        # Candidates sit sections in this order and every table renders its columns in it, so it
+        # is defined once here rather than by each caller remembering to sort.
+        ordering = ['section__display_order', 'section__section_name']
+        constraints = [
+            models.UniqueConstraint(fields=['batch', 'section'],
+                                    name='ux_batch_sections_batch_section'),
+        ]
+
+    def __str__(self):
+        return f'{self.batch.batch_name} - {self.section.section_name}'

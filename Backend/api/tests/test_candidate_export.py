@@ -6,8 +6,8 @@ would misreport "took it and scored nothing" for someone who never sat the asses
 """
 import pytest
 
-from api.models import ExamAttempt
-from api.services.excel_upload import EXPORT_COLUMNS, generate_candidates_workbook
+from api.models import AttemptSectionScore, ExamAttempt, QuestionBankSection
+from api.services.excel_upload import export_columns, generate_candidates_workbook
 
 pytestmark = pytest.mark.django_db
 
@@ -19,23 +19,42 @@ def _row_dict(ws, row_idx=2):
 
 
 class TestSectionScoreColumns:
-    def test_the_export_has_a_column_for_each_section_plus_overall(self):
-        for col in ['Logical Score', 'Quantitative Score', 'Verbal Score',
+    def test_the_export_has_a_column_for_each_section_plus_overall(self, get_section):
+        for key in ['logical', 'quantitative', 'verbal', 'programming']:
+            get_section(key)
+        columns = export_columns(list(QuestionBankSection.objects.all()))
+
+        for col in ['Logical & Analytical Score', 'Quantitative Score', 'Verbal Ability Score',
                     'Programming Score', 'Overall Score']:
-            assert col in EXPORT_COLUMNS
+            assert col in columns
         # Overall stays last - it's the summary, section scores are the detail behind it.
-        assert EXPORT_COLUMNS.index('Overall Score') > EXPORT_COLUMNS.index('Programming Score')
+        assert columns.index('Overall Score') > columns.index('Programming Score')
+
+    def test_a_newly_added_section_gets_its_own_column(self, get_section):
+        get_section('logical')
+        QuestionBankSection.objects.create(section_name='Data Interpretation',
+                                           section_key='data_interp', display_order=50)
+        columns = export_columns(list(QuestionBankSection.objects.all()))
+
+        # The point of the whole change: no code anywhere names this section.
+        assert 'Data Interpretation Score' in columns
+        assert columns.index('Data Interpretation Score') < columns.index('Overall Score')
 
     def test_a_candidate_with_an_attempt_exports_its_section_scores(
-        self, ta_user, make_batch, make_candidate, make_invitation
+        self, ta_user, make_batch, make_candidate, make_invitation, get_section
     ):
         candidate = make_candidate(make_batch(ta_user), ta_user)
         invitation = make_invitation(candidate, ta_user)
-        ExamAttempt.objects.create(
+        attempt = ExamAttempt.objects.create(
             candidate=candidate, invitation=invitation, status=ExamAttempt.Status.SUBMITTED,
-            logical_score=2, quantitative_score=1, verbal_score=2, programming_score=0,
+            total_marks_earned=5, total_marks=8,
             overall_score=62.5,
         )
+        for key, score in [('logical', 2), ('quantitative', 1), ('verbal', 2),
+                           ('programming', 0)]:
+            AttemptSectionScore.objects.create(
+                attempt=attempt, section=get_section(key), score=score, total_marks=2,
+            )
 
         wb = generate_candidates_workbook(
             [candidate],
@@ -43,9 +62,9 @@ class TestSectionScoreColumns:
         )
         row = _row_dict(wb.active)
 
-        assert row['Logical Score'] == 2
+        assert row['Logical & Analytical Score'] == 2
         assert row['Quantitative Score'] == 1
-        assert row['Verbal Score'] == 2
+        assert row['Verbal Ability Score'] == 2
         assert row['Programming Score'] == 0
         assert row['Overall Score'] == 62.5
 
@@ -57,7 +76,7 @@ class TestSectionScoreColumns:
         wb = generate_candidates_workbook([candidate], latest_attempt_fn=lambda c: None)
         row = _row_dict(wb.active)
 
-        assert row['Logical Score'] is None
+        assert row['Logical & Analytical Score'] is None
         assert row['Quantitative Score'] is None
-        assert row['Verbal Score'] is None
+        assert row['Verbal Ability Score'] is None
         assert row['Programming Score'] is None

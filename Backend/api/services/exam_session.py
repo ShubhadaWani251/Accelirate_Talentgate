@@ -11,9 +11,11 @@ from datetime import timedelta
 from django.db import transaction
 from django.utils import timezone
 
-from api.models import Candidate, ExamAnswer, ExamAttempt, Invitation
+from api.models import (
+    AttemptSectionScore, Candidate, ExamAnswer, ExamAttempt, Invitation,
+)
 from api.services.question_selection import (
-    SECTION_LABELS, SECTION_ORDER, select_questions_for_attempt,
+    batch_sections, select_questions_for_attempt,
 )
 
 
@@ -489,10 +491,12 @@ def begin_exam(attempt):
 
 def _assign_questions(attempt, batch):
     questions_by_section = select_questions_for_attempt(batch)
+    # Iterated through batch_sections, not over the dict, because insertion order IS the order
+    # the candidate sits the sections in - build_session_state groups by ExamAnswer.answer_id.
     answers = [
         ExamAnswer(attempt=attempt, question=question)
-        for section_key in SECTION_ORDER
-        for question in questions_by_section[section_key]
+        for batch_section in batch_sections(batch)
+        for question in questions_by_section[batch_section.section.section_key]
     ]
     ExamAnswer.objects.bulk_create(answers)
 
@@ -568,9 +572,25 @@ def build_session_state(attempt):
         attempt.examanswer_set.select_related('question', 'question__section')
         .order_by('answer_id')
     )
-    sections = {key: {'key': key, 'label': SECTION_LABELS[key], 'questions': []} for key in SECTION_ORDER}
+    # Built from the batch's own sections, in their configured order - not from a fixed list.
+    ordered_keys = [bs.section.section_key for bs in batch_sections(attempt.invitation.batch)]
+    sections = {
+        bs.section.section_key: {
+            'key': bs.section.section_key, 'label': bs.section.section_name, 'questions': [],
+        }
+        for bs in batch_sections(attempt.invitation.batch)
+    }
     for answer in answers:
         question = answer.question
+        # A section removed from the batch after this paper was drawn would have no bucket.
+        # Keeping the answer visible matters more than the tidy grouping: the candidate was
+        # assigned that question and must still be able to answer it.
+        if question.section.section_key not in sections:
+            sections[question.section.section_key] = {
+                'key': question.section.section_key,
+                'label': question.section.section_name, 'questions': [],
+            }
+            ordered_keys.append(question.section.section_key)
         sections[question.section.section_key]['questions'].append({
             'question_id': question.question_id,
             'question_text': question.question_text,
@@ -583,7 +603,7 @@ def build_session_state(attempt):
         })
     return {
         'remaining_seconds': remaining_seconds(attempt),
-        'sections': [sections[key] for key in SECTION_ORDER if sections[key]['questions']],
+        'sections': [sections[key] for key in ordered_keys if sections[key]['questions']],
         # Single choke point this flag rides from Batch to the frontend guards - see
         # ExamAttemptPage.jsx, which ANDs this into useVisionProctoringGuard/
         # useVoiceActivityGuard's own `active` argument.
@@ -598,12 +618,22 @@ def _load_answers(attempt):
     )
 
 
-# Fields _grade_sections writes, for a targeted bulk_update on re-grade.
-GRADED_FIELDS = (
-    ['total_correct', 'total_marks_earned', 'total_marks', 'overall_score']
-    + [f'{key}_score' for key in SECTION_ORDER]
-    + [f'{key}_cleared' for key in SECTION_ORDER]
-)
+# Attempt-level fields _grade_sections writes, for a targeted save() on re-grade. The
+# per-section values are AttemptSectionScore rows, which _grade_sections rewrites itself.
+GRADED_FIELDS = ['total_correct', 'total_marks_earned', 'total_marks', 'overall_score']
+
+
+def _section_score_snapshot(attempt):
+    """Comparable value for this attempt's section rows, for regrade_attempt's change detection.
+
+    A set of tuples rather than the model instances: the rows are deleted and recreated on every
+    grade, so their primary keys always differ and comparing objects would report a change every
+    single time.
+    """
+    return {
+        (s.section_id, s.score, s.total_marks, s.cleared)
+        for s in AttemptSectionScore.objects.filter(attempt=attempt)
+    }
 
 
 def section_marks(answers):
@@ -704,17 +734,19 @@ def _grade_sections(attempt, answers, batch):
     missed_by = {}
     cleared_count = 0
     marks_by_section = section_marks(answers)
-    for section_key in SECTION_ORDER:
+    score_rows = []
+    for batch_section in batch_sections(batch):
+        section_key = batch_section.section.section_key
         earned, available = marks_by_section.get(section_key, (0, 0))
         marks_earned += earned
         marks_available += available
 
         if available == 0:
-            # Not configured for this batch. Counts as neither cleared nor missed - there was
-            # nothing to sit.
+            # The candidate's paper carried nothing for this section - counts as neither
+            # cleared nor missed, since there was nothing to sit.
             cleared = None
         else:
-            needed = marks_needed_to_clear(available, getattr(batch, f'{section_key}_cutoff'))
+            needed = marks_needed_to_clear(available, batch_section.cutoff)
             cleared = earned >= needed
             if cleared:
                 cleared_count += 1
@@ -722,8 +754,16 @@ def _grade_sections(attempt, answers, batch):
                 all_cleared = False
                 missed_by[section_key] = needed - earned
 
-        setattr(attempt, f'{section_key}_score', earned)
-        setattr(attempt, f'{section_key}_cleared', cleared)
+        score_rows.append(AttemptSectionScore(
+            attempt=attempt, section_id=batch_section.section_id,
+            score=earned, total_marks=available, cleared=cleared,
+        ))
+
+    # Replaced wholesale rather than updated in place: a re-grade after a section was added to
+    # or removed from the batch must leave exactly the batch's CURRENT sections behind, with no
+    # stale row for one that is no longer part of it.
+    AttemptSectionScore.objects.filter(attempt=attempt).delete()
+    AttemptSectionScore.objects.bulk_create(score_rows)
 
     attempt.total_correct = sum(1 for a in answers if a.is_correct)
     attempt.total_marks_earned = marks_earned
@@ -779,10 +819,18 @@ def regrade_attempt(attempt, batch=None):
 
     batch = batch or attempt.invitation.batch
     before = [getattr(attempt, f) for f in GRADED_FIELDS]
+    # Section rows are compared too, not just the attempt-level totals. A cutoff change flips
+    # `cleared` while leaving every total identical, so comparing GRADED_FIELDS alone would
+    # report "nothing changed" for precisely the edit this function exists to apply - and
+    # regrade_batch's count, which is what the TA is shown, would say 0 candidates affected.
+    before_sections = _section_score_snapshot(attempt)
     all_cleared, missed_by, cleared_count = _grade_sections(
         attempt, _load_answers(attempt), batch,
     )
-    changed = before != [getattr(attempt, f) for f in GRADED_FIELDS]
+    changed = (
+        before != [getattr(attempt, f) for f in GRADED_FIELDS]
+        or before_sections != _section_score_snapshot(attempt)
+    )
 
     candidate = attempt.candidate
     decided_by_hand = candidate.result_decided_by_id is not None

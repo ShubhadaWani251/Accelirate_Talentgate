@@ -2,8 +2,12 @@
 
 Each candidate gets an independent random subset of Active questions per section, sized per
 the batch's own configured counts - this is what "reduces answer-sharing within a batch's open
-window" (SECTION_ORDER, `ExamAnswer` rows created from this sit for the rest of the attempt as
-both the assignment and the answer sheet, see services/exam_session.py).
+window" (the `ExamAnswer` rows created from this sit for the rest of the attempt as both the
+assignment and the answer sheet, see services/exam_session.py).
+
+WHICH sections exist, and which of them a batch uses, is data - QuestionBankSection rows and
+that batch's BatchSection rows. Adding a section is an Admin action on Question Bank
+Management, not a code change.
 
 WHICH questions a candidate gets is random. HOW HARD their paper is, is not: the sample is
 stratified by difficulty so every candidate drawing from the same bank gets the same number of
@@ -16,19 +20,29 @@ being asked an equivalent question.
 
 import random
 
-from api.models import Question, QuestionBankSection
+from api.models import Question
 
-# Fixed in code, not a Batch field - the brief doesn't ask for configurable section order, and
-# grouping ExamAnswer rows by insertion order (see exam_session.start_attempt) only needs one
-# consistent constant here.
-SECTION_ORDER = ['logical', 'quantitative', 'verbal', 'programming']
+# Sections are DATA now, not a constant here - an Admin can add one from Question Bank
+# Management and it appears everywhere without a code change. Which sections a given exam uses,
+# and in what order, comes from that batch's own BatchSection rows (ordered by
+# QuestionBankSection.display_order); the labels come from the section rows themselves.
+#
+# These two helpers exist so no caller has to remember the ordering or the select_related.
 
-SECTION_LABELS = {
-    'logical': 'Logical & Analytical',
-    'quantitative': 'Quantitative',
-    'verbal': 'Verbal Ability',
-    'programming': 'Programming',
-}
+
+def batch_sections(batch):
+    """The BatchSection rows this batch uses, in the order candidates sit them.
+
+    Ordering is BatchSection.Meta's, so every caller renders sections in the same sequence
+    without each one remembering to sort - which is what the old SECTION_ORDER constant was
+    really providing.
+    """
+    return list(batch.sections.select_related('section').all())
+
+
+def section_labels(batch):
+    """{section_key: display name} for one batch's sections."""
+    return {bs.section.section_key: bs.section.section_name for bs in batch_sections(batch)}
 
 
 # Apportionment order, which is also how ties are broken when two difficulties have the same
@@ -106,15 +120,16 @@ def select_questions_for_attempt(batch):
     the id-only query cheap now that difficulty comes back with it.
     """
     result = {}
-    for section_key in SECTION_ORDER:
-        required = getattr(batch, f'{section_key}_questions')
+    for batch_section in batch_sections(batch):
+        section_key = batch_section.section.section_key
+        required = batch_section.question_count
         if required <= 0:
             result[section_key] = []
             continue
 
         ids_by_difficulty = {}
         for question_id, difficulty in Question.objects.filter(
-            section__section_key=section_key,
+            section_id=batch_section.section_id,
             status=Question.Status.ACTIVE,
         ).values_list('question_id', 'difficulty'):
             ids_by_difficulty.setdefault(difficulty, []).append(question_id)

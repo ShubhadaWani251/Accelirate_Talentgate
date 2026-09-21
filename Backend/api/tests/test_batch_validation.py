@@ -16,7 +16,22 @@ from django.utils import timezone
 
 from api.models import Batch
 from api.serializers.batch import BatchSerializer, link_window_error
-from api.services.batch_defaults import get_batch_defaults, save_batch_defaults
+from api.services.batch_defaults import (
+    get_batch_defaults, resync_draft_batches, save_batch_defaults,
+)
+
+SECTION_KEYS = ('logical', 'quantitative', 'verbal', 'programming')
+
+
+@pytest.fixture(autouse=True)
+def standard_sections(get_section):
+    """The four sections every test here assumes exist.
+
+    Autouse because sections are DATA now: a batch is created from whatever active sections the
+    org has defined, so with none defined at all there is nothing to create a batch from and
+    every creation test would 400. This fixture is what used to be four hardcoded columns.
+    """
+    return [get_section(key) for key in SECTION_KEYS]
 
 
 class TestCreationSnapshotsDefaults:
@@ -38,10 +53,12 @@ class TestCreationSnapshotsDefaults:
     def test_exam_config_matches_the_current_admin_defaults(self, ta_user, client_for):
         save_batch_defaults({
             'exam_duration_minutes': 33,
-            'logical_questions': 4, 'quantitative_questions': 5,
-            'verbal_questions': 6, 'programming_questions': 7,
-            'logical_cutoff': 55, 'quantitative_cutoff': 60,
-            'verbal_cutoff': 65, 'programming_cutoff': 70,
+            'sections': [
+                {'section_key': 'logical', 'question_count': 4, 'cutoff': 55},
+                {'section_key': 'quantitative', 'question_count': 5, 'cutoff': 60},
+                {'section_key': 'verbal', 'question_count': 6, 'cutoff': 65},
+                {'section_key': 'programming', 'question_count': 7, 'cutoff': 70},
+            ],
         }, ta_user)
 
         response = client_for(ta_user).post(
@@ -50,9 +67,10 @@ class TestCreationSnapshotsDefaults:
         )
 
         assert response.data['exam_duration_minutes'] == 33
-        assert response.data['logical_questions'] == 4
-        assert response.data['programming_questions'] == 7
-        assert float(response.data['verbal_cutoff']) == 65.0
+        by_key = {s['section_key']: s for s in response.data['sections']}
+        assert by_key['logical']['question_count'] == 4
+        assert by_key['programming']['question_count'] == 7
+        assert float(by_key['verbal']['cutoff']) == 65.0
 
     def test_a_client_supplied_duration_or_count_is_ignored(self, ta_user, client_for):
         """The fields are read-only - not merely defaulted. A request that also supplies its own
@@ -67,8 +85,11 @@ class TestCreationSnapshotsDefaults:
             format='json',
         )
         defaults = get_batch_defaults()
+        default_logical = next(
+            s for s in defaults['sections'] if s['section_key'] == 'logical')
+        by_key = {s['section_key']: s for s in response.data['sections']}
         assert response.data['exam_duration_minutes'] == defaults['exam_duration_minutes']
-        assert response.data['logical_questions'] == defaults['logical_questions']
+        assert by_key['logical']['question_count'] == default_logical['question_count']
 
     def test_a_client_supplied_cutoff_at_creation_is_also_ignored(self, ta_user, client_for):
         """Cutoffs stay writable later (the post-finalize edit), but not at creation - a fresh
@@ -76,11 +97,15 @@ class TestCreationSnapshotsDefaults:
         """
         response = client_for(ta_user).post(
             '/api/batches/',
-            {'batch_name': 'New Batch', 'college_name': 'Test College', 'logical_cutoff': 1},
+            {'batch_name': 'New Batch', 'college_name': 'Test College',
+             'section_cutoffs': [{'section_key': 'logical', 'cutoff': 1}]},
             format='json',
         )
         defaults = get_batch_defaults()
-        assert float(response.data['logical_cutoff']) == defaults['logical_cutoff']
+        default_logical = next(
+            s for s in defaults['sections'] if s['section_key'] == 'logical')
+        by_key = {s['section_key']: s for s in response.data['sections']}
+        assert float(by_key['logical']['cutoff']) == default_logical['cutoff']
 
     def test_changing_defaults_afterward_does_not_touch_an_existing_batch(
         self, ta_user, client_for
@@ -96,10 +121,8 @@ class TestCreationSnapshotsDefaults:
 
         save_batch_defaults({
             'exam_duration_minutes': original_duration + 100,
-            'logical_questions': 1, 'quantitative_questions': 1,
-            'verbal_questions': 1, 'programming_questions': 1,
-            'logical_cutoff': 1, 'quantitative_cutoff': 1,
-            'verbal_cutoff': 1, 'programming_cutoff': 1,
+            'sections': [{'section_key': k, 'question_count': 1, 'cutoff': 1}
+                         for k in ('logical', 'quantitative', 'verbal', 'programming')],
         }, ta_user)
 
         refetched = client_for(ta_user).get('/api/batches/%d/' % created['batch_id']).data
@@ -149,20 +172,22 @@ class TestCutoffEditIsIsolatedToOneBatch:
     ):
         save_batch_defaults({
             'exam_duration_minutes': 45,
-            'logical_questions': 10, 'quantitative_questions': 10,
-            'verbal_questions': 10, 'programming_questions': 10,
-            'logical_cutoff': 70, 'quantitative_cutoff': 70,
-            'verbal_cutoff': 70, 'programming_cutoff': 70,
+            'sections': [{'section_key': k, 'question_count': 10, 'cutoff': 70}
+                         for k in ('logical', 'quantitative', 'verbal', 'programming')],
         }, admin_user)
         batch = make_batch(ta_user, status=Batch.Status.IN_PROGRESS, logical_cutoff=70)
 
         response = client_for(admin_user).patch(
-            '/api/batches/%d/' % batch.batch_id, {'logical_cutoff': 40}, format='json',
+            '/api/batches/%d/' % batch.batch_id,
+            {'section_cutoffs': [{'section_key': 'logical', 'cutoff': 40}]}, format='json',
         )
 
-        assert response.status_code == 200
-        assert float(response.data['logical_cutoff']) == 40.0
-        assert get_batch_defaults()['logical_cutoff'] == 70.0
+        assert response.status_code == 200, response.data
+        by_key = {s['section_key']: s for s in response.data['sections']}
+        assert float(by_key['logical']['cutoff']) == 40.0
+        default_logical = next(
+            s for s in get_batch_defaults()['sections'] if s['section_key'] == 'logical')
+        assert default_logical['cutoff'] == 70.0
 
     def test_a_second_batch_is_unaffected_by_the_first_batchs_cutoff_edit(
         self, admin_user, ta_user, client_for, make_batch
@@ -171,22 +196,23 @@ class TestCutoffEditIsIsolatedToOneBatch:
         batch_b = make_batch(ta_user, status=Batch.Status.IN_PROGRESS, logical_cutoff=70)
 
         client_for(admin_user).patch(
-            '/api/batches/%d/' % batch_a.batch_id, {'logical_cutoff': 40}, format='json',
+            '/api/batches/%d/' % batch_a.batch_id,
+            {'section_cutoffs': [{'section_key': 'logical', 'cutoff': 40}]}, format='json',
         )
 
-        batch_b.refresh_from_db()
-        assert float(batch_b.logical_cutoff) == 70.0
+        cutoff_b = batch_b.sections.get(section__section_key='logical').cutoff
+        assert float(cutoff_b) == 70.0
 
     def test_a_ta_cannot_change_a_cutoff(self, ta_user, client_for, make_batch):
         batch = make_batch(ta_user, status=Batch.Status.IN_PROGRESS, logical_cutoff=70)
 
         response = client_for(ta_user).patch(
-            '/api/batches/%d/' % batch.batch_id, {'logical_cutoff': 40}, format='json',
+            '/api/batches/%d/' % batch.batch_id,
+            {'section_cutoffs': [{'section_key': 'logical', 'cutoff': 40}]}, format='json',
         )
 
         assert response.status_code == 403
-        batch.refresh_from_db()
-        assert float(batch.logical_cutoff) == 70.0
+        assert float(batch.sections.get(section__section_key='logical').cutoff) == 70.0
 
 
 class TestDefaultsAreAdminOnly:
@@ -196,10 +222,8 @@ class TestDefaultsAreAdminOnly:
     def test_a_ta_cannot_write_the_defaults(self, ta_user, client_for):
         response = client_for(ta_user).put('/api/batches/defaults/', {
             'exam_duration_minutes': 1,
-            'logical_questions': 1, 'quantitative_questions': 1,
-            'verbal_questions': 1, 'programming_questions': 1,
-            'logical_cutoff': 1, 'quantitative_cutoff': 1,
-            'verbal_cutoff': 1, 'programming_cutoff': 1,
+            'sections': [{'section_key': k, 'question_count': 1, 'cutoff': 1}
+                         for k in SECTION_KEYS],
         }, format='json')
         assert response.status_code == 403
 
@@ -208,13 +232,14 @@ class TestDefaultsAreAdminOnly:
         assert client.get('/api/batches/defaults/').status_code == 200
         response = client.put('/api/batches/defaults/', {
             'exam_duration_minutes': 50,
-            'logical_questions': 8, 'quantitative_questions': 8,
-            'verbal_questions': 8, 'programming_questions': 8,
-            'logical_cutoff': 65, 'quantitative_cutoff': 65,
-            'verbal_cutoff': 65, 'programming_cutoff': 65,
+            'sections': [{'section_key': k, 'question_count': 8, 'cutoff': 65}
+                         for k in SECTION_KEYS],
         }, format='json')
-        assert response.status_code == 200
+        assert response.status_code == 200, response.data
         assert response.data['exam_duration_minutes'] == 50
+        by_key = {s['section_key']: s for s in response.data['sections']}
+        assert by_key['logical']['question_count'] == 8
+        assert by_key['verbal']['cutoff'] == 65.0
 
 
 class TestLinkWindowMustCoverTheExam:
@@ -549,3 +574,181 @@ class TestMarkBatchCompleted:
         response = client_for(ta_user).post('/api/batches/%d/complete/' % batch.batch_id)
 
         assert response.status_code == 400
+
+
+class TestSectionSelectionOnTheDefaults:
+    """Configure Default Batch is where an org chooses WHICH sections a new batch runs.
+
+    An unselected section keeps its stored question count and cutoff rather than being wiped, so
+    re-selecting it restores what was configured instead of silently resetting to the fallback.
+    """
+
+    def _save(self, admin_user, included_keys, **counts):
+        save_batch_defaults({
+            'exam_duration_minutes': 45,
+            'sections': [
+                {'section_key': k, 'question_count': counts.get(k, 10), 'cutoff': 70,
+                 'included': k in included_keys}
+                for k in SECTION_KEYS
+            ],
+        }, admin_user)
+
+    def test_a_new_section_is_selected_by_default(self, admin_user, get_section):
+        get_section('data_interp', 'Data Interpretation')
+
+        row = next(s for s in get_batch_defaults()['sections']
+                   if s['section_key'] == 'data_interp')
+
+        # "Added a section and nothing happened" would be a poor first experience of the
+        # feature, and unticking it is one click.
+        assert row['included'] is True
+
+    def test_unselected_sections_are_left_off_a_new_batch(
+        self, admin_user, ta_user, client_for,
+    ):
+        self._save(admin_user, {'logical', 'verbal'})
+
+        response = client_for(ta_user).post(
+            '/api/batches/', {'batch_name': 'Two Section Batch', 'college_name': 'C'},
+            format='json',
+        )
+
+        assert response.status_code == 201, response.data
+        assert ([s['section_key'] for s in response.data['sections']]
+                == ['logical', 'verbal'])
+
+    def test_an_unselected_sections_numbers_survive_being_unselected(self, admin_user):
+        self._save(admin_user, SECTION_KEYS, programming=7)
+        self._save(admin_user, {'logical'}, programming=7)
+
+        row = next(s for s in get_batch_defaults()['sections']
+                   if s['section_key'] == 'programming')
+
+        assert row['included'] is False
+        # The whole point of keeping them: re-ticking restores 7, not the fallback 10.
+        assert row['question_count'] == 7
+
+    def test_excluding_every_section_is_refused(self, admin_user, client_for):
+        response = client_for(admin_user).put('/api/batches/defaults/', {
+            'exam_duration_minutes': 45,
+            'sections': [{'section_key': k, 'question_count': 10, 'cutoff': 70,
+                          'included': False} for k in SECTION_KEYS],
+        }, format='json')
+
+        assert response.status_code == 400
+        assert 'at least one section' in str(response.data)
+
+
+class TestDraftBatchesFollowTheDefaults:
+    """A DRAFT has had nothing sent to its candidates, so it tracks the current defaults rather
+    than the snapshot it was created with.
+
+    Reported: an admin unticked a section, created a batch from an older draft, and got the old
+    five-section configuration - which appeared nowhere on any screen.
+    """
+
+    def _save(self, admin_user, included_keys, duration=45, **counts):
+        save_batch_defaults({
+            'exam_duration_minutes': duration,
+            'sections': [
+                {'section_key': k, 'question_count': counts.get(k, 10), 'cutoff': 70,
+                 'included': k in included_keys}
+                for k in SECTION_KEYS
+            ],
+        }, admin_user)
+        return resync_draft_batches()
+
+    def test_a_draft_loses_a_section_the_admin_unticked(
+        self, admin_user, ta_user, client_for,
+    ):
+        created = client_for(ta_user).post(
+            '/api/batches/', {'batch_name': 'Draft A', 'college_name': 'C'}, format='json',
+        ).data
+        assert len(created['sections']) == 4
+
+        self._save(admin_user, {'logical', 'verbal'})
+
+        refetched = client_for(ta_user).get('/api/batches/%d/' % created['batch_id']).data
+        assert [s['section_key'] for s in refetched['sections']] == ['logical', 'verbal']
+
+    def test_a_draft_gains_a_section_the_admin_ticked(
+        self, admin_user, ta_user, client_for,
+    ):
+        self._save(admin_user, {'logical'})
+        created = client_for(ta_user).post(
+            '/api/batches/', {'batch_name': 'Draft B', 'college_name': 'C'}, format='json',
+        ).data
+        assert len(created['sections']) == 1
+
+        self._save(admin_user, {'logical', 'programming'})
+
+        refetched = client_for(ta_user).get('/api/batches/%d/' % created['batch_id']).data
+        assert [s['section_key'] for s in refetched['sections']] == ['logical', 'programming']
+
+    def test_a_draft_picks_up_revised_counts_and_duration(
+        self, admin_user, ta_user, client_for,
+    ):
+        created = client_for(ta_user).post(
+            '/api/batches/', {'batch_name': 'Draft C', 'college_name': 'C'}, format='json',
+        ).data
+
+        self._save(admin_user, SECTION_KEYS, duration=33, logical=7)
+
+        refetched = client_for(ta_user).get('/api/batches/%d/' % created['batch_id']).data
+        assert refetched['exam_duration_minutes'] == 33
+        logical = next(s for s in refetched['sections'] if s['section_key'] == 'logical')
+        assert logical['question_count'] == 7
+
+    def test_a_live_batch_is_never_touched(self, admin_user, ta_user, client_for, make_batch):
+        """The half that must NOT move: candidates have been told about this exam."""
+        live = make_batch(ta_user, status=Batch.Status.IN_PROGRESS)
+        before = [bs.section.section_key for bs in live.sections.select_related('section')]
+
+        self._save(admin_user, {'logical'})
+
+        live.refresh_from_db()
+        after = [bs.section.section_key for bs in live.sections.select_related('section')]
+        assert after == before
+        assert len(after) == 4
+
+    def test_a_draft_that_somehow_has_an_invitation_is_left_alone(
+        self, admin_user, ta_user, client_for, make_candidate, make_invitation,
+    ):
+        """The rule rests on "nothing has been sent", not on the status label - so the guard is
+        the invitation, checked directly rather than inferred from Draft meaning what it means.
+        """
+        created = client_for(ta_user).post(
+            '/api/batches/', {'batch_name': 'Draft D', 'college_name': 'C'}, format='json',
+        ).data
+        batch = Batch.objects.get(pk=created['batch_id'])
+        make_invitation(make_candidate(batch, ta_user), ta_user)
+
+        self._save(admin_user, {'logical'})
+
+        assert batch.sections.count() == 4
+
+    def test_the_save_response_reports_how_many_drafts_moved(
+        self, admin_user, ta_user, client_for,
+    ):
+        for name in ('Draft E', 'Draft F'):
+            client_for(ta_user).post(
+                '/api/batches/', {'batch_name': name, 'college_name': 'C'}, format='json',
+            )
+
+        response = client_for(admin_user).put('/api/batches/defaults/', {
+            'exam_duration_minutes': 45,
+            'sections': [{'section_key': k, 'question_count': 10, 'cutoff': 70,
+                          'included': k == 'logical'} for k in SECTION_KEYS],
+        }, format='json')
+
+        assert response.status_code == 200, response.data
+        assert response.data['resynced_draft_batches'] == 2
+
+    def test_saving_unchanged_defaults_moves_nothing(self, admin_user, ta_user, client_for):
+        # "Changed" has to mean actually changed, or the count is noise on every save.
+        client_for(ta_user).post(
+            '/api/batches/', {'batch_name': 'Draft G', 'college_name': 'C'}, format='json',
+        )
+        self._save(admin_user, SECTION_KEYS)
+
+        assert self._save(admin_user, SECTION_KEYS) == 0

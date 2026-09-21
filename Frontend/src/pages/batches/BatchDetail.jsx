@@ -245,6 +245,7 @@ export default function BatchDetail() {
         onToggleSelectAll={toggleSelectAll}
         onEdit={setEditingCandidate}
         onOpenInvite={openInviteConfirm}
+        sections={batch.sections || []}
         onOpenNotify={() => setNotifyOpen(true)}
         onOpenCertification={() => setCertificationOpen(true)}
         onOpenExport={() => setExportOpen(true)}

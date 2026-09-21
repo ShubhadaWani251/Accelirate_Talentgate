@@ -14,7 +14,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from api.models import AuditLog, Batch, Candidate, ExamAttempt
+from api.models import AuditLog, Batch, Candidate, ExamAttempt, QuestionBankSection
 from api.pagination import StandardResultsPagination
 from api.permissions import IsAdminOrTA
 from api.serializers.batch import link_window_error
@@ -113,33 +113,39 @@ def _to_decimal_param(value):
         return None
 
 
-# Overall score lives on Candidate; per-section scores only exist on the ExamAttempt, so a
-# section filter has to reach through the related attempt. Both are exposed as <field>_min /
-# <field>_max query params so one shared filter UI can drive them all.
-_SCORE_FILTER_FIELDS = {
-    'score': 'overall_score',
-    'logical': 'examattempt__logical_score',
-    'quantitative': 'examattempt__quantitative_score',
-    'verbal': 'examattempt__verbal_score',
-    'programming': 'examattempt__programming_score',
-}
-
-
 def _apply_score_filters(qs, params):
-    """Apply any overall/section score range filters present in the query params."""
+    """Apply any overall/section score range filters present in the query params.
+
+    Overall score lives on Candidate. A SECTION score lives on an AttemptSectionScore row
+    reached through the attempt, and which sections exist is data - so the accepted params are
+    derived from QuestionBankSection rather than listed here. `<section_key>_min` /
+    `<section_key>_max` works for whatever sections the org has defined, including one added
+    after this code was written; `score_min` / `score_max` stay reserved for the overall figure.
+    """
+    for suffix, lookup in (('min', 'gte'), ('max', 'lte')):
+        value = _to_decimal_param(params.get(f'score_{suffix}'))
+        if value is not None:
+            qs = qs.filter(**{f'overall_score__{lookup}': value})
+
     section_filter_applied = False
-    for param_prefix, field in _SCORE_FILTER_FIELDS.items():
+    for section_key in QuestionBankSection.objects.values_list('section_key', flat=True):
         for suffix, lookup in (('min', 'gte'), ('max', 'lte')):
-            value = _to_decimal_param(params.get(f'{param_prefix}_{suffix}'))
+            value = _to_decimal_param(params.get(f'{section_key}_{suffix}'))
             if value is None:
                 continue
-            qs = qs.filter(**{f'{field}__{lookup}': value})
-            if field.startswith('examattempt__'):
-                section_filter_applied = True
+            # Both conditions in ONE filter() call: split across two, Django would be free to
+            # satisfy them with different section rows, so "logical >= 8 and logical <= 9" could
+            # match a candidate whose logical score is 2 as long as some other row of theirs
+            # happened to fit each half.
+            qs = qs.filter(**{
+                'examattempt__section_scores__section__section_key': section_key,
+                f'examattempt__section_scores__score__{lookup}': value,
+            })
+            section_filter_applied = True
 
-    # Joining through examattempt yields one row per attempt, so a candidate with more than
-    # one attempt in range would appear twice. Only pay for DISTINCT when a section filter
-    # actually introduced the join.
+    # Joining through examattempt yields one row per attempt (and per section row), so a
+    # candidate with more than one attempt in range would appear twice. Only pay for DISTINCT
+    # when a section filter actually introduced the join.
     return qs.distinct() if section_filter_applied else qs
 
 

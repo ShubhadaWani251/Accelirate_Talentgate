@@ -29,6 +29,21 @@ from api.services.question_selection import (
 )
 
 pytestmark = pytest.mark.django_db
+def set_cutoff(batch, value, *section_keys):
+    """Revise a batch's cutoff for one or more sections.
+
+    A cutoff lives on the batch's BatchSection row now, not on a Batch column - so a test that
+    revises one has to go through the same place the application does.
+    """
+    from api.models import BatchSection
+    BatchSection.objects.filter(
+        batch=batch, section__section_key__in=section_keys,
+    ).update(cutoff=value)
+
+
+def section_score(attempt, section_key):
+    """The AttemptSectionScore row for one section of an attempt, or None."""
+    return attempt.section_scores.filter(section__section_key=section_key).first()
 
 
 # --------------------------------------------------------------------------------- ISS-15
@@ -138,10 +153,8 @@ class TestDifficultyQuotas:
 
 class TestPapersAreDifficultyBalanced:
     @pytest.fixture
-    def stocked_section(self):
-        section = QuestionBankSection.objects.create(
-            section_name='Logical & Analytical', section_key='logical',
-        )
+    def stocked_section(self, get_section):
+        section = get_section('logical')
         for n in range(12):
             # 3:1 Easy:Medium, so a 4-question paper must be exactly 3 Easy + 1 Medium.
             difficulty = Question.Difficulty.MEDIUM if n % 4 == 3 else Question.Difficulty.EASY
@@ -198,15 +211,13 @@ class TestPapersAreDifficultyBalanced:
 # --------------------------------------------------------------------------------- ISS-17
 
 @pytest.fixture
-def weighted_attempt(ta_user, make_batch, make_candidate, make_invitation):
+def weighted_attempt(ta_user, make_batch, make_candidate, make_invitation, get_section):
     """One section, three questions: a 5-mark one and two 1-mark ones.
 
     Chosen so marks and answer counts disagree about who passed a 50% cutoff - getting only the
     heavy question right is 5/7 of the marks but 1/3 of the questions.
     """
-    section = QuestionBankSection.objects.create(
-        section_name='Logical & Analytical', section_key='logical',
-    )
+    section = get_section('logical')
     questions = [
         Question.objects.create(
             question_code='Q-MK-%d' % n, section=section, question_text='q%d' % n,
@@ -252,8 +263,8 @@ class TestMarksAreWeightedInScoring:
         # 5 of 7 marks = 71%, over the 50% cutoff. Counting answers instead gives 1 of 3 = 33%,
         # which is what this used to do - the candidate failed for getting the hardest question
         # right and the two throwaways wrong.
-        assert attempt.logical_score == 5
-        assert attempt.logical_cleared is True
+        assert section_score(attempt, 'logical').score == 5
+        assert section_score(attempt, 'logical').cleared is True
         assert attempt.overall_score == Decimal('71.43')
         assert attempt.candidate.result == Candidate.Result.PASS
 
@@ -268,8 +279,8 @@ class TestMarksAreWeightedInScoring:
 
         # The mirror image: 2 of 7 marks = 29%, a fail - where counting answers gives 2 of 3 =
         # 67% and a pass.
-        assert attempt.logical_score == 2
-        assert attempt.logical_cleared is False
+        assert section_score(attempt, 'logical').score == 2
+        assert section_score(attempt, 'logical').cleared is False
         assert attempt.candidate.result == Candidate.Result.FAIL
 
     def test_total_correct_stays_a_question_count(self, weighted_attempt):
@@ -295,23 +306,22 @@ class TestMarksAreWeightedInScoring:
         assert attempt.total_marks_earned == 0
         assert attempt.total_marks == 7
         assert attempt.overall_score == Decimal('0.00')
-        assert attempt.logical_cleared is False
+        assert section_score(attempt, 'logical').cleared is False
 
     def test_regrading_after_a_cutoff_change_uses_the_same_weighting(self, weighted_attempt):
         attempt, questions = weighted_attempt
         _answer(attempt, questions[1], 'A')   # 1 of 7 marks = 14%
         exam_session.finalize_attempt(attempt, outcome='submitted')
         attempt.refresh_from_db()
-        assert attempt.logical_cleared is False
+        assert section_score(attempt, 'logical').cleared is False
 
         batch = attempt.invitation.batch
-        batch.logical_cutoff = Decimal('10.00')
-        batch.save(update_fields=['logical_cutoff'])
+        set_cutoff(batch, Decimal('10.00'), 'logical')
 
         assert exam_session.regrade_attempt(attempt, batch) is True
         attempt.refresh_from_db()
         # Re-graded against the marks percentage, not a recount of answers.
-        assert attempt.logical_cleared is True
+        assert section_score(attempt, 'logical').cleared is True
         assert attempt.total_marks_earned == 1
         assert attempt.total_marks == 7
 

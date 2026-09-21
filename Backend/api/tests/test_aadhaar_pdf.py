@@ -114,9 +114,10 @@ class TestPasswordDerivation:
 class TestPdfUploadThroughTheCaptureEndpoint:
     @pytest.fixture
     def small_invitation(self, ta_user, make_batch, make_candidate, make_invitation):
-        section = QuestionBankSection.objects.create(
-            section_name='Logical & Analytical Reasoning', section_key='logical',
-        )
+        section = QuestionBankSection.objects.get_or_create(
+            section_key='logical',
+            defaults={'section_name': 'Logical & Analytical Reasoning'},
+        )[0]
         Question.objects.create(
             question_code='Q-AADHAAR-PDF-1', section=section, question_text='2 + 2 = ?',
             option_a='3', option_b='4', option_c='5', option_d='6', correct_option='B',

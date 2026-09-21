@@ -1,12 +1,19 @@
 from django.db.models import Count, Q
 from rest_framework import serializers
 
-from api.models import Batch, Candidate, DuplicateCheck
+from api.models import Batch, BatchSection, Candidate, QuestionBankSection, DuplicateCheck
 from api.serializers.common import format_aadhaar_last4
 from api.services.batch_defaults import get_batch_defaults
 
 
-SECTION_FIELDS = ['logical', 'quantitative', 'verbal', 'programming']
+class BatchSectionSerializer(serializers.ModelSerializer):
+    """One section of one batch, flattened so the UI never has to walk a nested section object."""
+    section_key = serializers.CharField(source='section.section_key', read_only=True)
+    section_name = serializers.CharField(source='section.section_name', read_only=True)
+
+    class Meta:
+        model = BatchSection
+        fields = ['section_id', 'section_key', 'section_name', 'question_count', 'cutoff']
 
 
 def link_window_error(link_from, link_until, duration):
@@ -59,14 +66,18 @@ class BatchSerializer(serializers.ModelSerializer):
     pass_count = serializers.SerializerMethodField()
     fail_count = serializers.SerializerMethodField()
     borderline_count = serializers.SerializerMethodField()
+    # Which sections this batch runs, with its own question count and cutoff for each. Read-only
+    # here: the set is chosen at creation (BatchListCreateView.post) and the cutoffs are revised
+    # through BatchDetailView's own section_cutoffs handling, which has to re-grade the cohort
+    # afterwards - something a plain nested write could not do.
+    sections = BatchSectionSerializer(many=True, read_only=True)
 
     class Meta:
         model = Batch
         fields = [
             'batch_id', 'batch_name', 'college_name',
             'link_valid_from', 'link_valid_until', 'exam_duration_minutes',
-            'logical_questions', 'quantitative_questions', 'verbal_questions', 'programming_questions',
-            'logical_cutoff', 'quantitative_cutoff', 'verbal_cutoff', 'programming_cutoff',
+            'sections',
             'status', 'status_display', 'total_candidates',
             'primary_ta_user', 'primary_ta_user_name', 'created_at',
             'pass_count', 'fail_count', 'borderline_count',
@@ -83,8 +94,7 @@ class BatchSerializer(serializers.ModelSerializer):
             # ConfigureBatchStep's cutoffs-only edit mode) - creation still snapshots them from
             # the same defaults, but that happens server-side via explicit save() kwargs, not
             # through this required-ness setting.
-            'exam_duration_minutes', 'logical_questions', 'quantitative_questions',
-            'verbal_questions', 'programming_questions',
+            'exam_duration_minutes', 'sections',
         ]
 
     def validate_batch_name(self, value):
@@ -163,30 +173,54 @@ class BatchSerializer(serializers.ModelSerializer):
             error = link_window_error(link_from, link_until, duration)
             if error:
                 raise serializers.ValidationError({'link_valid_until': error})
-        for section in SECTION_FIELDS:
-            count_field = f'{section}_questions'
-            cutoff_field = f'{section}_cutoff'
-            if count_field in attrs and attrs[count_field] <= 0:
-                raise serializers.ValidationError({count_field: 'Must be at least 1.'})
-            if cutoff_field in attrs and not (0 <= attrs[cutoff_field] <= 100):
-                raise serializers.ValidationError({cutoff_field: 'Must be between 0 and 100.'})
         return attrs
 
 
+class SectionDefaultSerializer(serializers.Serializer):
+    """One section's row on the Configure Default Batch screen.
+
+    `included` is whether a new batch gets this section at all. The count and cutoff are still
+    required for an excluded section, and still saved - so re-including it later restores what
+    was configured rather than resetting it.
+    """
+    section_key = serializers.CharField(max_length=30)
+    question_count = serializers.IntegerField(min_value=1)
+    cutoff = serializers.DecimalField(max_digits=5, decimal_places=2, min_value=0, max_value=100)
+    included = serializers.BooleanField(default=True)
+
+    def validate_section_key(self, value):
+        if not QuestionBankSection.objects.filter(section_key=value).exists():
+            raise serializers.ValidationError(f'No section named {value}.')
+        return value
+
+
 class BatchDefaultsSerializer(serializers.Serializer):
-    """Org-wide default exam config, backed by the Setting key/value table (setting_group='exam_config').
-    Saving these only affects batches created AFTER the save - each Batch snapshots its own
-    copy of these values at creation time.
+    """Org-wide default exam config, backed by the Setting key/value table
+    (setting_group='exam_config').
+
+    Saving these only affects batches created AFTER the save - each Batch snapshots its own copy
+    into BatchSection rows at creation.
+
+    `sections` is a list rather than a fixed field per section, because which sections exist is
+    data: an Admin can add one from Question Bank Management and it has to be configurable here
+    without a code change.
     """
     exam_duration_minutes = serializers.IntegerField(min_value=1)
-    logical_questions = serializers.IntegerField(min_value=1)
-    quantitative_questions = serializers.IntegerField(min_value=1)
-    verbal_questions = serializers.IntegerField(min_value=1)
-    programming_questions = serializers.IntegerField(min_value=1)
-    logical_cutoff = serializers.DecimalField(max_digits=5, decimal_places=2, min_value=0, max_value=100)
-    quantitative_cutoff = serializers.DecimalField(max_digits=5, decimal_places=2, min_value=0, max_value=100)
-    verbal_cutoff = serializers.DecimalField(max_digits=5, decimal_places=2, min_value=0, max_value=100)
-    programming_cutoff = serializers.DecimalField(max_digits=5, decimal_places=2, min_value=0, max_value=100)
+    sections = SectionDefaultSerializer(many=True)
+
+    def validate_sections(self, value):
+        if not value:
+            raise serializers.ValidationError('Configure at least one section.')
+        keys = [section['section_key'] for section in value]
+        if len(set(keys)) != len(keys):
+            raise serializers.ValidationError('Each section may only appear once.')
+        # Excluding every section would leave new batches with no exam at all, and the failure
+        # would only surface later as an un-creatable batch.
+        if not any(section.get('included', True) for section in value):
+            raise serializers.ValidationError(
+                'Keep at least one section selected - a batch needs something to assess.'
+            )
+        return value
 
 
 class CandidateStagingSerializer(serializers.ModelSerializer):

@@ -1,7 +1,7 @@
 from django.db import models
 from django.utils import timezone
 from .candidate import Candidate, Invitation
-from .question import Question
+from .question import Question, QuestionBankSection
 
 
 class ExamAttempt(models.Model):
@@ -118,12 +118,17 @@ class ExamAttempt(models.Model):
     # batch configuration.
     total_marks_earned = models.SmallIntegerField(default=0)
     total_marks = models.SmallIntegerField(default=0)
+
+    # DEPRECATED - per-section results live in AttemptSectionScore rows (see `section_scores`).
+    # These eight columns are the pre-AttemptSectionScore storage, kept only so migration 0035's
+    # backfill has a source and so a rollback has somewhere to land. Nothing reads them any
+    # more. They are dropped in a separate, later migration once this has run cleanly in
+    # production.
     logical_score = models.SmallIntegerField(null=True, blank=True)
     quantitative_score = models.SmallIntegerField(null=True, blank=True)
     verbal_score = models.SmallIntegerField(null=True, blank=True)
     programming_score = models.SmallIntegerField(null=True, blank=True)
 
-    # Section pass/fail
     logical_cleared = models.BooleanField(null=True, blank=True)
     quantitative_cleared = models.BooleanField(null=True, blank=True)
     verbal_cleared = models.BooleanField(null=True, blank=True)
@@ -221,3 +226,40 @@ class ProctoringEvent(models.Model):
 
     def __str__(self):
         return f"Event #{self.event_id} - {self.event_type}"
+
+class AttemptSectionScore(models.Model):
+    """One candidate's result in one section of their attempt.
+
+    Replaces ExamAttempt's eight `<section>_score`/`<section>_cleared` columns, for the same
+    reason BatchSection replaced Batch's: a fixed set of columns can only ever describe the four
+    sections someone wrote columns for.
+
+    Written only by services.exam_session._grade_sections, which recreates the full set on every
+    grade and re-grade - so these rows always describe the batch's CURRENT sections and cutoffs,
+    and a section removed from a Draft batch leaves no stale score behind.
+    """
+    attempt_section_id = models.BigAutoField(primary_key=True)
+    attempt = models.ForeignKey(ExamAttempt, on_delete=models.CASCADE, db_column='attempt_id',
+                                related_name='section_scores')
+    section = models.ForeignKey(QuestionBankSection, on_delete=models.PROTECT,
+                                db_column='section_id')
+    # MARKS earned and MARKS available on this candidate's own paper - not question counts. The
+    # two only coincide while every question is worth 1 mark (see Question.marks), and the
+    # denominator is stored per attempt because a stratified random draw can give two candidates
+    # in one batch papers worth different totals.
+    score = models.SmallIntegerField(default=0)
+    total_marks = models.SmallIntegerField(default=0)
+    # Null means "not attempted" - the section carried no questions on this paper, which is
+    # different from scoring zero in it.
+    cleared = models.BooleanField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'attempt_section_scores'
+        ordering = ['section__display_order', 'section__section_name']
+        constraints = [
+            models.UniqueConstraint(fields=['attempt', 'section'],
+                                    name='ux_attempt_sections_attempt_section'),
+        ]
+
+    def __str__(self):
+        return f'Attempt #{self.attempt_id} - {self.section.section_name}: {self.score}'

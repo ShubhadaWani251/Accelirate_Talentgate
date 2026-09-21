@@ -1,6 +1,7 @@
 import io
 import logging
 import zipfile
+from decimal import Decimal, InvalidOperation
 
 from django.db import DataError, transaction
 from django.db.models import Q
@@ -11,7 +12,7 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from api.models import Batch, Candidate, Invitation
+from api.models import Batch, BatchSection, Candidate, Invitation
 from api.pagination import StandardResultsPagination
 from api.permissions import IsAdmin, IsAdminOrTA
 from api.serializers.batch import (
@@ -20,7 +21,9 @@ from api.serializers.batch import (
 )
 from api.services.access import can_access_batch, visible_batches_qs
 from api.services.audit import log_action
-from api.services.batch_defaults import get_batch_defaults, save_batch_defaults
+from api.services.batch_defaults import (
+    get_batch_defaults, included_sections, resync_draft_batches, save_batch_defaults,
+)
 from api.services.batch_status_filter import filter_batches_by_status_group
 from api.services import draft_expiry
 from api.services.candidate_validation import (
@@ -39,6 +42,40 @@ from api.services.invites import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _apply_section_cutoffs(batch, section_cutoffs):
+    """Write revised cutoffs onto this batch's BatchSection rows. Returns True if any changed.
+
+    Raises ValueError (turned into a 400 by the caller) for a malformed payload or a section
+    this batch does not actually run - silently ignoring an unknown section would let a TA think
+    they had revised a cutoff that was never applied, and they would only find out from a
+    pass/fail list that failed to move.
+    """
+    if not isinstance(section_cutoffs, list) or not section_cutoffs:
+        raise ValueError('Send a list of {section_key, cutoff}.')
+
+    rows = {bs.section.section_key: bs for bs in batch.sections.select_related('section').all()}
+    updates = []
+    for entry in section_cutoffs:
+        if not isinstance(entry, dict):
+            raise ValueError('Each entry must be an object with section_key and cutoff.')
+        row = rows.get(entry.get('section_key'))
+        if row is None:
+            raise ValueError(f"This batch has no {entry.get('section_key')!r} section.")
+        try:
+            cutoff = Decimal(str(entry['cutoff']))
+        except (KeyError, InvalidOperation):
+            raise ValueError(f"{entry.get('section_key')}: cutoff must be a number.")
+        if not (0 <= cutoff <= 100):
+            raise ValueError(f'{row.section.section_key}: cutoff must be between 0 and 100.')
+        if row.cutoff != cutoff:
+            row.cutoff = cutoff
+            updates.append(row)
+
+    if updates:
+        BatchSection.objects.bulk_update(updates, ['cutoff'])
+    return bool(updates)
 
 
 def _get_batch_or_404(user, batch_id):
@@ -81,24 +118,44 @@ class BatchListCreateView(APIView):
         return paginator.get_paginated_response(BatchSerializer(page, many=True).data)
 
     def post(self, request):
-        # Only batch_name and college_name come from the request now - the exam schedule,
-        # question counts and cutoffs are the admin-configured org-wide defaults
-        # (services/batch_defaults.py), snapshotted onto this batch at creation via the
-        # explicit kwargs below. Passed as save() kwargs rather than left to the serializer's
-        # own (now read-only, for 5 of these 9 fields - see BatchSerializer.Meta) field handling
-        # specifically so this is unconditional: kwargs always win over whatever validated_data
-        # holds, so even a request that also supplied its own values for the 4 still-writable
-        # cutoff fields gets the current defaults instead. A batch's configuration should never
-        # depend on what a particular create request happened to send.
+        # Only batch_name and college_name come from the request. WHICH SECTIONS this batch
+        # runs, the exam duration, and each section's question count and cutoff are all the
+        # admin-configured org-wide defaults (services/batch_defaults.py, set on Configure
+        # Default Batch), snapshotted onto this batch at creation.
+        #
+        # Passed as save() kwargs rather than left to the serializer's own field handling
+        # specifically so this is unconditional: kwargs always win over validated_data, so a
+        # request that also supplied its own duration gets the current default instead. A
+        # batch's configuration should never depend on what a particular create request
+        # happened to send - deliberately including which sections it runs, which is why there
+        # is no per-batch section override here.
         serializer = BatchSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        defaults = get_batch_defaults()
+
+        chosen = included_sections(defaults)
+        if not chosen:
+            return Response(
+                {'detail': 'No sections are selected on Configure Default Batch, so there is '
+                           'nothing for this batch to assess.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         batch = serializer.save(
             primary_ta_user=request.user,
             created_by=request.user,
             status=Batch.Status.DRAFT,
-            **get_batch_defaults(),
+            exam_duration_minutes=defaults['exam_duration_minutes'],
         )
-        log_action(request, request.user, 'create', 'batch', batch.batch_id)
+        BatchSection.objects.bulk_create([
+            BatchSection(
+                batch=batch, section_id=section['section_id'],
+                question_count=section['question_count'], cutoff=section['cutoff'],
+            )
+            for section in chosen
+        ])
+        log_action(request, request.user, 'create', 'batch', batch.batch_id,
+                   details={'sections': [s['section_key'] for s in chosen]})
         return Response(BatchSerializer(batch).data, status=status.HTTP_201_CREATED)
 
 
@@ -113,9 +170,10 @@ class BatchDetailView(APIView):
     # against them, and a TA legitimately revises a cutoff after seeing how a cohort scored.
     # Everything else (dates, question counts, duration) would retroactively invalidate an exam
     # that candidates have already sat, so it stays frozen once the batch leaves Draft.
-    EDITABLE_AFTER_DRAFT = {
-        'logical_cutoff', 'quantitative_cutoff', 'verbal_cutoff', 'programming_cutoff',
-    }
+    # Cutoffs now arrive as `section_cutoffs`: [{section_key, cutoff}], because which sections a
+    # batch has is data, not four fixed columns. This is the ONE key a finalized batch still
+    # accepts; every Batch field stays frozen once it leaves Draft.
+    EDITABLE_AFTER_DRAFT = {'section_cutoffs'}
 
     def patch(self, request, batch_id):
         batch = _get_batch_or_404(request.user, batch_id)
@@ -126,8 +184,9 @@ class BatchDetailView(APIView):
 
         # Cutoffs grade results, so revising one is a policy call, not a data-entry fix - kept
         # admin-only even though a TA can otherwise PATCH this same endpoint (e.g. the wizard's
-        # own link-window step, which never touches these fields).
-        if self.EDITABLE_AFTER_DRAFT & set(request.data) and request.user.role.role_code != 'admin':
+        # own link-window step, which never touches cutoffs).
+        section_cutoffs = request.data.get('section_cutoffs')
+        if section_cutoffs is not None and request.user.role.role_code != 'admin':
             return Response(
                 {'detail': 'Only an admin can change section cutoffs.'},
                 status=status.HTTP_403_FORBIDDEN,
@@ -143,9 +202,18 @@ class BatchDetailView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-        cutoffs_before = {f: getattr(batch, f) for f in self.EDITABLE_AFTER_DRAFT}
+        cutoffs_changed = False
+        if section_cutoffs is not None:
+            try:
+                cutoffs_changed = _apply_section_cutoffs(batch, section_cutoffs)
+            except ValueError as exc:
+                return Response({'section_cutoffs': str(exc)},
+                                 status=status.HTTP_400_BAD_REQUEST)
 
-        serializer = BatchSerializer(batch, data=request.data, partial=True)
+        serializer = BatchSerializer(
+            batch, data={k: v for k, v in request.data.items() if k != 'section_cutoffs'},
+            partial=True,
+        )
         serializer.is_valid(raise_exception=True)
         batch = serializer.save()
         log_action(request, request.user, 'update', 'batch', batch.batch_id)
@@ -153,9 +221,6 @@ class BatchDetailView(APIView):
         # Results are graded against the cutoffs, so changing one has to re-grade the candidates
         # already scored under the old value - otherwise Batch Details and Candidate Details keep
         # showing pass/fail computed at submit time, which no longer matches the batch config.
-        cutoffs_changed = any(
-            getattr(batch, f) != cutoffs_before[f] for f in self.EDITABLE_AFTER_DRAFT
-        )
         data = serializer.data
         if cutoffs_changed:
             regraded = exam_session.regrade_batch(batch)
@@ -255,7 +320,14 @@ class BatchDefaultsView(APIView):
         serializer = BatchDefaultsSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         save_batch_defaults(serializer.validated_data, request.user)
-        return Response(get_batch_defaults())
+        # DRAFT batches follow the defaults; everything else keeps the snapshot it was created
+        # with. See services.batch_defaults.resync_draft_batches for why the line is drawn at
+        # Draft. The count goes back so the screen can say how many drafts this actually moved,
+        # rather than leaving the admin to discover it from a batch later.
+        resynced = resync_draft_batches()
+        log_action(request, request.user, 'update', 'batch_defaults', 0,
+                   details={'resynced_draft_batches': resynced})
+        return Response({**get_batch_defaults(), 'resynced_draft_batches': resynced})
 
 
 class BatchTemplateDownloadView(APIView):
