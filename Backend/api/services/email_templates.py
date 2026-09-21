@@ -180,23 +180,27 @@ INVITATION_TEMPLATE = {
         'participate in our Fresher Aptitude Assessment, which is the next step in our '
         'recruitment process.\n\n'
         'Please find your assessment details below:\n\n'
-        'Assessment Link:\n'
-        '{link}\n\n'
         'Assessment Window:\n'
         'Start: {start}\n'
         'End: {end}\n\n'
         'Please Note: The assessment link will be active only during the above-mentioned '
         'assessment window.\n\n'
+        # The link itself is deliberately at the END of this email, after the instructions -
+        # see the Assessment Link block below. Every reference to it here therefore says
+        # "below"/"at the end of this email", never "above". If the link is ever moved back,
+        # these have to move with it or they point the candidate the wrong way.
         'Important Instructions\n\n'
-        '- Before clicking the assessment link, please clear your browser cache to avoid any '
+        '- Please read these instructions in full before opening the assessment link at the '
+        'end of this email.\n\n'
+        '- Before opening the assessment link, please clear your browser cache to avoid any '
         'loading issues.\n\n'
         '- Please start the assessment at least 30 minutes before your assessment window '
         'closes, to allow sufficient time to complete it.\n\n'
         '- **Required: this assessment must be taken inside Safe Exam Browser (SEB).** It is '
         'a free lockdown browser that keeps other applications and notifications from '
         'interrupting you. Follow these steps before your assessment window opens:\n'
-        'Step 1: Click your Assessment Link above and follow the on-screen instructions to '
-        'launch Safe Exam Browser.\n'
+        'Step 1: Click your Assessment Link at the end of this email and follow the on-screen '
+        'instructions to launch Safe Exam Browser.\n'
         'Step 2: If Safe Exam Browser does not open automatically, you likely do not have it '
         'installed yet - download and install it from '
         'https://safeexambrowser.org/download_en.html, then click your configuration link '
@@ -215,8 +219,8 @@ INVITATION_TEMPLATE = {
         'of birth both in frame and no glare. A masked card showing only the last 4 digits '
         '(XXXX XXXX 1234), such as an e-Aadhaar or DigiLocker download, is fine. If it is not '
         'read correctly, you can retake the photo as many times as needed.\n\n'
-        '- Access the assessment only through the unique link provided above. This link is '
-        'exclusively assigned to you and must not be shared with anyone.\n\n'
+        '- Access the assessment only through the unique link at the end of this email. This '
+        'link is exclusively assigned to you and must not be shared with anyone.\n\n'
         '- Use your registered email address to access the assessment. Only the invited '
         'candidate will be permitted to start the test.\n\n'
         '- Complete the assessment within the specified assessment window. Once the window '
@@ -230,6 +234,14 @@ INVITATION_TEMPLATE = {
         'assessment in one uninterrupted session.\n\n'
         '- Submit your assessment before the allotted time expires. Once submitted, the '
         'assessment cannot be resumed or modified.\n\n'
+        # Last thing before the support details, so a candidate reads the rules before they can
+        # act. {link} sits alone in its own paragraph on purpose: text_body_to_html swaps the
+        # bare URL for the "Start Your Assessment" button in place, so the button lands here in
+        # the HTML part too - keep it on its own line or the button ends up inline in a
+        # sentence.
+        'Assessment Link\n'
+        'Please make sure you have read the instructions above before you begin.\n\n'
+        '{link}\n\n'
         'Need Assistance?\n'
         'If you experience any technical issues while accessing or completing the assessment, '
         'please take a screenshot of the error and contact our Talent Acquisition Team.\n'

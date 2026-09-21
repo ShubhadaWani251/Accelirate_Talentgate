@@ -647,3 +647,67 @@ class TestCtaButtonRendersInOutlook:
 
     def test_no_button_is_rendered_without_a_cta(self):
         assert 'role="presentation"' not in text_body_to_html('no link in this body')
+
+
+class TestTheAssessmentLinkComesAfterTheInstructions:
+    """The link sits at the END of the invitation, after Important Instructions, so a candidate
+    reads the rules before they have anything to click. Pinned by tests because the ordering is
+    invisible to every other check in this suite - the email would still send, still contain the
+    token, and still render a button if someone moved it back to the top.
+    """
+
+    def _body(self, ta_user, make_batch, make_candidate, make_invitation):
+        invitation = make_invitation(make_candidate(make_batch(ta_user), ta_user), ta_user)
+        invites.send_invite_and_record(invitation, 'https://exam.example.test')
+        return mail.outbox[0], invitation
+
+    def test_the_link_appears_after_the_important_instructions_heading(
+        self, ta_user, make_batch, make_candidate, make_invitation,
+    ):
+        message, invitation = self._body(ta_user, make_batch, make_candidate, make_invitation)
+        body = message.body
+
+        assert body.index('Important Instructions') < body.index(invitation.unique_link_token)
+
+    def test_the_link_still_comes_before_the_support_details(
+        self, ta_user, make_batch, make_candidate, make_invitation,
+    ):
+        # After the rules, but not stranded below the sign-off where nobody scrolls.
+        message, invitation = self._body(ta_user, make_batch, make_candidate, make_invitation)
+        body = message.body
+
+        assert body.index(invitation.unique_link_token) < body.index('Need Assistance?')
+
+    def test_nothing_still_points_the_candidate_upwards_for_the_link(
+        self, ta_user, make_batch, make_candidate, make_invitation,
+    ):
+        """The SEB step and the "unique link" rule both used to say "above". With the link moved
+        to the end, either one left as-is sends the candidate scrolling the wrong way.
+        """
+        message, _invitation = self._body(ta_user, make_batch, make_candidate, make_invitation)
+
+        assert 'Assessment Link above' not in message.body
+        assert 'link provided above' not in message.body
+
+    def test_the_html_button_moves_with_it(
+        self, ta_user, make_batch, make_candidate, make_invitation,
+    ):
+        """text_body_to_html swaps the bare URL for the button IN PLACE, so the HTML part
+        follows the plain text automatically - asserted rather than assumed, since a candidate
+        reading the HTML part is the normal case and it is built by different code.
+        """
+        message, _invitation = self._body(ta_user, make_batch, make_candidate, make_invitation)
+        html = message.alternatives[0][0]
+
+        assert html.index('Important Instructions') < html.index('Start Your Assessment')
+        assert html.index('Start Your Assessment') < html.index('Need Assistance')
+
+    def test_the_assessment_window_still_comes_first(
+        self, ta_user, make_batch, make_candidate, make_invitation,
+    ):
+        # Moving the link must not drag the dates down with it - a candidate needs to know WHEN
+        # before they read a page of rules about it.
+        message, _invitation = self._body(ta_user, make_batch, make_candidate, make_invitation)
+        body = message.body
+
+        assert body.index('Assessment Window:') < body.index('Important Instructions')
