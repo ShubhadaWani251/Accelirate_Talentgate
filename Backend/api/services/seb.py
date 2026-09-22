@@ -19,6 +19,20 @@ Config generation and the Browser Exam Key are unrelated to whether verification
 Every candidate who is offered SEB gets a real, working .seb file regardless of whether
 SEB_BROWSER_EXAM_KEY_SECRET happens to be configured; that setting only controls whether a
 *returning* request can be credited as verified.
+
+KNOWN LIMIT - seb_verified_at is self-reported, not proof. The Browser Exam Key is embedded in
+the .seb file the candidate downloads, and that file is an unencrypted XML plist (see
+build_config). So a candidate can read their own key and compute a valid
+X-SafeExamBrowser-RequestHash from an ordinary browser. This is inherent to distributing config
+files to the people sitting the exam: SEB's own protection for the key is config encryption,
+and both of its modes (password, certificate) need a secret the candidate would have to be
+given in order to open the file at all, which puts it back in their hands. The key is still
+derived per-invitation rather than shared, so this is only ever a candidate overstating their
+OWN setup - it can never be replayed against a different candidate's exam.
+
+That is precisely why nothing here gates on it, and why the TA-facing timeline label says
+"(self-reported)" (serializers/candidates.py). Real assurance for a contested attempt comes
+from the session recording, not from this flag.
 """
 
 import hashlib

@@ -614,10 +614,17 @@ class CandidateDetailSerializer(serializers.ModelSerializer):
                     'timestamp': attempt.started_at,
                     'event': 'Started',
                     # Same idea as the Terminated row's label below - a TA-facing fact worth
-                    # surfacing, not something the candidate ever sees. Only ever set, never
-                    # cleared (services.seb.record_seb_usage), so this is safe to trust: it
-                    # never claims SEB when a fallback candidate is who actually started.
-                    'details': 'Via Safe Exam Browser' if attempt.seb_verified_at else None,
+                    # surfacing, not something the candidate ever sees.
+                    #
+                    # "(self-reported)" is load-bearing, not hedging. The Browser Exam Key this
+                    # signal is derived from ships inside the candidate's own .seb file, which
+                    # is an unencrypted plist they download themselves - so a candidate who
+                    # opens it in a text editor can compute the same header from an ordinary
+                    # browser. It is evidence SEB was configured, never proof it was used, and
+                    # a TA weighing a proctoring decision needs to know which of those it is.
+                    # See services/seb.py for why the key cannot be hidden in this flow.
+                    'details': ('Safe Exam Browser (self-reported)'
+                                if attempt.seb_verified_at else None),
                 })
             if attempt.submitted_at:
                 events.append({'timestamp': attempt.submitted_at, 'event': 'Submitted', 'details': None})
