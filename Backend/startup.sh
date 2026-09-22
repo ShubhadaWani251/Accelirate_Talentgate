@@ -91,6 +91,12 @@ schedule 600 verify_aadhaar_ocr_fallback &
 # table otherwise grows one row per logout, forever. Nothing breaks if this lags, so it gets the
 # longest interval here by a wide margin.
 schedule 86400 purge_expired_revoked_tokens &
+# Daily, same reasoning as the line above. Deletes Aadhaar/face photos and session recordings
+# once they pass EVIDENCE_RETENTION_DAYS (30 by default - see services/evidence_retention.py).
+# The command and its service have existed since the retention policy was written but nothing
+# ever ran them, so evidence accumulated indefinitely and the policy was on paper only. A day's
+# granularity is ample against a 30-day window, and the sweep is idempotent.
+schedule 86400 purge_expired_evidence &
 
 echo "==> Starting gunicorn"
 # --config picks up gunicorn.conf.py, which binds to $PORT. App Service sets PORT and expects the

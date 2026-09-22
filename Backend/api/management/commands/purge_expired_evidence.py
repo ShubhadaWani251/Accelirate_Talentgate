@@ -34,8 +34,11 @@ class Command(BaseCommand):
                 self.stdout.write('No expired evidence.')
                 return
             for attempt in attempts:
+                # The anchor, not started_at: an abandoned identity capture has evidence and no
+                # started_at at all, and printing that as `.isoformat()` on None raised here.
+                anchor = attempt._evidence_age_anchor
                 self.stdout.write(
-                    f'  attempt_id={attempt.attempt_id} started_at={attempt.started_at.isoformat()}'
+                    f'  attempt_id={attempt.attempt_id} evidence_dated={anchor.isoformat()}'
                 )
             self.stdout.write(self.style.WARNING(
                 f'[dry run] Would purge evidence for {len(attempts)} attempt(s). '

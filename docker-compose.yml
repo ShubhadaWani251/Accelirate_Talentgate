@@ -120,6 +120,12 @@ services:
             sleep 86400
           done
         ) &
+        (
+          while true; do
+            python manage.py purge_expired_evidence || echo "scheduler: purge_expired_evidence FAILED"
+            sleep 86400
+          done
+        ) &
         while true; do
           python manage.py finalize_expired_attempts || echo "scheduler: finalize_expired_attempts FAILED"
           sleep 600
