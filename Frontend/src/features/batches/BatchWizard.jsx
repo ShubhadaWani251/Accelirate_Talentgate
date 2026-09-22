@@ -94,7 +94,7 @@ export default function BatchWizard() {
               ? 'That draft is no longer available — it may have been deleted.'
               : extractErrorMessage(err)
           );
-          navigate('/batches', { replace: true });
+          navigate('/', { replace: true });
         }
       }
     })();
@@ -201,9 +201,10 @@ export default function BatchWizard() {
               setStepKey('invite');
             }}
             // Leaves the batch as a Draft - not `/batches/${id}`, which is Batch Details and
-            // assumes a finalized batch (invites/results); a Draft belongs back on the list,
-            // findable and resumable ("Continue") from there.
-            onSavedAsDraft={() => navigate('/batches')}
+            // assumes a finalized batch (invites/results). Back to the dashboard, whose
+            // batches table lists Drafts under its Batch Status filter and offers the same
+            // "Continue" resume the old standalone list did.
+            onSavedAsDraft={() => navigate('/')}
           />
           <div className="btn-row" style={{ marginTop: 12 }}>
             <button className="btn" onClick={() => setStepKey('validate')}>

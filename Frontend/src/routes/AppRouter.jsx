@@ -32,7 +32,6 @@ import LoggedOut from '../features/auth/LoggedOut';
 // --- staff application ---
 const Dashboard = lazy(() => import('../pages/Dashboard'));
 const Profile = lazy(() => import('../pages/Profile'));
-const BatchList = lazy(() => import('../pages/batches/BatchList'));
 const BatchDetail = lazy(() => import('../pages/batches/BatchDetail'));
 const BatchWizard = lazy(() => import('../features/batches/BatchWizard'));
 const AllCandidates = lazy(() => import('../pages/candidates/AllCandidates'));
@@ -147,8 +146,15 @@ export default function AppRouter() {
           />
           <Route path="/profile" element={<Profile />} />
 
-          {/* Shared between Admin and TA - same page/component per the wireframe's design intent */}
-          <Route path="/batches" element={<BatchList />} />
+          {/* The standalone Batches list is gone - the dashboard's own batches table already
+              carried every one of its columns (plus Borderline), the same Batch Status filter,
+              and the same Continue/Delete/Export row actions, over an unpaginated list of every
+              batch. Two screens listing the same rows was the only thing it added.
+
+              Kept as a redirect rather than deleted outright so an existing bookmark or a
+              pasted link lands on the dashboard instead of the 404 page. RoleHome sends admins
+              and TAs to their own dashboard, and anyone not logged in to /login. */}
+          <Route path="/batches" element={<RoleHome />} />
           <Route path="/batches/new" element={<BatchWizard />} />
           {/* Resuming an unfinished draft - the wizard, not Batch Details. */}
           <Route path="/batches/:id/continue" element={<BatchWizard />} />
