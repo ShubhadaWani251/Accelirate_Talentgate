@@ -4,7 +4,7 @@ import urllib.error
 import urllib.request
 import zipfile
 
-from django.db.models import Prefetch, Q
+from django.db.models import OuterRef, Prefetch, Q, Subquery
 from django.http import Http404, HttpResponse
 from django.utils import timezone
 from django.utils.decorators import method_decorator
@@ -14,7 +14,9 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from api.models import AuditLog, Batch, Candidate, ExamAttempt, QuestionBankSection
+from api.models import (
+    AttemptSectionScore, AuditLog, Batch, Candidate, ExamAttempt, QuestionBankSection,
+)
 from api.pagination import StandardResultsPagination
 from api.permissions import IsAdminOrTA
 from api.serializers.batch import link_window_error
@@ -127,26 +129,45 @@ def _apply_score_filters(qs, params):
         if value is not None:
             qs = qs.filter(**{f'overall_score__{lookup}': value})
 
-    section_filter_applied = False
     for section_key in QuestionBankSection.objects.values_list('section_key', flat=True):
-        for suffix, lookup in (('min', 'gte'), ('max', 'lte')):
-            value = _to_decimal_param(params.get(f'{section_key}_{suffix}'))
-            if value is None:
-                continue
-            # Both conditions in ONE filter() call: split across two, Django would be free to
-            # satisfy them with different section rows, so "logical >= 8 and logical <= 9" could
-            # match a candidate whose logical score is 2 as long as some other row of theirs
-            # happened to fit each half.
-            qs = qs.filter(**{
-                'examattempt__section_scores__section__section_key': section_key,
-                f'examattempt__section_scores__score__{lookup}': value,
-            })
-            section_filter_applied = True
+        bounds = {
+            lookup: _to_decimal_param(params.get(f'{section_key}_{suffix}'))
+            for suffix, lookup in (('min', 'gte'), ('max', 'lte'))
+        }
+        if all(value is None for value in bounds.values()):
+            continue
 
-    # Joining through examattempt yields one row per attempt (and per section row), so a
-    # candidate with more than one attempt in range would appear twice. Only pay for DISTINCT
-    # when a section filter actually introduced the join.
-    return qs.distinct() if section_filter_applied else qs
+        # Annotate the candidate's LATEST attempt's score in this section, then filter on that
+        # single value. Two things go wrong with the obvious
+        # `.filter(examattempt__section_scores__score__gte=...)` spelling, and this fixes both:
+        #
+        #   - Filtering across a multi-valued relation matches ANY attempt, while the table
+        #     shows the latest one - so a candidate whose first attempt scored 1 and whose
+        #     latest scored 4 was returned for a 0-2 filter and then displayed as 4.
+        #   - min and max as two separate filter() calls each open their own join, so Django is
+        #     free to satisfy them from DIFFERENT attempts: 0-2 matched a candidate purely
+        #     because one old attempt was >= 0 and another was <= 2.
+        #
+        # Ordered by -attempt_id to match serializers/candidates._latest_attempt exactly; see
+        # its docstring for why started_at is the wrong key.
+        field = f'_latest_{section_key}_score'
+        qs = qs.annotate(**{
+            field: Subquery(
+                AttemptSectionScore.objects
+                .filter(attempt__candidate=OuterRef('pk'), section__section_key=section_key)
+                .order_by('-attempt__attempt_id')
+                .values('score')[:1]
+            )
+        })
+        # A candidate whose latest attempt has no row for this section (their batch never ran
+        # it) annotates to NULL and is excluded, which is right - they have no score in it.
+        qs = qs.filter(**{
+            f'{field}__{lookup}': value for lookup, value in bounds.items() if value is not None
+        })
+
+    # No DISTINCT needed: the subquery above returns one value per candidate rather than joining
+    # a row per attempt, so nothing can duplicate a candidate into the result.
+    return qs
 
 
 def attach_latest_activity(candidates):
