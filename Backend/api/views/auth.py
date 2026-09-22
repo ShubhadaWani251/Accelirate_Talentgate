@@ -319,7 +319,7 @@ class VerifyOtpResetView(APIView):
 
         record_password_history(user)
         user.set_password(data['new_password'])
-        user.save(update_fields=['password_hash', 'password_changed_at'])
+        user.save(update_fields=['password_hash', 'password_changed_at', 'must_change_password'])
         otp.verified_at = timezone.now()
         otp.save(update_fields=['verified_at'])
         _log(request, user, 'password_reset')
@@ -341,7 +341,7 @@ class ChangePasswordView(APIView):
         user = request.user
         record_password_history(user)
         user.set_password(serializer.validated_data['new_password'])
-        user.save(update_fields=['password_hash', 'password_changed_at'])
+        user.save(update_fields=['password_hash', 'password_changed_at', 'must_change_password'])
         _log(request, user, 'password_change')
 
         # Reissue tokens so this session (which just proved it knows the old password)

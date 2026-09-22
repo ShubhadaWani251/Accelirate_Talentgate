@@ -96,6 +96,16 @@ export default function Profile() {
     <div style={{ maxWidth: 460 }}>
       <h3>My Profile</h3>
 
+      {/* Someone arriving here on a handover password was redirected, not choosing to visit -
+          without this the page gives no clue why the rest of the app is unreachable. */}
+      {user.must_change_password && (
+        <div className="alert error" style={{ marginBottom: 14, textAlign: 'left' }}>
+          <b>Set your own password to continue.</b> The password you signed in with was issued
+          to you by someone else, so it is known to more than one person. The rest of the
+          application stays unavailable until you replace it below.
+        </div>
+      )}
+
       <div className="card">
         <div className="box-label">Account Details</div>
         <div className="field">

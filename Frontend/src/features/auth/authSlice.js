@@ -61,3 +61,9 @@ export const selectUser = (state) => state.auth.user;
 export const selectAccessToken = (state) => state.auth.accessToken;
 export const selectAuthStatus = (state) => state.auth.status;
 export const selectRoleCode = (state) => state.auth.user?.role_code ?? null;
+// True while the account is still on a password issued by someone else (a mailed temp password,
+// or an admin's `manage.py reset_user_password`). Drives ProtectedRoute's redirect to Profile;
+// the actual enforcement is server-side in api/permissions.py.
+export const selectMustChangePassword = (state) => (
+  state.auth.user?.must_change_password === true
+);

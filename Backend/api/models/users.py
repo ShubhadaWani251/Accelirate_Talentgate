@@ -35,6 +35,16 @@ class User(models.Model):
         help_text="Tokens issued before this timestamp are treated as stale "
                   "(see api/authentication.py and api/services/tokens.py).",
     )
+    # Set whenever someone OTHER than the account holder chose the current password - account
+    # provisioning mails a generated one in plain text, and `manage.py reset_user_password` has
+    # an admin type one in. Either way that password is known to a second party and sitting in a
+    # mailbox or a terminal, so it is a handover credential, not the account's real password.
+    # Enforced server-side in api/permissions.py, not just by the frontend redirect.
+    must_change_password = models.BooleanField(
+        default=False,
+        help_text="Blocks staff endpoints until the holder sets their own password. "
+                  "Cleared by any successful password change or reset.",
+    )
 
     class Meta:
         db_table = 'users'
@@ -54,6 +64,13 @@ class User(models.Model):
     def set_password(self, raw_password):
         self.password_hash = make_password(raw_password)
         self.password_changed_at = timezone.now()
+        # Cleared here rather than at each call site so a future password-change path can't
+        # forget to. The two handover paths (provisioning, reset_user_password) set it back to
+        # True immediately after calling this - see must_change_password's own comment. Note
+        # that a caller passing update_fields must include 'must_change_password' for this to
+        # persist; if one forgets, the holder stays on the change-password screen, which is the
+        # harmless direction for this to fail in.
+        self.must_change_password = False
 
     def check_password(self, raw_password):
         return check_password(raw_password, self.password_hash)

@@ -54,6 +54,11 @@ def create_user_with_credentials(data, created_by):
         created_by=created_by,
     )
     user.set_password(temp_password)
+    # This password is about to be sent over email in plain text, so it lives in at least one
+    # mailbox indefinitely and was never chosen by the person it belongs to. Requiring a change
+    # before the account can do anything is what stops it being a standing credential - the
+    # email below only ever asked nicely. Set after set_password, which clears the flag.
+    user.must_change_password = True
     user.save()
     _send_credentials_email_background(user, temp_password)
     return user
@@ -69,8 +74,9 @@ def send_new_user_credentials_email(user, temp_password):
             f"Application Link: {login_url}\n"
             f"Email: {user.email}\n"
             f"Temporary Password: {temp_password}\n\n"
-            "Please log in and change your password from your Profile page as soon as "
-            "possible.\n\n"
+            "You will be asked to set your own password the first time you log in - this "
+            "temporary one stops working at that point, and nothing else in the application "
+            "is available until you do.\n\n"
             "If you weren't expecting this account, please contact your Administrator."
         ),
         from_email=settings.DEFAULT_FROM_EMAIL,

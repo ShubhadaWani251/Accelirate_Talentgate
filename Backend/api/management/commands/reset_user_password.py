@@ -17,6 +17,11 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument('--email', required=True)
+        parser.add_argument(
+            '--no-force-change', action='store_true',
+            help="Don't require the holder to replace this password at next login. Only "
+                 "correct when you are resetting your own account.",
+        )
 
     def handle(self, *args, **options):
         email = options['email'].strip().lower()
@@ -43,6 +48,17 @@ class Command(BaseCommand):
             raise CommandError('Password does not meet requirements: ' + ' '.join(exc.messages))
 
         user.set_password(password)
+        # Whoever ran this command now knows the account's password. Unless they ARE the account
+        # holder, that is a handover credential, and the holder should replace it before the
+        # account is usable - same reasoning as the emailed temp password in
+        # services/user_provisioning.py. --no-force-change is for the self-reset case.
+        user.must_change_password = not options['no_force_change']
         user.save()
 
         self.stdout.write(self.style.SUCCESS(f'Password updated for {user.email}.'))
+        if user.must_change_password:
+            self.stdout.write(
+                'They will be asked to set their own password at next login, and staff '
+                'endpoints stay closed to them until they do. Pass --no-force-change to skip '
+                'that (e.g. when resetting your own account).'
+            )
