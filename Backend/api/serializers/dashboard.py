@@ -1,4 +1,4 @@
-from collections import Counter, defaultdict
+from collections import defaultdict
 
 from django.db.models import Case, Count, IntegerField, OuterRef, Q, Subquery, Value, When
 
@@ -100,10 +100,8 @@ def _build_question_bank_health():
         .values_list('section_id', 'question_text')
     )
     distinct_by_section = defaultdict(set)
-    rows_by_section = Counter()
     for section_id, text in active:
         distinct_by_section[section_id].add(normalize_question_text(text))
-        rows_by_section[section_id] += 1
 
     result = []
     # Active only, same reasoning as the question template (services/question_bank.py): this
@@ -115,7 +113,6 @@ def _build_question_bank_health():
         result.append({
             'section_name': section.section_name,
             'active_count': unique_count,
-            'duplicate_count': rows_by_section[section.section_id] - unique_count,
             'min_required_active': section.min_required_active,
             'is_ok': unique_count >= section.min_required_active,
         })

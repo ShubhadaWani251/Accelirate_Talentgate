@@ -216,7 +216,7 @@ export default function Dashboard() {
               // own intrinsic width and pushes the whole page sideways on a phone.
               <div className="table-scroll">
               <table className="data-table">
-                <thead><tr><th>Section</th><th>Total Active Questions</th><th>Duplicates</th></tr></thead>
+                <thead><tr><th>Section</th><th>Total Active Questions</th></tr></thead>
                 <tbody>
                   {qbankHealth.map((s) => (
                     <tr key={s.section_name}>
@@ -227,9 +227,6 @@ export default function Dashboard() {
                           active each" in the box label still means something without a separate
                           Status column spelling out OK/Low for every row. */}
                       <td title={`Minimum required: ${s.min_required_active}`}>{s.active_count}</td>
-                      <td>{s.duplicate_count > 0
-                        ? <span className="pill amber">{s.duplicate_count}</span>
-                        : '—'}</td>
                     </tr>
                   ))}
                 </tbody>
