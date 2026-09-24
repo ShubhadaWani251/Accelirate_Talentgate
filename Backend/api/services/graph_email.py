@@ -16,16 +16,16 @@ prove the app's identity differently:
 
     GRAPH_TENANT_ID           directory (tenant) ID of the Azure AD app registration
     GRAPH_CLIENT_ID           application (client) ID
-    GRAPH_SENDER               mailbox to send as, e.g. talentgate@accelirate.com
+    GRAPH_SENDER              mailbox to send as, e.g. talentgate@accelirate.com
 
     GRAPH_CLIENT_SECRET       a shared secret value - simplest to set up, the default
     -- or --
-    GRAPH_CERT_PATH +          a certificate's private key, presented as a signed JWT
-    GRAPH_CERT_THUMBPRINT      (private_key_jwt) - stronger, no shared secret to leak or expire
-                                unnoticed. Preferred when both are set; falls back to
-                                GRAPH_CLIENT_SECRET otherwise. See
-                                api/management/commands/generate_graph_cert.py to produce the
-                                key pair and the exact values these two settings need.
+    GRAPH_CERT_PATH +         a certificate's private key, presented as a signed JWT
+    GRAPH_CERT_THUMBPRINT     (private_key_jwt) - stronger, no shared secret to leak or expire
+                              unnoticed. Preferred when both are set; falls back to
+                              GRAPH_CLIENT_SECRET otherwise. See
+                              api/management/commands/generate_graph_cert.py to produce the
+                              key pair and the exact values these two settings need.
 """
 
 import base64
@@ -255,7 +255,7 @@ class GraphEmailBackend(BaseEmailBackend):
                 continue
             try:
                 response = requests.post(url, headers=headers,
-                                         json=_to_graph_message(message), timeout=30)
+                              json=_to_graph_message(message), timeout=30)
             except requests.RequestException as exc:
                 if not self.fail_silently:
                     raise GraphEmailError(f'Could not reach Microsoft Graph: {exc}') from exc
