@@ -8,18 +8,24 @@ import BrandHeader from '../../components/layout/BrandHeader';
 import BrandFooter from '../../components/layout/BrandFooter';
 import { ButtonSpinner } from '../../components/loading/Spinner';
 
-// Catches obvious mistakes (wrong domain, typos) before hitting the network. Deliberately does
-// NOT check whether the email is actually registered - the backend (ForgotPasswordView) always
-// returns the same generic response either way, so an attacker can't use this form to find out
-// which corporate accounts exist. This is a UX improvement, not a security boundary.
+// Shape only - is this a well-formed email - matching Login's schema exactly.
+//
+// It used to also require the address to end in "@accelirate.com". That was a hardcoded copy of
+// a value the server reads from CORPORATE_EMAIL_DOMAIN, which is a comma-separated LIST: a staff
+// account on any second configured domain could log in (Login never had this check) but was
+// refused a password reset by this form, before the request even left the browser. One screen
+// enforcing a stale guess at another screen's rule is worse than not checking at all, so the
+// domain decision now belongs solely to the server.
+//
+// Nothing is lost by dropping it: ForgotPasswordView answers a non-corporate or unregistered
+// address with a plain "No account found for this email address.", which this form surfaces as
+// serverError. (It deliberately does reveal that, per an earlier product decision - so there is
+// no anti-enumeration property here for a client-side check to have been protecting.)
 const schema = yup.object({
   email: yup
     .string()
     .email('Enter a valid email')
-    .required('Corporate email is required')
-    .test('corporate-domain', 'Must be an @accelirate.com email address', (value) =>
-      !value || value.toLowerCase().endsWith('@accelirate.com')
-    ),
+    .required('Corporate email is required'),
 });
 
 export default function ForgotPassword() {
