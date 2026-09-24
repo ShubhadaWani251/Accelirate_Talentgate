@@ -172,6 +172,9 @@ export default function AllCandidates() {
         batches={batches}
         onApply={() => refresh(filters, 1)}
         onClear={clearFilters}
+        // The same list the table renders score columns from, so a filter exists for exactly
+        // the columns on screen.
+        sections={sections}
       />
 
       <CandidateTable

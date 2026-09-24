@@ -225,6 +225,9 @@ export default function BatchDetail() {
         onApply={() => refreshCandidates(filters, 1)}
         onClear={() => { setFilters(EMPTY_CANDIDATE_FILTERS); refreshCandidates(EMPTY_CANDIDATE_FILTERS, 1); }}
         showBatchFilter={false}
+        // This batch's own sections, not every section that exists - these rows can only ever
+        // hold a score in the sections their batch actually ran.
+        sections={batch.sections || []}
       />
 
       {/* Read-only: the configuration was locked the moment the batch left Draft, since
