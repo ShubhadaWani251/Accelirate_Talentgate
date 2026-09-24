@@ -403,7 +403,7 @@ class TestFinalizeRequiresAValidWindow:
         assert batch.status == Batch.Status.DRAFT
 
     def test_finalize_succeeds_once_the_window_is_set_properly(
-        self, ta_user, client_for, make_batch, make_candidate
+        self, ta_user, client_for, make_batch, make_candidate, stocked_question_bank
     ):
         start = timezone.now() + timedelta(days=1)
         batch, candidate = self._ready_to_finalize(
@@ -428,7 +428,7 @@ class TestFullFlowEndToEnd:
     """
 
     def test_create_then_set_window_then_finalize_then_invite(
-        self, ta_user, client_for, make_candidate
+        self, ta_user, client_for, make_candidate, stocked_question_bank
     ):
         client = client_for(ta_user)
 

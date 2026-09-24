@@ -25,6 +25,7 @@ from api.services.batch_defaults import (
     get_batch_defaults, included_sections, resync_draft_batches, save_batch_defaults,
 )
 from api.services.batch_status_filter import filter_batches_by_status_group
+from api.services.question_selection import section_supply_shortfalls
 from api.services import draft_expiry
 from api.services.candidate_validation import (
     EDITABLE_FIELDS, clamp_aadhaar_to_last4, parse_dob_text, revalidate_batch_candidates,
@@ -796,6 +797,31 @@ class BatchFinalizeView(APIView):
         )
         if window_error:
             return Response({'detail': window_error}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Can this batch's paper actually be built? Nothing upstream asks: a section added from
+        # Question Bank Management is included in new batches immediately (by design - see
+        # batch_defaults.FALLBACK_SECTION_INCLUDED) but starts with no questions at all, and
+        # batch creation is happy to snapshot "10 questions" against an empty bank.
+        #
+        # Without this the shortfall surfaced at exam start, as a 409 to the CANDIDATE - after
+        # they had installed Safe Exam Browser, granted camera access, read the instructions and
+        # photographed their Aadhaar card. Nothing they could do about it, and nobody told the
+        # admin. Finalize is the last moment before any of that is promised to anyone, which
+        # makes it the honest place to refuse.
+        shortfalls = section_supply_shortfalls(batch)
+        if shortfalls:
+            return Response(
+                {'detail': 'This batch asks for more questions than the bank can supply: '
+                           + '; '.join(
+                               f"{s['section_name']} needs {s['required']} but only "
+                               f"{s['available']} active question(s) exist"
+                               for s in shortfalls
+                           )
+                           + '. Add questions to those sections, or remove them from the batch, '
+                             'before sending invites.',
+                 'section_shortfalls': shortfalls},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # Two concurrent finalize requests for the same batch must not both win. Taking the row
         # lock and re-reading status inside it makes this the single atomic decision point.

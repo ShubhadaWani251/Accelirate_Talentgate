@@ -110,6 +110,40 @@ def difficulty_quotas(pool_sizes, required):
     return quota
 
 
+def _active_pool_size(section_id):
+    """How many questions a section can actually supply. The one definition of "available",
+    shared with select_questions_for_attempt below so a pre-flight check cannot drift from the
+    thing it is checking.
+    """
+    return Question.objects.filter(
+        section_id=section_id, status=Question.Status.ACTIVE,
+    ).count()
+
+
+def section_supply_shortfalls(batch):
+    """Sections this batch asks for more questions than the bank can supply.
+
+    Returns [{section_key, section_name, required, available}], empty when the batch can
+    actually be sat. select_questions_for_attempt raises on the first shortfall because it has
+    one attempt to serve; this reports EVERY one, because the person reading it is an admin who
+    would rather fix all of them in one pass than discover them one at a time.
+    """
+    shortfalls = []
+    for batch_section in batch_sections(batch):
+        required = batch_section.question_count
+        if required <= 0:
+            continue
+        available = _active_pool_size(batch_section.section_id)
+        if available < required:
+            shortfalls.append({
+                'section_key': batch_section.section.section_key,
+                'section_name': batch_section.section.section_name,
+                'required': required,
+                'available': available,
+            })
+    return shortfalls
+
+
 def select_questions_for_attempt(batch):
     """Returns {section_key: [Question, ...]}, one difficulty-stratified random sample per
     configured section.

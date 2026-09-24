@@ -111,6 +111,35 @@ def get_section(db):
 
 
 @pytest.fixture
+def stocked_question_bank(db, get_section):
+    """Enough active questions in every standard section for a batch to actually be sat.
+
+    Finalize refuses a batch whose sections cannot supply the questions they ask for (see
+    views/batches.BatchFinalizeView), which is what stops an empty new section dead-ending a
+    candidate mid-exam. Tests that finalize over HTTP therefore need a bank with something in
+    it - an empty one is a batch nobody could sit, and 400 is the correct answer to that.
+
+    Generous on purpose: a batch created through the API takes its counts from the org defaults
+    (10 per section), well above make_batch's own 2.
+    """
+    from api.models import Question
+
+    per_section = 15
+    for section_key, _name in STANDARD_SECTIONS:
+        section = get_section(section_key)
+        Question.objects.bulk_create([
+            Question(
+                section=section, question_code=f'stock-{section_key}-{i}',
+                question_text=f'Stocked {section_key} question {i}?',
+                option_a='A', option_b='B', option_c='C', option_d='D', correct_option='A',
+                difficulty=Question.Difficulty.EASY, marks=1,
+                status=Question.Status.ACTIVE,
+            )
+            for i in range(per_section)
+        ])
+
+
+@pytest.fixture
 def make_batch(db, get_section):
     from api.models import Batch, BatchSection
     counter = {'n': 0}
