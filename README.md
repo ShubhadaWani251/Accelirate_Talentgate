@@ -281,14 +281,15 @@ config.wsgi:application`.
 
 ### Azure App Service (staging)
 
-`azure-pipelines.yml` builds and deploys to a single App Service in `rg-talentgate-staging`:
+`azure-pipelines.yml` builds and deploys to a single App Service in `AccelirateInternalProjects`,
+the resource group Accelirate's internal projects share:
 
 | Resource | Name |
 |---|---|
-| App Service (Django + SPA) | `app-talentgate-staging` |
-| App Service plan | `asp-talentgate-staging` (Linux B1) |
-| PostgreSQL flexible server | `recruitmentapptitudeteststaging` (database `QA_TalentDB`) |
-| Storage (proctoring evidence) | `sttalentgatestaging`, container `proctoring-evidence` |
+| App Service (Django + SPA) | `app-aptitude-stg-eastus` |
+| App Service plan | `asp-accelinternal-stg-eastus` (Linux B2, shared with other internal projects' staging apps) |
+| PostgreSQL flexible server | `pgsql-accelinternal-stg-eastus` (shared; database `talentgate_stg`, login role `talentgate_app`) |
+| Storage (proctoring evidence) | `staptitudestgeus`, container `proctoring-evidence` |
 
 **One App Service serves both the API and the frontend**, for the same-origin reason above.
 There is no Static Web App: routing the API through one would have meant the Standard plan and,
@@ -302,24 +303,40 @@ Because App Service runs the app from a zip on its own Python image, it never in
 `docker-entrypoint.sh`. `Backend/startup.sh` is the equivalent and is set as the startup command;
 **it is the only thing that applies migrations on this host**, so keep the two files in step.
 
-The pipeline needs one thing that is not in source control: an ARM service connection named
-`TalentGate-Staging` (the `azureServiceConnection` variable), scoped to `rg-talentgate-staging`.
+**The database server is shared, and so is its connection budget.** It holds every internal
+project's staging database and, on its Burstable B1ms tier, admits 35 client connections in total
+across all of them. `talentgate_app` is capped at 15 of those (`CONNECTION LIMIT`), owns only
+`talentgate_stg`, and has no rights on anything else there; keep `WEB_CONCURRENCY` ×
+`WEB_THREADS` plus the scheduler loops in `startup.sh` under that cap, or the overflow fails with
+"too many connections for role" rather than queueing. Production (`pgsql-accelinternal-prod-eastus`)
+is not deployed for this project.
+
+The pipeline needs one thing that is not in source control: an ARM service connection (the
+`azureServiceConnection` variable) scoped to `AccelirateInternalProjects`.
 
 ### Deployment status
 
-Staging is deployed. Build `20260825.3` ran from `main` on 2026-08-25 and completed all three jobs
-— backend tests, frontend build and packaging, and `Deploy App Service` — so the
-`TalentGate-Staging` service connection exists and works, and `app-talentgate-staging` is running
-the packaged app. The pipeline's default branch is `main`. The database behind it holds real
-candidate data.
+Staging moved on 2026-09-24 from its own resource group, `rg-talentgate-staging`, into
+`AccelirateInternalProjects`, data included: the database was copied with `pg_dump`/`pg_restore`
+and verified row for row, and the evidence container was copied server-side, with every stored
+evidence URL rewritten to the new account (`fresh_read_url` only signs URLs belonging to the
+configured account, so a stale host would serve every old photo and recording unsigned, and
+broken). The old hostname, `app-talentgate-staging.azurewebsites.net`, answers every request with
+a 307 to the same path on the new one, so links in emails sent before the move keep working. The
+old resource group stays untouched for a 7-day rollback window and is deleted after that.
 
-`DB_PASSWORD`, `SECRET_KEY`, and all four `GRAPH_*` values are already set as App Service
-application settings. Set them the same way if the App Service is ever rebuilt — without
-`DB_PASSWORD`, `startup.sh` fails at `migrate` and the site never starts; without the Graph values
-it starts fine but invitation emails don't send.
+**Deploys fail until the new service connection exists.** `azureServiceConnection` still names
+`TalentGate-Staging`, which is scoped to the retired resource group, so the deploy stage fails on
+authorization. Builds and tests are unaffected. Switch the variable to
+`AccelirateInterProjectResourceManagerSC` once a subscription Owner has created it in this project.
+
+`DB_PASSWORD`, `SECRET_KEY`, `AZURE_STORAGE_CONNECTION_STRING`, and all four `GRAPH_*` values are
+set as App Service application settings. Set them the same way if the App Service is ever rebuilt
+— without `DB_PASSWORD`, `startup.sh` fails at `migrate` and the site never starts; without the
+Graph values it starts fine but invitation emails don't send.
 
 ```bash
-az webapp config appsettings set -g rg-talentgate-staging -n app-talentgate-staging \
+az webapp config appsettings set -g AccelirateInternalProjects -n app-aptitude-stg-eastus \
   --settings DB_PASSWORD='...' GRAPH_TENANT_ID='...' GRAPH_CLIENT_ID='...' \
              GRAPH_CLIENT_SECRET='...' GRAPH_SENDER='...'
 ```
@@ -354,8 +371,10 @@ stops at `0005`, `phase-3-dashboards-candidates` at `0007`, `refactor/modular-ar
 database.
 
 Re-verify with `python manage.py showmigrations api` against the real server if time has passed.
-The server keeps 7 days of automatic backups with point-in-time restore; note that restoring
-produces a *new* server rather than rewinding this one, so recovery also means repointing `DB_HOST`.
+The server keeps 14 days of automatic backups with point-in-time restore. A restore produces a
+*new* server holding every project's databases as of that moment, not a rewound copy of this one:
+recover by dumping `talentgate_stg` from the restored server and restoring it here, rather than
+repointing `DB_HOST` at a copy of everyone's data.
 
 ### Scheduled jobs
 
@@ -385,9 +404,10 @@ invite is correctly recorded as issued, the UI says so, and the rows just accumu
 `python manage.py check --deploy` reports most of this itself - the `api.W00x` warnings come
 from `Backend/api/checks.py` and cover configuration Django's own checks know nothing about.
 
-- **Rotate `SECRET_KEY` and the database password.** Both currently exist only as values a
-  developer entered locally into `.env`. `SECRET_KEY` also signs every JWT, so a leaked one lets
-  anyone mint a valid staff token. Generate one with:
+- **Rotate `SECRET_KEY`.** It currently exists only as a value a developer entered locally into
+  `.env`, and it signs every JWT, so a leaked one lets anyone mint a valid staff token. (The
+  database password was replaced when staging moved to the shared server; `talentgate_app`'s was
+  generated then and exists only as the App Service setting.) Generate one with:
   `python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"`
 - **Rotate the Azure Storage account key** if it has ever been shared. This is now safe to do:
   evidence URLs are signed at read time (`blob_storage.fresh_read_url`), so rotation no longer
