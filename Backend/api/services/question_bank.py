@@ -67,7 +67,10 @@ def generate_question_template_workbook():
     wb = Workbook()
     wb.remove(wb.active)  # replaced by the per-section sheets below
 
-    sections = list(QuestionBankSection.objects.all())
+    # Active only. A retired section still holds its historical questions and still shows its
+    # scores wherever past results are read, but no new batch can run it - so offering a sheet
+    # to file fresh questions into one invites work that can never be used.
+    sections = list(QuestionBankSection.objects.filter(is_active=True))
     for section in sections:
         # Excel caps sheet names at 31 characters and forbids : \ / ? * [ ]. A truncated or
         # scrubbed name would no longer match its section on the way back in, so fall back to
@@ -247,6 +250,10 @@ def _validate_row(data, sections_by_key, valid_section_names, seen_texts):
 def _validation_context():
     """Section lookup + existing-question index, built once per validation run."""
     sections_by_key = {}
+    # Deliberately NOT filtered to active, unlike the template generator above. The template
+    # stops OFFERING a retired section's sheet, but a file prepared before it was retired must
+    # still parse rather than fail on a sheet name the app itself handed out - the section is
+    # still a real row, and filing into it is at worst pointless, never corrupting.
     for section_obj in QuestionBankSection.objects.all():
         # Keyed by both the internal section_key ("verbal") and the human-readable section_name
         # ("verbal ability"), since the template and UI show the display name everywhere.

@@ -222,3 +222,54 @@ class TestRetiringASection:
 
         rows = client_for(admin_user).get('/api/questions/sections/').data
         assert next(r for r in rows if r['section_key'] == 'data_interp')['in_use'] is True
+
+
+class TestARetiredSectionIsNotOfferedForNewWork:
+    """Retiring keeps a section's history readable but must stop it soliciting NEW work.
+
+    batch_defaults already left retired sections out of new batches. Two other surfaces did not,
+    and both invited effort that could never be used: the question template still shipped a sheet
+    to file fresh questions into, and the dashboard still reported the section as short of its
+    minimum - an alarm about a shortfall nobody could act on usefully.
+    """
+
+    def _retire(self, section):
+        QuestionBankSection.objects.filter(pk=section.pk).update(is_active=False)
+
+    def test_the_question_template_has_no_sheet_for_a_retired_section(self, get_section):
+        from api.services import question_bank
+
+        live = get_section('still_live', 'Still Live')
+        retired = get_section('gone', 'Gone')
+        self._retire(retired)
+
+        workbook = question_bank.generate_question_template_workbook()
+
+        assert live.section_name in workbook.sheetnames
+        assert retired.section_name not in workbook.sheetnames
+
+    def test_an_upload_naming_a_retired_section_still_parses(self, get_section):
+        """Asymmetric on purpose: the template stops OFFERING the sheet, but a file prepared
+        before the section was retired must not start failing on a sheet name this app itself
+        handed out.
+        """
+        from api.services import question_bank
+
+        self._retire(get_section('gone_too', 'Gone Too'))
+
+        sections_by_key = question_bank._validation_context()[0]
+
+        assert 'gone_too' in sections_by_key
+        assert 'gone too' in sections_by_key
+
+    def test_dashboard_health_ignores_a_retired_section(self, get_section):
+        from api.serializers.dashboard import _build_question_bank_health
+
+        live = get_section('health_live', 'Health Live')
+        retired = get_section('health_gone', 'Health Gone')
+        self._retire(retired)
+
+        names = {row['section_name'] for row in _build_question_bank_health()}
+
+        assert live.section_name in names
+        assert retired.section_name not in names

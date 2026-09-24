@@ -106,7 +106,11 @@ def _build_question_bank_health():
         rows_by_section[section_id] += 1
 
     result = []
-    for section in QuestionBankSection.objects.all():
+    # Active only, same reasoning as the question template (services/question_bank.py): this
+    # panel exists to tell an admin which sections still need questions before a batch can run
+    # them. A retired section cannot be run at all, so reporting it as short of its minimum is
+    # an alarm about work that would be wasted.
+    for section in QuestionBankSection.objects.filter(is_active=True):
         unique_count = len(distinct_by_section.get(section.section_id, ()))
         result.append({
             'section_name': section.section_name,
