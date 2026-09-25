@@ -23,11 +23,10 @@ variables:
   # differently across minor versions fails in CI rather than only after deployment.
   pythonVersion: '3.13'
   nodeVersion: '24.x'
-  # Must be scoped to resourceGroupName. TalentGate-Staging is scoped to the retired
-  # rg-talentgate-staging, so until this names a connection scoped to AccelirateInternalProjects
-  # (AccelirateInterProjectResourceManagerSC, as Requisition Tracker uses) the deploy stage fails
-  # on authorization. CI is unaffected: the connection only has to exist to queue a run.
-  azureServiceConnection: 'TalentGate-Staging'
+  # Signs in as the managed identity id-aptitude-deploy-stg-eastus, whose only role is Website
+  # Contributor on webAppName: it can deploy this one app and nothing else in the shared resource
+  # group, so pointing webAppName anywhere else needs a role assignment there first.
+  azureServiceConnection: 'Aptitude-Staging'
   resourceGroupName: 'AccelirateInternalProjects'
   webAppName: 'app-aptitude-stg-eastus'
 

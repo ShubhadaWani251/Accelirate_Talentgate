@@ -290,6 +290,7 @@ the resource group Accelirate's internal projects share:
 | App Service plan | `asp-accelinternal-stg-eastus` (Linux B2, shared with other internal projects' staging apps) |
 | PostgreSQL flexible server | `pgsql-accelinternal-stg-eastus` (shared; database `talentgate_stg`, login role `talentgate_app`) |
 | Storage (proctoring evidence) | `staptitudestgeus`, container `proctoring-evidence` |
+| Deploy identity | `id-aptitude-deploy-stg-eastus` (user-assigned managed identity behind the pipeline's service connection) |
 
 **One App Service serves both the API and the frontend**, for the same-origin reason above.
 There is no Static Web App: routing the API through one would have meant the Standard plan and,
@@ -311,8 +312,14 @@ across all of them. `talentgate_app` is capped at 15 of those (`CONNECTION LIMIT
 "too many connections for role" rather than queueing. Production (`pgsql-accelinternal-prod-eastus`)
 is not deployed for this project.
 
-The pipeline needs one thing that is not in source control: an ARM service connection (the
-`azureServiceConnection` variable) scoped to `AccelirateInternalProjects`.
+The pipeline needs two things that are not in source control: the `Aptitude-Staging` service
+connection (the `azureServiceConnection` variable) and the role assignment behind it. The
+connection signs in through workload identity federation, with no secret to leak or rotate, as
+`id-aptitude-deploy-stg-eastus`, and that identity's only role is Website Contributor on
+`app-aptitude-stg-eastus`. That is deliberately narrower than Contributor on the resource group:
+the group is shared, and Contributor there would let this pipeline change every internal project's
+resources, both shared database servers included. Only the `TalentGate-CI` pipeline may use the
+connection.
 
 ### Deployment status
 
@@ -325,10 +332,21 @@ broken). The old hostname, `app-talentgate-staging.azurewebsites.net`, answers e
 a 307 to the same path on the new one, so links in emails sent before the move keep working. The
 old resource group stays untouched for a 7-day rollback window and is deleted after that.
 
-**Deploys fail until the new service connection exists.** `azureServiceConnection` still names
-`TalentGate-Staging`, which is scoped to the retired resource group, so the deploy stage fails on
-authorization. Builds and tests are unaffected. Switch the variable to
-`AccelirateInterProjectResourceManagerSC` once a subscription Owner has created it in this project.
+**Deploys fail until the identity's role assignment exists.** Granting a role takes Owner or User
+Access Administrator, which this project's maintainers don't hold, so a subscription Owner has to
+run the following once. Until then the deploy stage fails on authorization; builds and tests are
+unaffected.
+
+```bash
+az role assignment create --role "Website Contributor" \
+  --assignee-object-id 0c1bc364-857a-40e9-b62e-4fa5e255b072 --assignee-principal-type ServicePrincipal \
+  --scope /subscriptions/20bc5b3e-36db-4f0e-b0ef-6c66e3bac173/resourceGroups/AccelirateInternalProjects/providers/Microsoft.Web/sites/app-aptitude-stg-eastus
+```
+
+**Don't rerun the deploy stage of a run from before the move.** A rerun replays that run's own
+commit, whose pipeline targets the old app with the old `TalentGate-Staging` connection. That
+connection still works there, so the rerun would replace the redirect with a live copy of the old
+site on the old database.
 
 `DB_PASSWORD`, `SECRET_KEY`, `AZURE_STORAGE_CONNECTION_STRING`, and all four `GRAPH_*` values are
 set as App Service application settings. Set them the same way if the App Service is ever rebuilt
