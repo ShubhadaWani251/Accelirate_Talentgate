@@ -133,8 +133,12 @@ class QuestionSectionDetailView(APIView):
         # has just left them - so it has to leave the drafts too, or a draft created this
         # morning would still run a section no new batch can get.
         batch_defaults.resync_draft_batches()
-        log_action(request, request.user, 'update', 'question_section', section_id,
-                   details={'section_name': name, 'deactivated': True,
+        # 'deactivate', not a generic 'update': the audit screen reads one sentence per
+        # (action, entity) pair, so logging this as an update made it indistinguishable from a
+        # restore - the two opposite halves of this feature rendered identically. Matches the
+        # 'deactivate' already used for batches and user accounts.
+        log_action(request, request.user, 'deactivate', 'question_section', section_id,
+                   details={'section_name': name,
                             'question_count': question_count, 'batch_count': batch_count})
 
         # What is being KEPT, named explicitly. "It will not appear in new batches" alone leaves
@@ -174,8 +178,9 @@ class QuestionSectionDetailView(APIView):
         # Same reason as the delete path above - a draft has had nothing sent to its candidates,
         # so it tracks whatever the org currently runs.
         batch_defaults.resync_draft_batches()
-        log_action(request, request.user, 'update', 'question_section', section.section_id,
-                   details={'section_name': section.section_name, 'is_active': is_active})
+        log_action(request, request.user, 'restore' if is_active else 'deactivate',
+                   'question_section', section.section_id,
+                   details={'section_name': section.section_name})
         return Response(
             QuestionBankSectionSerializer(_sections_with_counts().get(pk=section.pk)).data,
         )

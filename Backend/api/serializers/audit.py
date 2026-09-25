@@ -20,8 +20,14 @@ _PAGE_BY_ENTITY = {
     'batch': 'Batches',
     'candidate': 'Candidates',
     'question': 'Question Bank',
+    # Exam sections are managed from Question Bank Management, same screen as the questions.
+    # Unmapped, this fell through to entity_type.title() and the column read "Question_Section"
+    # - a database column name, underscore and all, shown to an administrator.
+    'question_section': 'Question Bank',
     'user': 'User & Access Management',
     'invitation': 'Candidates',
+    # The org-wide exam defaults - one settings screen, reached from Batches.
+    'batch_defaults': 'Batches',
 }
 
 # Authentication isn't a "page" in the nav, but it is where these actions happen, and grouping
@@ -55,6 +61,14 @@ _DESCRIPTIONS = {
     ('update', 'question'): 'Edited a question',
     ('delete', 'question'): 'Deleted a question',
     ('bulk_upload', 'question'): 'Bulk-uploaded questions from a spreadsheet',
+    ('create', 'question_section'): 'Added an exam section',
+    ('deactivate', 'question_section'): 'Deactivated an exam section',
+    ('restore', 'question_section'): 'Restored an exam section',
+    # Rows written before deactivate/restore got their own action types. The log is append-only,
+    # so these exist and still have to read as something; 'update' is all the old rows recorded.
+    ('update', 'question_section'): 'Changed an exam section',
+    ('delete', 'question_section'): 'Deleted an exam section',
+    ('update', 'batch_defaults'): 'Updated the default batch configuration',
     ('create', 'user'): 'Created a user account',
     ('update', 'user'): 'Updated a user account',
     ('deactivate', 'user'): 'Deactivated a user account',

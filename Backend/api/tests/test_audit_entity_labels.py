@@ -11,6 +11,7 @@ import pytest
 from django.utils import timezone
 
 from api.models import AuditLog, Candidate
+from api.serializers.audit import describe_action
 from api.views.audit import build_entity_labels
 
 pytestmark = pytest.mark.django_db
@@ -118,3 +119,82 @@ class TestTheAuditScreenCanTellTheRowsApart:
 
         assert response.status_code == 200
         assert response.data['results'][0]['entity_label'] is None
+
+
+class TestExamSectionRowsReadAsEnglish:
+    """Section and defaults rows fell through every mapping and rendered as raw database codes:
+    the Action Page column read "Question_Section" - a column name, underscore and all - and the
+    description read "Update (question_section)".
+    """
+
+    @pytest.mark.parametrize('action_type, expected', [
+        ('create', 'Added an exam section'),
+        ('deactivate', 'Deactivated an exam section'),
+        ('restore', 'Restored an exam section'),
+        ('delete', 'Deleted an exam section'),
+        # Written before deactivate/restore had their own action types. The log is append-only,
+        # so these rows exist and still have to read as something.
+        ('update', 'Changed an exam section'),
+    ])
+    def test_each_section_action_has_a_sentence(self, action_type, expected):
+        assert describe_action(action_type, 'question_section') == expected
+
+    def test_the_defaults_screen_has_one_too(self):
+        assert describe_action('update', 'batch_defaults') == (
+            'Updated the default batch configuration')
+
+    @pytest.mark.parametrize('entity_type, expected_page', [
+        ('question_section', 'Question Bank'),
+        ('batch_defaults', 'Batches'),
+    ])
+    def test_the_action_page_is_a_real_screen_name(
+        self, admin_user, ta_user, client_for, entity_type, expected_page,
+    ):
+        AuditLog.objects.create(user=ta_user, action_type='update',
+                                entity_type=entity_type, entity_id=0)
+
+        response = client_for(admin_user).get('/api/audit-logs/', {'entity': entity_type})
+
+        assert response.data['results'][0]['action_page'] == expected_page
+
+    def test_no_row_renders_a_raw_entity_code(self, admin_user, ta_user, client_for):
+        """The shape of the original complaint: an underscore in a user-facing cell means a
+        database identifier reached the screen.
+        """
+        for entity_type in ('question_section', 'batch_defaults'):
+            AuditLog.objects.create(user=ta_user, action_type='update',
+                                    entity_type=entity_type, entity_id=0)
+
+        response = client_for(admin_user).get('/api/audit-logs/')
+
+        for row in response.data['results']:
+            assert '_' not in row['action_page'], row
+            assert '(' not in row['action_description'] or ':' in row['action_description'], row
+
+
+class TestDeactivateAndRestoreAreToldApart:
+    def test_deactivating_logs_its_own_action_type(
+        self, admin_user, client_for, get_section,
+    ):
+        section = get_section('tellapart', 'Tell Apart')
+
+        client_for(admin_user).delete('/api/questions/sections/%d/' % section.section_id)
+
+        row = AuditLog.objects.filter(entity_type='question_section').latest('log_id')
+        assert row.action_type == 'deactivate'
+        assert describe_action(row.action_type, row.entity_type) == 'Deactivated an exam section'
+
+    def test_restoring_logs_a_different_one(self, admin_user, client_for, get_section):
+        """Both used to log 'update', so the two opposite halves of the feature produced
+        identical audit rows - the exact problem this screen exists to avoid.
+        """
+        section = get_section('tellapart2', 'Tell Apart Two')
+        client = client_for(admin_user)
+        client.delete('/api/questions/sections/%d/' % section.section_id)
+
+        client.patch('/api/questions/sections/%d/' % section.section_id,
+                     {'is_active': True}, format='json')
+
+        row = AuditLog.objects.filter(entity_type='question_section').latest('log_id')
+        assert row.action_type == 'restore'
+        assert describe_action(row.action_type, row.entity_type) == 'Restored an exam section'
