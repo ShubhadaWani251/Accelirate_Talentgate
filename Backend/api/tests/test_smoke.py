@@ -26,7 +26,9 @@ def test_test_database_is_isolated():
     # the real database's name.
     assert connection.settings_dict['ENGINE'] == 'django.db.backends.sqlite3'
     assert 'memory' in str(connection.settings_dict['NAME'])
-    assert 'TalentDB' not in str(connection.settings_dict['NAME'])
+    # Staging's database before and after it moved to the shared server.
+    for real_database in ('TalentDB', 'talentgate_stg'):
+        assert real_database not in str(connection.settings_dict['NAME'])
 
 
 def test_email_cannot_leave_the_process():

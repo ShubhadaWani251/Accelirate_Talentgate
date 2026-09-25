@@ -234,7 +234,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # fallback here means that specific failure mode can never happen again even if the App Service
 # setting goes missing again, while an explicit .env override (local dev, or a genuinely different
 # deployment) still always takes precedence.
-FRONTEND_ORIGIN = os.environ.get('FRONTEND_ORIGIN', 'https://app-talentgate-staging.azurewebsites.net')
+FRONTEND_ORIGIN = os.environ.get('FRONTEND_ORIGIN', 'https://app-aptitude-stg-eastus.azurewebsites.net')
 
 # Service-to-service integration key for api.views.integrations.ActiveQuestionExportView - a
 # static shared secret, not a JWT, because the caller is another system with no api.User at
@@ -292,7 +292,7 @@ AADHAAR_OCR_MAX_CONCURRENT = int(os.environ.get('AADHAAR_OCR_MAX_CONCURRENT', '1
 # frontend is (localhost in dev), but staff only ever log in against the one real deployment -
 # a developer running the app locally should still send new teammates the real staging link, not
 # a localhost URL nobody but their own machine can reach. Update when staging moves off this URL.
-STAFF_APP_URL = os.environ.get('STAFF_APP_URL', 'https://app-talentgate-staging.azurewebsites.net')
+STAFF_APP_URL = os.environ.get('STAFF_APP_URL', 'https://app-aptitude-stg-eastus.azurewebsites.net')
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOWED_ORIGINS = [FRONTEND_ORIGIN]
 CORS_ALLOW_CREDENTIALS = True
