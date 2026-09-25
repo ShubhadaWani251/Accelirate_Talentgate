@@ -118,16 +118,41 @@ def _to_decimal_param(value):
 def _apply_score_filters(qs, params):
     """Apply any overall/section score range filters present in the query params.
 
-    Overall score lives on Candidate. A SECTION score lives on an AttemptSectionScore row
-    reached through the attempt, and which sections exist is data - so the accepted params are
-    derived from QuestionBankSection rather than listed here. `<section_key>_min` /
-    `<section_key>_max` works for whatever sections the org has defined, including one added
-    after this code was written; `score_min` / `score_max` stay reserved for the overall figure.
+    Every range here is in MARKS, off the candidate's LATEST attempt - the same figure and the
+    same attempt the table's own columns render, so a number typed into a filter means what the
+    column beside it says. Which sections exist is data, so the accepted params are derived from
+    QuestionBankSection rather than listed here: `<section_key>_min` / `<section_key>_max` works
+    for whatever sections the org has defined, including one added after this code was written.
+    `score_min` / `score_max` stay reserved for the overall figure.
     """
-    for suffix, lookup in (('min', 'gte'), ('max', 'lte')):
-        value = _to_decimal_param(params.get(f'score_{suffix}'))
-        if value is not None:
-            qs = qs.filter(**{f'overall_score__{lookup}': value})
+    overall_bounds = {
+        lookup: _to_decimal_param(params.get(f'score_{suffix}'))
+        for suffix, lookup in (('min', 'gte'), ('max', 'lte'))
+    }
+    if any(value is not None for value in overall_bounds.values()):
+        # Was `.filter(overall_score__gte=...)`, against Candidate.overall_score. Wrong twice:
+        #
+        #   - Wrong UNIT. That column is a PERCENTAGE, while the Overall column on screen shows
+        #     marks ("11/40"). Filtering 0-12 to catch an 11 silently matched on 27.50 instead,
+        #     so the filter disagreed with the number the user was reading off the row.
+        #   - Wrong SOURCE. It is a denormalised field on Candidate, and live data has it out of
+        #     step with the latest attempt: candidate 2556 reads 3/40 on screen, its latest
+        #     attempt scored 7.50%, and the stored overall_score still said 40.00 from an
+        #     earlier sitting.
+        #
+        # Now the same shape as the per-section ranges below, for the same reasons.
+        qs = qs.annotate(
+            _latest_total_marks=Subquery(
+                ExamAttempt.objects
+                .filter(candidate=OuterRef('pk'))
+                .order_by('-attempt_id')
+                .values('total_marks_earned')[:1]
+            )
+        )
+        qs = qs.filter(**{
+            f'_latest_total_marks__{lookup}': value
+            for lookup, value in overall_bounds.items() if value is not None
+        })
 
     for section_key in QuestionBankSection.objects.values_list('section_key', flat=True):
         bounds = {

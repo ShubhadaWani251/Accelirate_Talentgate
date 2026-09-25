@@ -72,13 +72,16 @@ export default function CandidateFilters({
             </select>
           </div>
         )}
+        {/* "Marks", not "Score": the Overall column renders marks ("11/40"), and this range now
+            filters on exactly that. Labelled as Score it read as a percentage, which is what it
+            used to filter on - so typing 0-12 to catch an 11 quietly matched nothing. */}
         <div className="field">
-          <label>Overall Score — From</label>
+          <label>Overall Marks — From</label>
           <input type="number" value={filters.score_min} onChange={(e) => set('score_min', e.target.value)} placeholder="e.g. 0" />
         </div>
         <div className="field">
-          <label>Overall Score — To</label>
-          <input type="number" value={filters.score_max} onChange={(e) => set('score_max', e.target.value)} placeholder="e.g. 40" />
+          <label>Overall Marks — To</label>
+          <input type="number" value={filters.score_max} onChange={(e) => set('score_max', e.target.value)} placeholder="e.g. 20" />
         </div>
       </div>
 

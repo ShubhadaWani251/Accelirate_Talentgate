@@ -9,7 +9,7 @@ from datetime import timedelta
 import pytest
 from django.utils import timezone
 
-from api.models import AttemptSectionScore, ExamAttempt, Invitation
+from api.models import AttemptSectionScore, Candidate, ExamAttempt, Invitation
 
 pytestmark = pytest.mark.django_db
 
@@ -115,5 +115,120 @@ class TestSectionScoreFilters:
 
         response = client_for(ta_user).get('/api/candidates/',
                                             {'logical_min': 0, 'logical_max': 2})
+        ids = [row['candidate_id'] for row in response.data['results']]
+        assert ids.count(candidate.candidate_id) == 1
+
+
+@pytest.fixture
+def candidate_with_overall(ta_user, make_batch, make_candidate):
+    """A candidate whose attempts earned the given MARKS, newest last.
+
+    candidate.overall_score is set deliberately out of step with them, because that is the state
+    live data is actually in - it is a denormalised percentage, and the filter used to read it.
+    """
+    batch = make_batch(ta_user)
+    counter = {'n': 0}
+
+    def _make(*marks, stored_overall_score=None):
+        counter['n'] += 1
+        candidate = make_candidate(batch, ta_user)
+        for index, earned in enumerate(marks):
+            invitation = Invitation.objects.create(
+                candidate=candidate, batch=batch,
+                unique_link_token=f'overall-filter-{counter["n"]}-{index}',
+                link_expired_at=timezone.now() + timedelta(days=1), sent_by=ta_user,
+            )
+            ExamAttempt.objects.create(
+                candidate=candidate, invitation=invitation,
+                status=ExamAttempt.Status.SUBMITTED,
+                total_marks_earned=earned, total_marks=40,
+                overall_score=round(earned * 100 / 40, 2),
+            )
+        if stored_overall_score is not None:
+            Candidate.objects.filter(pk=candidate.pk).update(
+                overall_score=stored_overall_score)
+        return candidate
+
+    return _make
+
+
+class TestOverallMarksFilter:
+    def test_it_filters_on_MARKS_not_the_stored_percentage(
+        self, candidate_with_overall, ta_user, client_for,
+    ):
+        """The reported bug. The Overall column renders "11/40"; typing 0-12 to catch that 11
+        used to match against candidate.overall_score, which for the same row is 27.50.
+        """
+        candidate = candidate_with_overall(11)
+
+        assert candidate.candidate_id in _filtered_ids(
+            client_for(ta_user), score_min=0, score_max=12)
+
+    def test_the_old_percentage_range_no_longer_matches(
+        self, candidate_with_overall, ta_user, client_for,
+    ):
+        """11 marks out of 40 is 27.5%. A 20-30 range meant that row before; it must not now,
+        or the filter is still reading percentages.
+        """
+        candidate = candidate_with_overall(11)
+
+        assert candidate.candidate_id not in _filtered_ids(
+            client_for(ta_user), score_min=20, score_max=30)
+
+    def test_it_uses_the_latest_attempt_not_an_older_one(
+        self, candidate_with_overall, ta_user, client_for,
+    ):
+        candidate = candidate_with_overall(2, 30)  # older scored 2, latest scored 30
+
+        matched_low = _filtered_ids(client_for(ta_user), score_min=0, score_max=5)
+        matched_high = _filtered_ids(client_for(ta_user), score_min=25, score_max=35)
+
+        assert candidate.candidate_id not in matched_low
+        assert candidate.candidate_id in matched_high
+
+    def test_a_stale_stored_overall_score_is_ignored(
+        self, candidate_with_overall, ta_user, client_for,
+    ):
+        """Live data has rows where candidate.overall_score disagrees with the latest attempt -
+        one reads 3/40 on screen while the stored figure still says 40.00 from an earlier
+        sitting. The attempt is the truth, because the attempt is what the table renders.
+        """
+        candidate = candidate_with_overall(3, stored_overall_score=40)
+
+        assert candidate.candidate_id in _filtered_ids(
+            client_for(ta_user), score_min=0, score_max=5)
+        assert candidate.candidate_id not in _filtered_ids(
+            client_for(ta_user), score_min=35, score_max=45)
+
+    def test_min_and_max_cannot_be_satisfied_by_different_attempts(
+        self, candidate_with_overall, ta_user, client_for,
+    ):
+        candidate = candidate_with_overall(0, 39)
+
+        assert candidate.candidate_id not in _filtered_ids(
+            client_for(ta_user), score_min=0, score_max=5)
+
+    def test_bounds_are_inclusive(self, candidate_with_overall, ta_user, client_for):
+        at_floor = candidate_with_overall(0)
+        at_ceiling = candidate_with_overall(5)
+
+        matched = _filtered_ids(client_for(ta_user), score_min=0, score_max=5)
+        assert {at_floor.candidate_id, at_ceiling.candidate_id} <= matched
+
+    def test_a_candidate_who_never_sat_it_is_excluded(
+        self, ta_user, make_batch, make_candidate, client_for,
+    ):
+        candidate = make_candidate(make_batch(ta_user), ta_user)
+
+        assert candidate.candidate_id not in _filtered_ids(
+            client_for(ta_user), score_min=0, score_max=5)
+
+    def test_a_candidate_appears_only_once(
+        self, candidate_with_overall, ta_user, client_for,
+    ):
+        candidate = candidate_with_overall(3, 3, 3)
+
+        response = client_for(ta_user).get('/api/candidates/',
+                                            {'score_min': 0, 'score_max': 5})
         ids = [row['candidate_id'] for row in response.data['results']]
         assert ids.count(candidate.candidate_id) == 1
