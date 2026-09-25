@@ -114,12 +114,13 @@ class AuditLogSerializer(serializers.ModelSerializer):
     user_role = serializers.SerializerMethodField()
     action_page = serializers.SerializerMethodField()
     action_description = serializers.SerializerMethodField()
+    entity_label = serializers.SerializerMethodField()
 
     class Meta:
         model = AuditLog
         fields = [
             'log_id', 'created_at', 'user_name', 'user_email', 'user_role',
-            'action_page', 'action_description',
+            'action_page', 'action_description', 'entity_label',
             # Raw codes kept alongside the prose so the screen can filter on them without
             # reverse-engineering the sentence.
             'action_type', 'entity_type', 'entity_id', 'ip_address',
@@ -144,3 +145,21 @@ class AuditLogSerializer(serializers.ModelSerializer):
 
     def get_action_description(self, log):
         return describe_action(log.action_type, log.entity_type, log.action_details)
+
+    def get_entity_label(self, log):
+        """WHICH record this row is about - the candidate's name, the batch's name.
+
+        Without it, sending one batch's invitations wrote 23 rows that rendered identically:
+        same second, same user, same "Sent an assessment invitation", nothing to tell them
+        apart. They read as the same event logged over and over rather than as 23 different
+        candidates, which is what they are. Reported as exactly that.
+
+        Resolved from a map the view builds for the page in one query per entity type (see
+        views/audit.build_entity_labels) rather than per row, which would be 50 extra queries a
+        page. No map in context - another caller, a test - simply means no label, never a crash
+        and never an N+1 sneaking in by default.
+        """
+        labels = self.context.get('entity_labels')
+        if not labels:
+            return None
+        return labels.get((log.entity_type, log.entity_id))

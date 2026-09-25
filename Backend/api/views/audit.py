@@ -14,10 +14,47 @@ from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from api.models import AuditLog, User
+from api.models import (
+    AuditLog, Batch, Candidate, Question, QuestionBankSection, User,
+)
 from api.pagination import StandardResultsPagination
 from api.permissions import IsAdmin
 from api.serializers.audit import AuditLogSerializer
+
+# Which record each entity_type points at, and how to name one. Only types that identify a
+# specific row appear: 'batch_defaults' is a single org-wide setting with no id to resolve, so
+# it is deliberately absent and simply gets no label.
+_LABEL_SOURCES = {
+    'candidate': (Candidate, 'candidate_id', lambda c: c.full_name),
+    'batch': (Batch, 'batch_id', lambda b: b.batch_name),
+    'user': (User, 'user_id', lambda u: u.full_name),
+    'question': (Question, 'question_id', lambda q: q.question_code),
+    'question_section': (QuestionBankSection, 'section_id', lambda s: s.section_name),
+}
+
+
+def build_entity_labels(logs):
+    """{(entity_type, entity_id): human name} for one page of audit rows.
+
+    One query per entity type present on the page - at most five - rather than one per row,
+    which at a page size of 50 would be 50 extra round trips to a remote database for a screen
+    nobody waits on twice.
+
+    A row whose target has since been deleted simply gets no label. That is the honest outcome:
+    the log is append-only and outlives the things it refers to, so a missing name means "this
+    record is gone", not that the log is wrong.
+    """
+    wanted = {}
+    for log in logs:
+        if log.entity_type in _LABEL_SOURCES and log.entity_id:
+            wanted.setdefault(log.entity_type, set()).add(log.entity_id)
+
+    labels = {}
+    for entity_type, ids in wanted.items():
+        model, pk_field, name_of = _LABEL_SOURCES[entity_type]
+        for obj in model.objects.filter(**{f'{pk_field}__in': ids}):
+            labels[(entity_type, getattr(obj, pk_field))] = name_of(obj)
+    return labels
 
 
 class AuditLogListView(APIView):
@@ -74,8 +111,12 @@ class AuditLogListView(APIView):
 
         paginator = StandardResultsPagination()
         page = paginator.paginate_queryset(qs, request, view=self)
-        response = paginator.get_paginated_response(AuditLogSerializer(page, many=True).data)
-        return response
+        # Resolved for the page, after pagination - labelling the whole filtered queryset would
+        # fetch every candidate in the database to render fifty rows.
+        serializer = AuditLogSerializer(
+            page, many=True, context={'entity_labels': build_entity_labels(page)},
+        )
+        return paginator.get_paginated_response(serializer.data)
 
 
 class AuditLogFilterOptionsView(APIView):

@@ -174,6 +174,14 @@ export default function AuditLogs() {
                   <td>{row.action_page}</td>
                   <td style={{ whiteSpace: 'normal', color: ROW_TONE[row.action_type] }}>
                     {row.action_description}
+                    {/* WHICH record it happened to. Sending one batch's invitations writes a row
+                        per candidate, so without this, 23 different people rendered as the same
+                        sentence 23 times at the same second and read like a logging fault. */}
+                    {row.entity_label && (
+                      <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 2 }}>
+                        {row.entity_label}
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))
