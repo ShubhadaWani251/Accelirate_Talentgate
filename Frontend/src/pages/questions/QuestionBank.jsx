@@ -5,7 +5,7 @@ import * as questionApi from '../../api/questionApi';
 import PaginationControls from '../../components/common/PaginationControls';
 import QuestionFormModal from '../../features/questions/QuestionFormModal';
 import AddSectionModal from '../../features/questions/AddSectionModal';
-import DeleteSectionModal from '../../features/questions/DeleteSectionModal';
+import SectionStatusModal from '../../features/questions/SectionStatusModal';
 import { ListPageSkeleton, SkeletonTableRows } from '../../components/loading/Skeleton';
 import { extractErrorMessage } from '../../utils/passwordSchema';
 
@@ -26,7 +26,7 @@ export default function QuestionBank() {
   const [firstLoad, setFirstLoad] = useState(true);
   const [editing, setEditing] = useState(null); // question object, or 'new'
   const [addingSection, setAddingSection] = useState(false);
-  const [deletingSection, setDeletingSection] = useState(null);
+  const [statusSection, setStatusSection] = useState(null);
 
   useEffect(() => {
     questionApi.getSections().then(setSections).catch((err) => toast.error(extractErrorMessage(err)));
@@ -98,7 +98,7 @@ export default function QuestionBank() {
               <div className="stat-lbl" style={{ fontWeight: 600, paddingRight: 24 }}>
                 {sec.section_name}
                 {!sec.is_active && (
-                  <span className="pill gray" style={{ marginLeft: 6 }}>Retired</span>
+                  <span className="pill gray" style={{ marginLeft: 6 }}>Inactive</span>
                 )}
               </div>
               <div className="stat-num" style={{ fontSize: 26 }}>{sec.total_questions ?? '—'}</div>
@@ -112,18 +112,27 @@ export default function QuestionBank() {
                 </span>
               </div>
             </button>
+            {/* The control follows the section's state, rather than always reading "delete"
+                and quietly offering a restore once you open it. An inactive section's only
+                useful action is putting it back, and a bin icon is the wrong promise for that -
+                it looked like the way to delete something that was already gone. */}
             <button
               type="button"
-              title={`Delete ${sec.section_name}`}
-              aria-label={`Delete ${sec.section_name}`}
-              onClick={() => setDeletingSection(sec)}
+              title={sec.is_active
+                ? `Deactivate ${sec.section_name}`
+                : `Restore ${sec.section_name}`}
+              aria-label={sec.is_active
+                ? `Deactivate ${sec.section_name}`
+                : `Restore ${sec.section_name}`}
+              onClick={() => setStatusSection(sec)}
               style={{
                 position: 'absolute', top: 8, right: 8, border: 'none', background: 'none',
-                cursor: 'pointer', fontSize: 14, lineHeight: 1, color: 'var(--muted)',
+                cursor: 'pointer', fontSize: 14, lineHeight: 1,
+                color: sec.is_active ? 'var(--muted)' : 'var(--brand-green, #1a7f37)',
                 padding: 4,
               }}
             >
-              🗑
+              {sec.is_active ? '🗑' : '↩'}
             </button>
           </div>
         ))}
@@ -264,15 +273,15 @@ export default function QuestionBank() {
         />
       )}
 
-      {deletingSection && (
-        <DeleteSectionModal
-          section={deletingSection}
-          onClose={() => setDeletingSection(null)}
+      {statusSection && (
+        <SectionStatusModal
+          section={statusSection}
+          onClose={() => setStatusSection(null)}
           onChanged={() => {
-            setDeletingSection(null);
+            setStatusSection(null);
             questionApi.getSections().then(setSections).catch(() => {});
             // The table may have been filtered to a section that no longer exists.
-            if (sectionKey === deletingSection.section_key) setSectionKey('');
+            if (sectionKey === statusSection.section_key) setSectionKey('');
             refresh(1);
           }}
         />

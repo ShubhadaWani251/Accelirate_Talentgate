@@ -11,7 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 import zipfile
 
-from api.models import Question, QuestionBankSection, Setting
+from api.models import Question, QuestionBankSection
 from api.pagination import StandardResultsPagination
 from api.permissions import IsAdmin, IsAdminOrTA
 from api.serializers.question import (
@@ -94,23 +94,23 @@ class QuestionSectionListView(APIView):
 
 
 class QuestionSectionDetailView(APIView):
-    """Delete or restore one section. Admin-only.
+    """Deactivate or restore one section. Admin-only.
 
-    Deleting a section means one thing: it stops appearing in any NEW batch, and every batch that
+    Deactivating means: the section stops appearing in any NEW batch, and every batch that
     already ran it - along with every score recorded under it - is left exactly as it was. A
     candidate's result has to keep describing the exam they actually sat.
 
-    That single promise is delivered two ways, depending on whether there is any history to keep:
+    Nothing is ever destroyed here. An earlier version removed the row outright when nothing
+    depended on it yet, on the reasoning that there was no past to preserve. That made the same
+    button mean two different things depending on state the admin could not see, and the
+    destructive one was unrecoverable - a section deactivated by mistake came back with one
+    click, while an identical click on a section that happened to have no questions yet was
+    final. Now it is always reversible, which is the only version of this action that can be
+    offered without a warning about which kind you are about to get.
 
-      - Nothing depends on the section (no questions, no batch ever used it): the row is removed
-        outright. There is no past to preserve and a tombstone would just be clutter.
-      - Anything does depend on it: the row is RETIRED (is_active=False) instead. Question,
-        BatchSection and AttemptSectionScore all reference it with PROTECT, so a real delete
-        would have to either take the question bank's content with it or rewrite what a cohort
-        was assessed on.
-
-    The response says which happened, but the admin is never asked to choose - from their side
-    it is one action with one meaning.
+    The row therefore always survives, which matters beyond undo: Question, BatchSection and
+    AttemptSectionScore all reference a section with PROTECT, so keeping it is also what lets
+    history stay readable.
     """
     permission_classes = [IsAdmin]
 
@@ -122,44 +122,39 @@ class QuestionSectionDetailView(APIView):
 
     def delete(self, request, section_id):
         section = self._get_or_404(section_id)
-        name, key = section.section_name, section.section_key
+        name = section.section_name
 
         question_count = section.question_set.count()
         batch_count = section.batch_sections.values('batch_id').distinct().count()
 
-        if question_count or batch_count:
-            section.is_active = False
-            section.save(update_fields=['is_active'])
-            # Drafts follow the defaults (see batch_defaults.resync_draft_batches), and this
-            # section has just left them - so it has to leave the drafts too, or a draft created
-            # this morning would still run a section that no longer exists anywhere else.
-            batch_defaults.resync_draft_batches()
-            log_action(request, request.user, 'update', 'question_section', section_id,
-                       details={'section_name': name, 'retired': True,
-                                'question_count': question_count, 'batch_count': batch_count})
-            kept = []
-            if question_count:
-                kept.append(f'{question_count} question{"" if question_count == 1 else "s"}')
-            if batch_count:
-                kept.append(f'{batch_count} batch{"" if batch_count == 1 else "es"}')
-            return Response({
-                'removed': False,
-                'detail': f'"{name}" will not appear in any new batch. Its '
-                          f'{" and ".join(kept)} already using it are unchanged.',
-                'question_count': question_count,
-                'batch_count': batch_count,
-            })
+        section.is_active = False
+        section.save(update_fields=['is_active'])
+        # Drafts follow the defaults (see batch_defaults.resync_draft_batches), and this section
+        # has just left them - so it has to leave the drafts too, or a draft created this
+        # morning would still run a section no new batch can get.
+        batch_defaults.resync_draft_batches()
+        log_action(request, request.user, 'update', 'question_section', section_id,
+                   details={'section_name': name, 'deactivated': True,
+                            'question_count': question_count, 'batch_count': batch_count})
 
-        section.delete()
-        # The section's own defaults rows go with it, or they would sit in the Setting table
-        # forever and silently reapply if a section with the same derived key were added later.
-        Setting.objects.filter(
-            setting_group=batch_defaults.SETTING_GROUP,
-            setting_key__startswith=f'{batch_defaults.SETTING_GROUP}.section.{key}.',
-        ).delete()
-        log_action(request, request.user, 'delete', 'question_section', section_id,
-                   details={'section_name': name, 'section_key': key})
-        return Response({'removed': True, 'detail': f'"{name}" deleted.'})
+        # What is being KEPT, named explicitly. "It will not appear in new batches" alone leaves
+        # an admin wondering what happened to the questions they spent an afternoon uploading.
+        kept = []
+        if question_count:
+            kept.append(f'{question_count} question{"" if question_count == 1 else "s"}')
+        if batch_count:
+            kept.append(f'{batch_count} batch{"" if batch_count == 1 else "es"}')
+        detail = f'"{name}" will not appear in any new batch.'
+        if kept:
+            detail += f' Its {" and ".join(kept)} already using it are unchanged.'
+        detail += ' You can restore it at any time.'
+
+        return Response({
+            'detail': detail,
+            'is_active': False,
+            'question_count': question_count,
+            'batch_count': batch_count,
+        })
 
     def patch(self, request, section_id):
         """Retire (is_active=False) or restore a section.

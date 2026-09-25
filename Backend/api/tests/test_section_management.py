@@ -72,29 +72,46 @@ class TestAddingASection:
         assert client_for(ta_user).get('/api/questions/sections/').status_code == 200
 
 
-class TestDeletingASection:
-    def test_an_unused_section_is_removed_outright(
+class TestDeactivatingASection:
+    def test_even_an_unused_section_is_kept_not_destroyed(
+        self, admin_user, client_for, unused_section,
+    ):
+        """This used to delete the row outright when nothing depended on it yet.
+
+        That made one button mean two different things depending on state the admin could not
+        see, and only one of them was reversible. Deactivating is now always what happens, so
+        Restore is always available.
+        """
+        response = client_for(admin_user).delete(_url(unused_section))
+
+        assert response.status_code == 200, response.data
+        assert QuestionBankSection.objects.filter(pk=unused_section.pk).exists()
+        unused_section.refresh_from_db()
+        assert unused_section.is_active is False
+
+    def test_the_response_says_it_can_be_restored(
         self, admin_user, client_for, unused_section,
     ):
         response = client_for(admin_user).delete(_url(unused_section))
 
-        assert response.status_code == 200, response.data
-        # Nothing depended on it, so there is no past to preserve and no tombstone left behind.
-        assert response.data['removed'] is True
-        assert not QuestionBankSection.objects.filter(pk=unused_section.pk).exists()
+        assert response.data['is_active'] is False
+        assert 'restore' in response.data['detail'].lower()
 
-    def test_its_default_settings_go_with_it(self, admin_user, client_for, unused_section):
+    def test_its_default_settings_survive_so_a_restore_brings_them_back(
+        self, admin_user, client_for, unused_section,
+    ):
+        """The old hard-delete path also wiped the section's Setting rows. Nothing is destroyed
+        now, so its configured question count and cutoff are still there on restore.
+        """
         Setting.objects.create(setting_key='exam_config.section.data_interp.questions',
                                setting_value='10', setting_group='exam_config')
 
         client_for(admin_user).delete(_url(unused_section))
 
-        # Left behind, these would sit in the Setting table forever and silently reapply to a
-        # later section that happened to derive the same key.
-        assert not Setting.objects.filter(
-            setting_key__startswith='exam_config.section.data_interp.').exists()
+        assert Setting.objects.filter(
+            setting_key='exam_config.section.data_interp.questions').exists()
 
-    def test_a_section_holding_questions_is_kept_but_retired(
+    def test_a_section_holding_questions_is_kept_but_deactivated(
         self, admin_user, client_for, unused_section,
     ):
         Question.objects.create(
@@ -106,13 +123,13 @@ class TestDeletingASection:
         response = client_for(admin_user).delete(_url(unused_section))
 
         assert response.status_code == 200, response.data
-        assert response.data['removed'] is False
+        assert response.data['is_active'] is False
         # The questions are not destroyed - they stay in the bank and remain manageable.
         assert Question.objects.filter(section=unused_section).count() == 1
         unused_section.refresh_from_db()
         assert unused_section.is_active is False
 
-    def test_a_section_a_batch_has_used_is_kept_but_retired(
+    def test_a_section_a_batch_has_used_is_kept_but_deactivated(
         self, admin_user, ta_user, client_for, make_batch, unused_section,
     ):
         batch = make_batch(ta_user, status=Batch.Status.IN_PROGRESS)
@@ -122,7 +139,7 @@ class TestDeletingASection:
         response = client_for(admin_user).delete(_url(unused_section))
 
         assert response.status_code == 200, response.data
-        assert response.data['removed'] is False
+        assert response.data['is_active'] is False
         assert response.data['batch_count'] == 1
         # The one that really matters: that batch's candidates were assessed on this section,
         # and their results have to keep describing the exam they actually sat.
@@ -273,3 +290,97 @@ class TestARetiredSectionIsNotOfferedForNewWork:
 
         assert live.section_name in names
         assert retired.section_name not in names
+
+
+class TestDeactivateThenRestoreRoundTrip:
+    """The pair as an admin actually uses it: the card's control deactivates, and the same
+    control on the now-inactive card puts it back. Nothing is destroyed in between, which is
+    what makes the second half possible at all.
+    """
+
+    def test_a_deactivated_section_comes_back_with_everything_attached(
+        self, admin_user, client_for, unused_section,
+    ):
+        question = Question.objects.create(
+            question_code='Q-RT-1', section=unused_section, question_text='round trip?',
+            option_a='a', option_b='b', correct_option='A',
+            difficulty=Question.Difficulty.EASY,
+        )
+        client = client_for(admin_user)
+
+        client.delete(_url(unused_section))
+        restored = client.patch(_url(unused_section), {'is_active': True}, format='json')
+
+        assert restored.status_code == 200, restored.data
+        assert restored.data['is_active'] is True
+        unused_section.refresh_from_db()
+        assert unused_section.is_active is True
+        assert Question.objects.filter(pk=question.pk, section=unused_section).exists()
+
+    def test_a_restored_section_reaches_new_batches_again(
+        self, admin_user, ta_user, client_for, unused_section, get_section,
+    ):
+        get_section('logical')  # something must survive the deactivation, or no batch is creatable
+        client = client_for(admin_user)
+        client.delete(_url(unused_section))
+
+        client.patch(_url(unused_section), {'is_active': True}, format='json')
+        created = client_for(ta_user).post(
+            '/api/batches/', {'batch_name': 'After Restore', 'college_name': 'C'}, format='json',
+        )
+
+        assert 'data_interp' in [s['section_key'] for s in created.data['sections']]
+
+    def test_a_restored_section_returns_to_draft_batches(
+        self, admin_user, ta_user, client_for, unused_section, get_section,
+    ):
+        """Drafts track the org defaults, so restoring has to reach them the same way
+        deactivating did - otherwise a draft keeps a gap nobody can explain.
+        """
+        get_section('logical')
+        client = client_for(admin_user)
+        client.delete(_url(unused_section))
+        draft = client_for(ta_user).post(
+            '/api/batches/', {'batch_name': 'Draft Across Restore', 'college_name': 'C'},
+            format='json',
+        )
+        batch_id = draft.data['batch_id']
+        assert 'data_interp' not in [s['section_key'] for s in draft.data['sections']]
+
+        client.patch(_url(unused_section), {'is_active': True}, format='json')
+
+        reread = client_for(ta_user).get(f'/api/batches/{batch_id}/')
+        assert 'data_interp' in [s['section_key'] for s in reread.data['sections']]
+
+
+class TestAddingASectionWhoseNameIsTaken:
+    def test_a_deactivated_name_clash_points_at_restore(
+        self, admin_user, client_for, unused_section,
+    ):
+        """Nothing is deleted any more, so a name stays taken by a section the admin may believe
+        is gone. "already exists" alone would send them hunting for something not in the active
+        list; the message has to name the real situation.
+        """
+        client = client_for(admin_user)
+        client.delete(_url(unused_section))
+
+        response = client.post('/api/questions/sections/',
+                               {'section_name': unused_section.section_name}, format='json')
+
+        assert response.status_code == 400
+        message = ' '.join(response.data['section_name'])
+        assert 'deactivated' in message.lower()
+        assert 'restore' in message.lower()
+
+    def test_an_active_name_clash_keeps_the_plain_message(
+        self, admin_user, client_for, unused_section,
+    ):
+        response = client_for(admin_user).post(
+            '/api/questions/sections/', {'section_name': unused_section.section_name},
+            format='json',
+        )
+
+        assert response.status_code == 400
+        message = ' '.join(response.data['section_name'])
+        assert 'already exists' in message.lower()
+        assert 'restore' not in message.lower()

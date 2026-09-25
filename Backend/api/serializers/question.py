@@ -77,6 +77,13 @@ class SectionCreateSerializer(serializers.ModelSerializer):
     columns keyed on it cannot carry.
     """
 
+    # validators=[] clears the UniqueValidator ModelSerializer derives from the model's
+    # unique=True. That validator runs during field validation, BEFORE validate_section_name,
+    # so it silently won every name clash - and it compares case-SENSITIVELY, where the rule
+    # here is case-insensitive and has a different message to give depending on whether the
+    # section holding the name is active. One method now owns the whole rule.
+    section_name = serializers.CharField(max_length=60, validators=[])
+
     class Meta:
         model = QuestionBankSection
         fields = ['section_name', 'description', 'min_required_active', 'display_order']
@@ -85,7 +92,16 @@ class SectionCreateSerializer(serializers.ModelSerializer):
         value = ' '.join((value or '').split())
         if not value:
             raise serializers.ValidationError('A section name is required.')
-        if QuestionBankSection.objects.filter(section_name__iexact=value).exists():
+        # Deactivating never removes the row, so a name stays taken by a section the admin may
+        # think is gone. Saying only "already exists" sends them hunting for something they
+        # cannot see as active; naming the real situation points at the one-click fix.
+        clash = QuestionBankSection.objects.filter(section_name__iexact=value).first()
+        if clash is not None:
+            if not clash.is_active:
+                raise serializers.ValidationError(
+                    'A deactivated section already uses this name. Restore it instead of '
+                    'creating a second one - its questions and past results are still attached.'
+                )
             raise serializers.ValidationError('A section with this name already exists.')
         if not _section_key_from_name(value):
             raise serializers.ValidationError(
