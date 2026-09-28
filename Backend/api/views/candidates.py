@@ -33,9 +33,10 @@ from api.services.access import dedupe_by_profile, visible_candidates_qs
 from api.services.audit import log_action
 from api.services.candidate_history import build_candidate_history
 from api.services.email_templates import (
-    CERTIFICATION_TEMPLATE, DEFAULT_CERTIFICATION_COURSE_1_URL,
-    DEFAULT_CERTIFICATION_COURSE_2_URL, NOTIFICATION_TEMPLATES, render_certification_email,
-    render_template,
+    CERTIFICATION_PLACEHOLDERS, CERTIFICATION_TEMPLATE, DEFAULT_CERTIFICATION_COURSE_1_URL,
+    DEFAULT_CERTIFICATION_COURSE_2_URL, MAX_CERTIFICATION_SUBJECT_LENGTH, NOTIFICATION_TEMPLATES,
+    certification_body_error, get_certification_template, render_certification_email,
+    render_template, save_certification_template,
 )
 from api.services.excel_upload import generate_candidates_workbook
 from api.services.invites import (
@@ -587,6 +588,24 @@ class CandidateCertificationView(APIView):
     # render as a clickable link) and plain http, which would send candidates over cleartext.
     MAX_COURSE_URL_LENGTH = 500
 
+    def get(self, request):
+        """The wording and course links the modal should open with.
+
+        Served rather than hardcoded in the frontend: the modal used to carry its own copy of
+        the body purely to render a preview, which is two sources for one piece of approved
+        candidate-facing text - and now that the body is editable, a stale duplicate would show
+        the TA something other than what their edit is based on.
+        """
+        template = get_certification_template()
+        return Response({
+            'subject': template['subject'],
+            'body': template['body'],
+            'course_1_url': DEFAULT_CERTIFICATION_COURSE_1_URL,
+            'course_2_url': DEFAULT_CERTIFICATION_COURSE_2_URL,
+            'placeholders': list(CERTIFICATION_PLACEHOLDERS),
+            'is_customised': template['body'] != CERTIFICATION_TEMPLATE['body'],
+        })
+
     def _clean_course_url(self, raw, label):
         """Returns (url_or_None, error_or_None). None means "use the template default"."""
         url = (raw or '').strip()
@@ -628,6 +647,20 @@ class CandidateCertificationView(APIView):
         if error:
             return Response({'detail': error}, status=status.HTTP_400_BAD_REQUEST)
 
+        # An omitted subject/body means "whatever is currently in force", so an older caller
+        # that sends only a deadline still works and still picks up a saved edit.
+        current = get_certification_template()
+        subject = ' '.join((request.data.get('subject') or current['subject']).split())
+        body = request.data.get('body') or current['body']
+        save_as_default = bool(request.data.get('save_as_default'))
+
+        edit_error = certification_body_error(body)
+        if not subject:
+            edit_error = edit_error or 'The email subject cannot be empty.'
+        elif len(subject) > MAX_CERTIFICATION_SUBJECT_LENGTH:
+            edit_error = edit_error or (
+                f'The subject is too long (max {MAX_CERTIFICATION_SUBJECT_LENGTH} characters).')
+
         candidates = list(visible_candidates_qs(request.user).filter(candidate_id__in=candidate_ids))
         if not candidates:
             return Response({'detail': 'No matching candidates found.'},
@@ -641,10 +674,15 @@ class CandidateCertificationView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        subject = CERTIFICATION_TEMPLATE['subject']
+        if edit_error:
+            return Response({'detail': edit_error}, status=status.HTTP_400_BAD_REQUEST)
+        if save_as_default:
+            save_certification_template(subject, body, request.user)
+
         send_notification_emails(
             sendable, subject,
-            lambda c: render_certification_email(c, deadline, course_1_url, course_2_url)[1],
+            lambda c: render_certification_email(
+                c, deadline, course_1_url, course_2_url, subject, body)[1],
         )
         for candidate in sendable:
             # The course URLs are recorded on the audit entry because they are now per-send and

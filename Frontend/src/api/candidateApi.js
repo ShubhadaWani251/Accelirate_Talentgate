@@ -60,16 +60,28 @@ export const notifyCandidates = (candidateIds, { template, message, subject } = 
     .post('/candidates/notify/', { candidate_ids: candidateIds, template, message, subject })
     .then((r) => r.data);
 
-// The surrounding wording is fixed server-side; the deadline and the two course URLs are
-// per-send values. Omitting either URL makes the server fall back to its own default UiPath
-// link, and it rejects anything that isn't https://.
-export const sendCertificationEmail = (candidateIds, { deadline, course1Url, course2Url }) =>
+// The wording currently in force, plus the default course links. Fetched rather than held in
+// the bundle: the body is editable now, so a second copy here would be what the TA's edit was
+// based on, and it would drift from what actually gets sent.
+export const getCertificationTemplate = () =>
+  axiosClient.get('/candidates/send-certification/').then((r) => r.data);
+
+// deadline and the two course URLs are per-send values. subject/body are the possibly-edited
+// wording; omitting them sends whatever is currently in force. saveAsDefault makes that wording
+// the starting point for every later send. Omitting either URL makes the server fall back to its
+// own default UiPath link, and it rejects anything that isn't https://.
+export const sendCertificationEmail = (
+  candidateIds, { deadline, course1Url, course2Url, subject, body, saveAsDefault },
+) =>
   axiosClient
     .post('/candidates/send-certification/', {
       candidate_ids: candidateIds,
       deadline,
       course_1_url: course1Url,
       course_2_url: course2Url,
+      subject,
+      body,
+      save_as_default: saveAsDefault,
     })
     .then((r) => r.data);
 

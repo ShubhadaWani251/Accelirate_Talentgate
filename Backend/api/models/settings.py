@@ -7,7 +7,10 @@ class Setting(models.Model):
     """Generic key-value store for global configuration."""
     setting_id = models.AutoField(primary_key=True)
     setting_key = models.CharField(max_length=100, unique=True)
-    setting_value = models.CharField(max_length=255)
+    # TextField, not CharField(255): this is described as a generic store, and the first value
+    # that was genuinely generic - an editable email body - did not fit in 255 characters. A
+    # widening is backwards-compatible, every existing value still fits.
+    setting_value = models.TextField()
     setting_group = models.CharField(max_length=40,
                                      help_text="exam_config, duplicate_check, etc.")
     is_editable = models.BooleanField(default=True)

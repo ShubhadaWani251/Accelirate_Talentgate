@@ -328,15 +328,103 @@ def render_invitation_email(candidate, invitation, link, sender=None, seb_config
     )
 
 
-def render_certification_email(candidate, deadline, course_1_url=None, course_2_url=None):
+# Everything a certification body may substitute. Anything else in braces is a typo, and has to
+# be caught BEFORE a send rather than raising KeyError partway through a list of candidates.
+CERTIFICATION_PLACEHOLDERS = ('name', 'deadline', 'course_1_url', 'course_2_url')
+
+CERTIFICATION_SETTING_GROUP = 'email_templates'
+_CERTIFICATION_SUBJECT_KEY = 'email_templates.certification.subject'
+_CERTIFICATION_BODY_KEY = 'email_templates.certification.body'
+
+# Generous: the approved copy is ~1,200 characters and the whole point is that it can be
+# rewritten. Bounded anyway, because this is free text that ends up in an email to candidates.
+MAX_CERTIFICATION_BODY_LENGTH = 20000
+MAX_CERTIFICATION_SUBJECT_LENGTH = 200
+
+
+def get_certification_template():
+    """The certification subject and body currently in force.
+
+    The wording used to live only in CERTIFICATION_TEMPLATE below, which meant changing it was a
+    code change and a deploy. It is editable now and a saved version wins, falling back to the
+    built-in copy whenever nothing has been saved - so a fresh database, and every existing one,
+    behaves exactly as before until somebody deliberately edits it.
+    """
+    from api.models import Setting
+
+    saved = {
+        row.setting_key: row.setting_value
+        for row in Setting.objects.filter(setting_key__in=(
+            _CERTIFICATION_SUBJECT_KEY, _CERTIFICATION_BODY_KEY,
+        ))
+    }
+    return {
+        'subject': saved.get(_CERTIFICATION_SUBJECT_KEY) or CERTIFICATION_TEMPLATE['subject'],
+        'body': saved.get(_CERTIFICATION_BODY_KEY) or CERTIFICATION_TEMPLATE['body'],
+    }
+
+
+def save_certification_template(subject, body, user=None):
+    """Make this wording the default every later send starts from."""
+    from api.models import Setting
+
+    for key, value in ((_CERTIFICATION_SUBJECT_KEY, subject), (_CERTIFICATION_BODY_KEY, body)):
+        Setting.objects.update_or_create(
+            setting_key=key,
+            defaults={'setting_value': value, 'setting_group': CERTIFICATION_SETTING_GROUP,
+                      'updated_by': user},
+        )
+
+
+def certification_body_error(body):
+    """Why this body cannot be sent, or None if it can.
+
+    The real hazard in editable copy is str.format: an unknown name in braces raises KeyError,
+    and a stray single brace raises ValueError. Either would surface mid-send, after some
+    candidates had already been emailed and some had not. So the body is rendered here against
+    dummy values first, and the send is refused before anything leaves.
+    """
+    if not (body or '').strip():
+        return 'The email body cannot be empty.'
+    if len(body) > MAX_CERTIFICATION_BODY_LENGTH:
+        return (f'The email body is too long (max {MAX_CERTIFICATION_BODY_LENGTH:,} '
+                f'characters).')
+    try:
+        body.format(**{name: '' for name in CERTIFICATION_PLACEHOLDERS})
+    except KeyError as exc:
+        return (f'{exc.args[0]} is not a placeholder this email understands. Available: '
+                + ', '.join('{%s}' % name for name in CERTIFICATION_PLACEHOLDERS) + '.')
+    except (IndexError, ValueError):
+        return ('A brace in the body is unbalanced. Use {{ and }} to write a literal { or }, '
+                'and one of ' + ', '.join('{%s}' % n for n in CERTIFICATION_PLACEHOLDERS)
+                + ' to substitute a value.')
+    return None
+
+
+def render_certification_email(candidate, deadline, course_1_url=None, course_2_url=None,
+                               subject=None, body=None):
     """Resolve the certification copy for one candidate with the TA's deadline and course links.
+
+    `subject`/`body` override the stored template for this send only - the caller decides
+    whether an edit is also saved as the new default (see save_certification_template). Omitted,
+    both come from get_certification_template.
 
     The two course URLs fall back to the module-level defaults when a caller omits them, so an
     older caller (or a test) that passes only a deadline still renders the standard UiPath
-    pairing. The caller is responsible for rejecting a non-https URL before it reaches here -
-    see views.candidates.CandidateCertificationView.
+    pairing. The caller is responsible for rejecting a non-https URL, and for validating an
+    edited body with certification_body_error, before either reaches here - see
+    views.candidates.CandidateCertificationView.
+
+    The stored template is only READ when the caller left something out. That matters because
+    this runs once per candidate, on the background thread send_notification_emails sends from -
+    resolving it here unconditionally put a Setting query inside that loop, fifty of them for a
+    fifty-candidate send. The view resolves it once and passes both down.
     """
-    return CERTIFICATION_TEMPLATE['subject'], CERTIFICATION_TEMPLATE['body'].format(
+    if subject is None or body is None:
+        template = get_certification_template()
+        subject = subject or template['subject']
+        body = body or template['body']
+    return subject, body.format(
         name=candidate.full_name,
         deadline=deadline,
         course_1_url=course_1_url or DEFAULT_CERTIFICATION_COURSE_1_URL,
