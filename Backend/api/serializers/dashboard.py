@@ -55,17 +55,23 @@ def _build_batches_overview(batches_qs, is_admin, status_group='active'):
     # switching the filter (see filter_batches_by_status_group) - nothing here is hidden
     # outright, only excluded from the default view.
     #
-    # When the group mixes statuses together (status_group='all'), cancelled batches still
-    # sink to the bottom rather than interleaving with active ones by date - they're not live
-    # work even though they're shown.
+    # Ordered by how much attention a batch still wants, then newest-first within each band.
+    # Sorting by date alone interleaved finished batches with live ones, so the rows a TA can
+    # still act on were scattered down a list they had to read all of - and the default Active
+    # view holds both In Progress and Completed, which is where it showed most.
+    #
+    #   0  in progress (and drafts, in the groups that include them) - live work
+    #   1  completed   - done, kept for reference
+    #   2  cancelled   - not work at all, even though it is shown
     qs = annotate_batch_counts(
         filter_batches_by_status_group(batches_qs, status_group)
         .select_related('primary_ta_user')
-        .annotate(is_cancelled=Case(
-            When(status=Batch.Status.CANCELLED, then=Value(1)),
+        .annotate(status_rank=Case(
+            When(status=Batch.Status.COMPLETED, then=Value(1)),
+            When(status=Batch.Status.CANCELLED, then=Value(2)),
             default=Value(0), output_field=IntegerField(),
         ))
-        .order_by('is_cancelled', '-created_at')
+        .order_by('status_rank', '-created_at')
     )
     rows = []
     for batch in qs:
