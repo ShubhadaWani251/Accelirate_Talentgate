@@ -332,10 +332,12 @@ broken). The old hostname, `app-talentgate-staging.azurewebsites.net`, answers e
 a 307 to the same path on the new one, so links in emails sent before the move keep working. The
 old resource group stays untouched for a 7-day rollback window and is deleted after that.
 
-**Deploys fail until the identity's role assignment exists.** Granting a role takes Owner or User
-Access Administrator, which this project's maintainers don't hold, so a subscription Owner has to
-run the following once. Until then the deploy stage fails on authorization; builds and tests are
-unaffected.
+**Rebuilding the app means granting the identity's role again.** An Owner granted it on 2026-09-28
+with the command below; granting roles takes Owner or User Access Administrator, which this
+project's maintainers don't hold. Without it the deploy stage fails on authorization
+(`does not have authorization to perform action 'Microsoft.Web/sites/config/list/action'`) while
+builds and tests pass. The role belongs to the identity, not a person: in the portal's *Add role
+assignment*, choose **Managed identity** on the Members tab.
 
 ```bash
 az role assignment create --role "Website Contributor" \
