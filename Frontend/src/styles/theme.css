@@ -87,10 +87,6 @@ h1, h2, h3, h4, .brand, .btn, .box-label {
   padding: 12px 24px; border-bottom: 1px solid var(--line-soft); background: #fff;
 }
 .app-nav .nav-left { display: flex; align-items: center; gap: 8px; }
-.app-nav .nav-brand {
-  font-weight: 700; font-size: 13.5px; color: var(--brand-navy);
-  margin-left: 4px; white-space: nowrap;
-}
 
 /* Back / Home controls - the wireframe's `.persistent-nav` spec: both are ordinary small
    buttons, with Home carrying the same blue-to-indigo primary gradient it has there. */
@@ -585,7 +581,6 @@ table.data-table tbody tr:hover td { background: var(--accent-soft); }
   /* Nav wraps rather than squeezing Back/Home off-screen - both must stay reachable. */
   .app-nav { flex-wrap: wrap; gap: 10px; padding: 12px 16px; }
   .app-nav .nav-left { flex-wrap: wrap; }
-  .app-nav .nav-brand { order: -1; width: 100%; }
 }
 
 @media (max-width: 767px) {
@@ -600,7 +595,6 @@ table.data-table tbody tr:hover td { background: var(--accent-soft); }
   /* Nav: brand + toggle on one row, links revealed underneath on demand. */
   .app-nav { flex-wrap: wrap; gap: 8px; padding: 10px 12px; }
   .app-nav .nav-left { flex-wrap: wrap; width: 100%; gap: 6px; }
-  .app-nav .nav-brand { order: -1; width: 100%; font-size: 12.5px; margin-left: 0; }
   .app-nav .nav-links { display: none; width: 100%; flex-direction: column; align-items: stretch; gap: 4px; }
   .app-nav .nav-links.is-open { display: flex; }
   .app-nav .nav-links a { display: block; }

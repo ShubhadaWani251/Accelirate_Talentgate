@@ -71,7 +71,6 @@ export default function AppNav() {
           <button className="btn small nav-back" onClick={handleBack}>← Back</button>
         )}
         <button className="btn small primary nav-home" onClick={() => navigate(home)}>Home</button>
-        <span className="nav-brand">CEP — {user?.role_code === 'admin' ? 'Administrator' : 'Staffing User'}</span>
         {/* Visible only under 768px (CSS-driven), so desktop/tablet behaviour is unchanged. */}
         <button
           type="button"
