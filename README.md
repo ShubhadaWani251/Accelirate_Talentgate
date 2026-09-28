@@ -345,10 +345,10 @@ az role assignment create --role "Website Contributor" \
   --scope /subscriptions/20bc5b3e-36db-4f0e-b0ef-6c66e3bac173/resourceGroups/AccelirateInternalProjects/providers/Microsoft.Web/sites/app-aptitude-stg-eastus
 ```
 
-**Don't rerun the deploy stage of a run from before the move.** A rerun replays that run's own
-commit, whose pipeline targets the old app with the old `TalentGate-Staging` connection. That
-connection still works there, so the rerun would replace the redirect with a live copy of the old
-site on the old database.
+**Don't rerun the deploy stage of a run from before the move; queue a new run from `main`.** A
+rerun replays that run's own commit, whose pipeline targets the old app with the old
+`TalentGate-Staging` connection. That connection was disabled on 2026-09-28, so the deploy step
+fails instead of replacing the redirect with a live copy of the old site on the old database.
 
 `DB_PASSWORD`, `SECRET_KEY`, `AZURE_STORAGE_CONNECTION_STRING`, and all four `GRAPH_*` values are
 set as App Service application settings. Set them the same way if the App Service is ever rebuilt
