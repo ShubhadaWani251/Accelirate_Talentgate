@@ -841,7 +841,27 @@ def regrade_attempt(attempt, batch=None):
         new_result = Candidate.Result.FAIL
     else:
         new_result = graded_result(all_cleared, missed_by, cleared_count)
-    result_changed = candidate.result != new_result or candidate.overall_score != attempt.overall_score
+
+    # Only the LATEST attempt may set the candidate's result. An older one's section scores are
+    # still recomputed above - they are that attempt's own record and Candidate Details renders
+    # them - but its verdict is superseded and must not be written back.
+    #
+    # Without this, re-grading a batch walked every attempt and let whichever it touched last
+    # win. A candidate with an earlier TERMINATED attempt and a later clean pass was flipped to
+    # FAIL, because the terminated one pins FAIL unconditionally - so simply revising a cutoff
+    # silently failed somebody who had passed. Found on batch 443: one terminated 10/40, one
+    # submitted 34/40 with every section cleared, stored as pass, regraded to fail.
+    #
+    # -attempt_id matches serializers/candidates._latest_attempt, which is what every screen
+    # reads, so the result now follows the attempt the app actually shows.
+    is_latest = not (
+        ExamAttempt.objects
+        .filter(candidate_id=candidate.pk, attempt_id__gt=attempt.attempt_id)
+        .exists()
+    )
+    result_changed = is_latest and (
+        candidate.result != new_result or candidate.overall_score != attempt.overall_score
+    )
 
     if changed:
         attempt.save(update_fields=GRADED_FIELDS)

@@ -493,3 +493,112 @@ class TestLoweringACutoffTakesEffect:
         assert exam_session.regrade_attempt(attempt, batch) is False
         attempt.refresh_from_db()
         assert section_score(attempt, 'logical') is None
+
+
+class TestOnlyTheLatestAttemptSetsTheResult:
+    """Re-grading walked every attempt and let whichever it touched last win.
+
+    A candidate with an earlier TERMINATED attempt and a later clean pass was flipped to FAIL,
+    because a terminated attempt pins FAIL unconditionally. Revising a cutoff - the ordinary,
+    documented way to re-grade a batch - therefore silently failed somebody who had passed.
+
+    Found on real data: batch 443, one terminated 10/40 and one submitted 34/40 with every
+    section cleared, stored as pass, re-graded to fail.
+    """
+
+    def _second_attempt(self, bank, ta_user, first_attempt, candidate, correct, outcome):
+        """Another attempt for the SAME candidate, newer than the one they already have."""
+        batch = first_attempt.invitation.batch
+        invitation = Invitation.objects.create(
+            candidate=candidate, batch=batch,
+            unique_link_token=f'latest-{candidate.candidate_id}-{outcome}',
+            link_expired_at=timezone.now() + timedelta(days=1), sent_by=ta_user,
+        )
+        attempt = ExamAttempt.objects.create(
+            candidate=candidate, invitation=invitation,
+            status=ExamAttempt.Status.IN_PROGRESS, started_at=timezone.now(),
+        )
+        for key in SECTIONS:
+            for index, question in enumerate(bank[key]):
+                ExamAnswer.objects.create(
+                    attempt=attempt, question=question,
+                    selected_option='A' if index < correct[key] else 'B',
+                    answered_at=timezone.now(),
+                )
+        exam_session.finalize_attempt(
+            attempt, outcome=outcome, reason='tab_switch' if outcome != 'submitted' else None)
+        attempt.refresh_from_db()
+        candidate.refresh_from_db()
+        return attempt
+
+    def test_an_earlier_terminated_attempt_cannot_fail_a_later_pass(
+        self, bank, ta_user, make_batch, make_candidate, make_graded_attempt,
+    ):
+        # First sitting terminated on proctoring grounds, scoring almost nothing.
+        terminated, candidate = make_graded_attempt(
+            {'logical': 2, 'quantitative': 0, 'verbal': 0, 'programming': 0}, outcome='terminated')
+        # Second sitting clears everything.
+        self._second_attempt(
+            bank, ta_user, terminated, candidate,
+            {'logical': 9, 'quantitative': 9, 'verbal': 9, 'programming': 9}, 'submitted')
+        assert candidate.result == Candidate.Result.PASS
+
+        exam_session.regrade_batch(terminated.invitation.batch)
+
+        candidate.refresh_from_db()
+        assert candidate.result == Candidate.Result.PASS
+
+    def test_the_superseded_attempts_own_scores_are_still_recomputed(
+        self, bank, ta_user, make_batch, make_candidate, make_graded_attempt,
+    ):
+        """The older attempt is still that attempt's record, and Candidate Details renders it -
+        only its VERDICT is superseded, not its section scores.
+        """
+        terminated, candidate = make_graded_attempt(
+            {'logical': 4, 'quantitative': 4, 'verbal': 4, 'programming': 4}, outcome='terminated')
+        self._second_attempt(
+            bank, ta_user, terminated, candidate,
+            {'logical': 9, 'quantitative': 9, 'verbal': 9, 'programming': 9}, 'submitted')
+        batch = terminated.invitation.batch
+
+        # 4/10 was one short at 50%; at 40% it clears.
+        set_cutoff(batch, Decimal('40.00'), *SECTIONS)
+        exam_session.regrade_batch(batch)
+
+        assert section_score(terminated, 'logical').cleared is True
+
+    def test_the_latest_attempt_still_drives_the_result(
+        self, bank, ta_user, make_batch, make_candidate, make_graded_attempt,
+    ):
+        """The guard must not freeze the result - a cutoff change still has to move it."""
+        first, candidate = make_graded_attempt(
+            {'logical': 9, 'quantitative': 9, 'verbal': 9, 'programming': 9})
+        self._second_attempt(
+            bank, ta_user, first, candidate,
+            {'logical': 4, 'quantitative': 4, 'verbal': 4, 'programming': 4}, 'submitted')
+        batch = first.invitation.batch
+        candidate.refresh_from_db()
+        assert candidate.result == Candidate.Result.FAIL
+
+        set_cutoff(batch, Decimal('40.00'), *SECTIONS)
+        exam_session.regrade_batch(batch)
+
+        candidate.refresh_from_db()
+        assert candidate.result == Candidate.Result.PASS
+
+    def test_a_terminated_LATEST_attempt_still_pins_fail(
+        self, bank, ta_user, make_batch, make_candidate, make_graded_attempt,
+    ):
+        """The rule is "latest wins", not "terminated never counts" - a candidate whose most
+        recent sitting was terminated still fails.
+        """
+        first, candidate = make_graded_attempt(
+            {'logical': 9, 'quantitative': 9, 'verbal': 9, 'programming': 9})
+        self._second_attempt(
+            bank, ta_user, first, candidate,
+            {'logical': 9, 'quantitative': 9, 'verbal': 9, 'programming': 9}, 'terminated')
+
+        exam_session.regrade_batch(first.invitation.batch)
+
+        candidate.refresh_from_db()
+        assert candidate.result == Candidate.Result.FAIL
