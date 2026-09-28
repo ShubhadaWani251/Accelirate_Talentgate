@@ -7,9 +7,14 @@ import { extractErrorMessage } from '../../utils/passwordSchema';
 // Only the display name is asked for. The server derives section_key from it - that key is what
 // every score row, score filter and export column is keyed on, so it has to stay stable and is
 // not something an Admin should be picking by hand.
+//
+// The health threshold is not asked for either. It only tuned when the dashboard's Question Bank
+// Health panel calls a section under-stocked, which is advisory and blocks nothing - the real
+// gate is the per-batch question count, enforced at finalize. Asking for it made a number up
+// front for a warning nobody had seen yet, and per-section values would have contradicted that
+// panel's own "min. 50 active each" heading. Every section now uses the server's default.
 export default function AddSectionModal({ onClose, onCreated }) {
   const [name, setName] = useState('');
-  const [minRequired, setMinRequired] = useState(50);
   const [saving, setSaving] = useState(false);
 
   async function handleSave() {
@@ -19,14 +24,11 @@ export default function AddSectionModal({ onClose, onCreated }) {
     }
     setSaving(true);
     try {
-      const section = await questionApi.createSection({
-        section_name: name.trim(),
-        min_required_active: Number(minRequired) || 50,
-      });
+      const section = await questionApi.createSection({ section_name: name.trim() });
       toast.success(`"${section.section_name}" added.`);
       onCreated(section);
     } catch (err) {
-      toast.error(extractErrorMessage(err, ['section_name', 'min_required_active']));
+      toast.error(extractErrorMessage(err, ['section_name']));
     } finally {
       setSaving(false);
     }
@@ -51,21 +53,6 @@ export default function AddSectionModal({ onClose, onCreated }) {
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') handleSave(); }}
           />
-        </div>
-
-        <div className="field">
-          <label>Question Bank Health Threshold</label>
-          <input
-            type="number"
-            min={1}
-            value={minRequired}
-            onChange={(e) => setMinRequired(e.target.value)}
-          />
-          {/* Same meaning as every other section's threshold - the dashboard warns when a
-              section holds fewer active questions than this. */}
-          <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 4 }}>
-            The dashboard flags this section as under-stocked below this many active questions.
-          </div>
         </div>
 
         <div className="alert amber" style={{ textAlign: 'left', marginTop: 4 }}>
