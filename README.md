@@ -332,10 +332,12 @@ broken). The old hostname, `app-talentgate-staging.azurewebsites.net`, answers e
 a 307 to the same path on the new one, so links in emails sent before the move keep working. The
 old resource group stays untouched for a 7-day rollback window and is deleted after that.
 
-**Deploys fail until the identity's role assignment exists.** Granting a role takes Owner or User
-Access Administrator, which this project's maintainers don't hold, so a subscription Owner has to
-run the following once. Until then the deploy stage fails on authorization; builds and tests are
-unaffected.
+**Rebuilding the app means granting the identity's role again.** An Owner granted it on 2026-09-28
+with the command below; granting roles takes Owner or User Access Administrator, which this
+project's maintainers don't hold. Without it the deploy stage fails on authorization
+(`does not have authorization to perform action 'Microsoft.Web/sites/config/list/action'`) while
+builds and tests pass. The role belongs to the identity, not a person: in the portal's *Add role
+assignment*, choose **Managed identity** on the Members tab.
 
 ```bash
 az role assignment create --role "Website Contributor" \
@@ -343,10 +345,10 @@ az role assignment create --role "Website Contributor" \
   --scope /subscriptions/20bc5b3e-36db-4f0e-b0ef-6c66e3bac173/resourceGroups/AccelirateInternalProjects/providers/Microsoft.Web/sites/app-aptitude-stg-eastus
 ```
 
-**Don't rerun the deploy stage of a run from before the move.** A rerun replays that run's own
-commit, whose pipeline targets the old app with the old `TalentGate-Staging` connection. That
-connection still works there, so the rerun would replace the redirect with a live copy of the old
-site on the old database.
+**Don't rerun the deploy stage of a run from before the move; queue a new run from `main`.** A
+rerun replays that run's own commit, whose pipeline targets the old app with the old
+`TalentGate-Staging` connection. That connection was disabled on 2026-09-28, so the deploy step
+fails instead of replacing the redirect with a live copy of the old site on the old database.
 
 `DB_PASSWORD`, `SECRET_KEY`, `AZURE_STORAGE_CONNECTION_STRING`, and all four `GRAPH_*` values are
 set as App Service application settings. Set them the same way if the App Service is ever rebuilt
