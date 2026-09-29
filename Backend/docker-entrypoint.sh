@@ -10,7 +10,30 @@ echo "==> Applying database migrations"
 # Migrations run here rather than at image build time because they need the real database, which
 # only exists at runtime. On a multi-instance rollout this means several containers may race;
 # Django takes a lock per migration, so the losers no-op rather than double-apply.
-python manage.py migrate --noinput
+#
+# Retried for the reason startup.sh spells out in full: under `set -e` a single refused
+# connection ends this script, the app is never exec'd, and a database that would have been back
+# in seconds costs an outage lasting until a human intervenes. Here it also covers the ordinary
+# compose case of this container winning the race against the `db` service's first boot.
+# Each attempt is capped by DB_CONNECT_TIMEOUT (settings.py DATABASES), which is what keeps the
+# loop bounded. Exhausting the attempts still exits non-zero, so a genuinely broken migration
+# fails as loudly as it did before.
+migrate_attempts=${MIGRATE_MAX_ATTEMPTS:-5}
+migrate_delay=${MIGRATE_RETRY_DELAY:-5}
+migrate_attempt=1
+while true; do
+    # `if` rather than `&&`: a failure inside an if-condition does not trip `set -e`.
+    if python manage.py migrate --noinput; then
+        break
+    fi
+    if [ "$migrate_attempt" -ge "$migrate_attempts" ]; then
+        echo "entrypoint: migrate failed $migrate_attempts times, giving up" >&2
+        exit 1
+    fi
+    echo "entrypoint: migrate failed (attempt $migrate_attempt/$migrate_attempts), retrying in ${migrate_delay}s" >&2
+    migrate_attempt=$((migrate_attempt + 1))
+    sleep "$migrate_delay"
+done
 
 echo "==> Collecting static files"
 # Idempotent, and cheap when nothing changed. Kept at runtime rather than build time so that a

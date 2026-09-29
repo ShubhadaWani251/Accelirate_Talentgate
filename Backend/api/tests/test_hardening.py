@@ -405,3 +405,49 @@ class TestRefreshAlwaysShowsTheSameFriendlyMessage:
 
         assert response.status_code == 401
         assert response.data == {'detail': 'Session expired. Please log in again.'}
+
+
+class TestDatabaseConnectIsBounded:
+    """A connection attempt must fail fast rather than hang.
+
+    This is load-bearing for something not visible from Python at all: startup.sh and
+    docker-entrypoint.sh retry `migrate` so that a database which is briefly unreachable at boot
+    costs a short wait instead of a container that never starts serving. That retry is only
+    bounded because each attempt is. Without connect_timeout, libpq waits out the OS TCP timeout
+    - around 130s on Linux - whenever the host drops packets instead of refusing them, which is
+    what a managed-Postgres failover looks like from the client side. Five such attempts would
+    run past App Service's 230s container start limit and be killed mid-wait, which is strictly
+    worse than not retrying at all.
+
+    So this is not a test of Django; it is a test that the shell scripts' arithmetic still holds.
+
+    It reads config.settings directly rather than django.conf.settings, because this suite runs
+    under settings_test, which replaces DATABASES wholesale with SQLite to keep tests off the
+    shared Postgres. Asserting against the active settings would therefore assert against SQLite
+    and pass no matter what production does - the exact thing this needs to catch.
+    """
+
+    @staticmethod
+    def _production_db_options():
+        import config.settings
+
+        return config.settings.DATABASES['default']['OPTIONS']
+
+    def test_a_connect_timeout_is_configured(self):
+        assert 'connect_timeout' in self._production_db_options(), (
+            'startup.sh retries migrate on the assumption each attempt is capped; without '
+            'connect_timeout a single attempt can outlast the whole container start budget.'
+        )
+
+    def test_the_timeout_leaves_room_inside_the_container_start_limit(self):
+        """Worst case must stay under 230s with room for collectstatic and gunicorn's own boot."""
+        connect_timeout = int(self._production_db_options()['connect_timeout'])
+        # Mirrors the defaults in both scripts; see .env.example for the full arithmetic.
+        attempts, delay, django_boot = 5, 5, 3
+
+        worst_case = attempts * (connect_timeout + django_boot) + (attempts - 1) * delay
+
+        assert worst_case < 150, (
+            f'migrate retries could take {worst_case}s, too close to the 230s App Service '
+            f'container start limit once collectstatic and gunicorn are added'
+        )

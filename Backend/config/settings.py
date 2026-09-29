@@ -121,6 +121,15 @@ DATABASES = {
             # password and every candidate record on the wire in clear text. A local Postgres
             # without TLS configured needs DB_SSLMODE=disable set explicitly in .env.
             'sslmode': os.environ.get('DB_SSLMODE', 'require'),
+            # Caps how long ONE connection attempt may hang. Without it libpq waits for the OS
+            # TCP timeout - around 130s on Linux - whenever DB_HOST swallows packets instead of
+            # refusing them, which is what a managed-Postgres failover or a firewall change
+            # actually looks like from this side. That is the difference between a retry loop
+            # and a hang: startup.sh retries migrate, and unbounded attempts would push the
+            # container past App Service's 230s start limit and get it killed mid-retry, which
+            # no amount of retrying then recovers from. A request-time connect is bounded by
+            # this too, comfortably inside gunicorn's 120s worker timeout.
+            'connect_timeout': int(os.environ.get('DB_CONNECT_TIMEOUT', 10)),
         },
         # Reuse a connection for the ORM work inside one request (avoids paying a fresh TLS
         # handshake on every query in the same view). Between requests, api.middleware.
