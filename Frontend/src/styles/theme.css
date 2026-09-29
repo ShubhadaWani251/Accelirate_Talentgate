@@ -88,18 +88,10 @@ h1, h2, h3, h4, .brand, .btn, .box-label {
 }
 .app-nav .nav-left { display: flex; align-items: center; gap: 8px; }
 
-/* Back / Home controls - the wireframe's `.persistent-nav` spec: both are ordinary small
-   buttons, with Home carrying the same blue-to-indigo primary gradient it has there. */
+/* Back control - the wireframe's `.persistent-nav` spec, an ordinary small button. The Home
+   button it used to sit beside is gone: it went to the same place as the Dashboard link. */
 .btn.small { padding: 5px 13px; font-size: 11.5px; }
-.nav-back, .nav-home { white-space: nowrap; }
-.btn.primary.nav-home {
-  width: auto;
-  background: linear-gradient(135deg, var(--brand-blue) 0%, var(--indigo) 100%);
-  border-color: var(--indigo); color: #fff; box-shadow: 0 2px 6px rgba(57,73,166,.25);
-}
-.btn.primary.nav-home:hover:not(:disabled) {
-  filter: brightness(1.06); box-shadow: 0 4px 12px rgba(57,73,166,.4);
-}
+.nav-back { white-space: nowrap; }
 /* Pill-shaped tabs, per the wireframe's "Top nav buttons - highlighted, tab-like" spec. */
 .nav-links { display: flex; gap: 6px; align-items: center; font-size: 12px; }
 .nav-links span {
@@ -639,7 +631,7 @@ table.data-table tbody tr:hover td { background: var(--accent-soft); }
          grow back to something tappable. --- */
   .btn { min-height: 40px; padding: 10px 16px; }
   .btn.small { min-height: 38px; padding: 8px 14px; font-size: 12px; }
-  .nav-back, .nav-home, .nav-toggle { min-height: 38px; }
+  .nav-back, .nav-toggle { min-height: 38px; }
   .profile-trigger { min-height: 38px; padding: 6px; }
   .profile-menu .pitem { padding: 12px 14px; }
   .link-text { display: inline-block; padding: 4px 0; }

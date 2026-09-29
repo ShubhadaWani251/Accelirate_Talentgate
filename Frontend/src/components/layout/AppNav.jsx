@@ -66,11 +66,14 @@ export default function AppNav() {
     <nav className="app-nav">
       <div className="nav-left">
         {/* Meaningless on the dashboard itself - there's nothing to go back to that isn't
-            already one click away via Home. */}
+            already one click away in the links beside it. */}
         {!atHome && (
           <button className="btn small nav-back" onClick={handleBack}>← Back</button>
         )}
-        <button className="btn small primary nav-home" onClick={() => navigate(home)}>Home</button>
+        {/* No Home button: it navigated to ROLE_HOME, which is the exact destination the
+            Dashboard link below already has, so the bar opened with two differently-labelled
+            buttons doing the same thing. `home` itself is still needed - it decides when Back
+            is shown, and is where Back falls back to at the start of a session. */}
         {/* Visible only under 768px (CSS-driven), so desktop/tablet behaviour is unchanged. */}
         <button
           type="button"
