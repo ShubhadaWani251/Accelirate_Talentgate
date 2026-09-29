@@ -581,17 +581,22 @@ class TestInvitationEmailBody:
     def test_important_instructions_are_highlighted_red_in_the_html(
         self, ta_user, make_batch, make_candidate, make_invitation
     ):
-        """The two **marked** instructions (SEB is required, camera/mic must stay on) render as
-        bold red text in the HTML part - see email_templates._highlight_important. The
-        plain-text part can't show color at all, so this only checks the HTML alternative.
+        """The two rules candidates most often break - SEB is required, camera/mic must stay on
+        - are red in the HTML part, not ordinary body text.
+
+        The plain-text half marks them **important** for the same reason. The HTML is now a
+        hand-built layout (services/invitation_email_html.py) rather than generated from that
+        text, so the emphasis has to be asserted here or a redesign could quietly drop it.
         """
         invitation = make_invitation(make_candidate(make_batch(ta_user), ta_user), ta_user)
 
         invites.send_invite_and_record(invitation, 'https://exam.example.test')
 
         html = mail.outbox[0].alternatives[0][0]
-        assert '<strong style="color:#db001e;">Required: this assessment must be taken' in html
-        assert '<strong style="color:#db001e;">Your camera and microphone must remain enabled' in html
+        assert 'Required: this assessment must be taken inside Safe Exam Browser' in html
+        assert 'Your camera and microphone must remain enabled' in html
+        # Both sit in a red-toned note, not in the body colour.
+        assert html.count('#b3261e') >= 2
         assert '**' not in html
 
 
@@ -692,15 +697,15 @@ class TestTheAssessmentLinkComesAfterTheInstructions:
     def test_the_html_button_moves_with_it(
         self, ta_user, make_batch, make_candidate, make_invitation,
     ):
-        """text_body_to_html swaps the bare URL for the button IN PLACE, so the HTML part
-        follows the plain text automatically - asserted rather than assumed, since a candidate
-        reading the HTML part is the normal case and it is built by different code.
+        """The HTML half is its own layout now, so its ordering is a separate fact from the
+        plain text's and is asserted against its own landmarks: the rules come first, then the
+        call to action, then where to get help.
         """
         message, _invitation = self._body(ta_user, make_batch, make_candidate, make_invitation)
         html = message.alternatives[0][0]
 
-        assert html.index('Important Instructions') < html.index('Start Your Assessment')
-        assert html.index('Start Your Assessment') < html.index('Need Assistance')
+        assert html.index('During the Assessment') < html.index('Start Your Assessment &rarr;')
+        assert html.index('Start Your Assessment &rarr;') < html.index('Need Help?')
 
     def test_the_assessment_window_still_comes_first(
         self, ta_user, make_batch, make_candidate, make_invitation,

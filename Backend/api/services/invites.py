@@ -11,8 +11,9 @@ from django.utils import timezone
 from api.models import Batch, Candidate, Invitation
 from api.services.email_errors import EMAIL_SEND_ERRORS
 from api.services.email_templates import (
-    render_invitation_email, strip_monospace_fences, text_body_to_html,
+    invitation_values, render_invitation_email, strip_monospace_fences, text_body_to_html,
 )
+from api.services.invitation_email_html import render_invitation_html
 
 logger = logging.getLogger(__name__)
 
@@ -175,7 +176,7 @@ def summarize_send_error(exc):
 
 
 def send_candidate_email(subject, body, to_address, cta_url=None,
-                        cta_label='Start Your Assessment'):
+                        cta_label='Start Your Assessment', html_body=None):
     """Send one candidate-facing email as multipart text + HTML.
 
     Single seam for every candidate email (invitation, notifications, certification) so they
@@ -198,8 +199,13 @@ def send_candidate_email(subject, body, to_address, cta_url=None,
         from_email=settings.DEFAULT_FROM_EMAIL,
         to=[to_address],
     )
+    # html_body lets a caller supply its own designed HTML instead of the generated one. Only
+    # the invitation does: it walks a candidate through an eight-step setup, which is a layout
+    # problem rather than a prose one (see services/invitation_email_html.py). Everything else
+    # keeps a single plain-text source with its HTML derived from it, which is the cheaper
+    # arrangement whenever the content really is prose.
     message.attach_alternative(
-        text_body_to_html(body, cta_url=cta_url, cta_label=cta_label), 'text/html',
+        html_body or text_body_to_html(body, cta_url=cta_url, cta_label=cta_label), 'text/html',
     )
     # Matches the previous send_mail(fail_silently=False): callers rely on the exception to
     # mark an invitation FAILED rather than reporting a silent success.
@@ -230,10 +236,14 @@ def send_invite_email(invitation, base_url):
     subject, body = render_invitation_email(
         candidate, invitation, link, invitation.sent_by, seb_config_link, seb_config_zip_link,
     )
-    # cta_url turns the assessment link into a real button in the HTML part; the bare URL
-    # is still printed beneath it and in the plain-text part.
-    send_candidate_email(subject, body, candidate.email, cta_url=link,
-                        cta_label='Start Your Assessment')
+    # The invitation is the one email with its own designed HTML rather than HTML generated
+    # from its text - it is an eight-step setup guide, which is a layout. Both formats take
+    # their values from the same invitation_values call, so the window and the links in the
+    # two halves of this message cannot disagree.
+    html_body = render_invitation_html(invitation_values(
+        candidate, invitation, link, invitation.sent_by, seb_config_link, seb_config_zip_link,
+    ))
+    send_candidate_email(subject, body, candidate.email, html_body=html_body)
 
 
 def send_invite_and_record(invitation, base_url):

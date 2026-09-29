@@ -351,14 +351,29 @@ def render_invitation_email(candidate, invitation, link, sender=None, seb_config
     directly since - unlike link_valid_from - it is never null on an Invitation.
     """
     return INVITATION_TEMPLATE['subject'], INVITATION_TEMPLATE['body'].format(
-        name=candidate.full_name,
-        link=link,
-        seb_config_link=seb_config_link,
-        seb_config_zip_link=seb_config_zip_link,
-        start=format_datetime(invitation_opens_at(invitation)),
-        end=format_datetime(invitation.link_expired_at),
-        support_email=(sender.email if sender else None) or support_email(),
+        **invitation_values(candidate, invitation, link, sender, seb_config_link,
+                            seb_config_zip_link)
     )
+
+
+def invitation_values(candidate, invitation, link, sender=None, seb_config_link=None,
+                      seb_config_zip_link=None):
+    """Everything the invitation substitutes, resolved once.
+
+    Shared by the plain-text body and the designed HTML alternative
+    (services/invitation_email_html.py). The wording exists in both, which is the price of a
+    laid-out email - but the FACTS must not: a window or a link resolved separately for each
+    format is a window or a link that can disagree between them, in the same message.
+    """
+    return {
+        'name': candidate.full_name,
+        'link': link,
+        'seb_config_link': seb_config_link,
+        'seb_config_zip_link': seb_config_zip_link,
+        'start': format_datetime(invitation_opens_at(invitation)),
+        'end': format_datetime(invitation.link_expired_at),
+        'support_email': (sender.email if sender else None) or support_email(),
+    }
 
 
 # Everything a certification body may substitute. Anything else in braces is a typo, and has to
