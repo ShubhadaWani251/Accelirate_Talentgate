@@ -168,6 +168,38 @@ CERTIFICATION_TEMPLATE = {
 }
 
 
+# A drawing of the FRONT of an Aadhaar card, showing where the two things verification actually
+# needs - the number and the date of birth - sit on it. Candidates were photographing the back,
+# or a corner, or the card at an angle that cut the number off, and only found out after the
+# capture failed. A picture of the layout says it before they take the photo.
+#
+# Deliberately empty of data: every field is a placeholder, so this is a shape, not a specimen
+# of anybody's identity document.
+#
+# Fenced with MONOSPACE_FENCE so text_body_to_html renders it in a fixed-width font. Every line
+# is padded to the same width; in a proportional font the box would collapse into a zigzag.
+MONOSPACE_FENCE = '```'
+
+AADHAAR_LAYOUT_BLOCK = (
+    'What the front of the card looks like, and what must be readable:\n\n'
+    + MONOSPACE_FENCE + '\n'
+    '+------------------------------------------------+\n'
+    '|  [emblem]         Government of India          |\n'
+    '|                                                |\n'
+    '|  +------------+   Your Name                    |\n'
+    '|  |            |   Father / Mother : ...        |\n'
+    '|  |   photo    |   DOB : DD/MM/YYYY   <-- needed|\n'
+    '|  |            |                       [ QR ]   |\n'
+    '|  +------------+   Male / Female                |\n'
+    '|                                                |\n'
+    '|        XXXX  XXXX  1234   <-- needed           |\n'
+    '+------------------------------------------------+\n'
+    + MONOSPACE_FENCE + '\n\n'
+    'Both marked lines must be inside the photo and in focus. The first eight digits may be '
+    'masked; the last four cannot be.'
+)
+
+
 # The assessment invitation. Lives here with the rest of the candidate-facing copy rather than
 # inline in services/invites.py, so all approved wording is in one file.
 INVITATION_TEMPLATE = {
@@ -219,6 +251,7 @@ INVITATION_TEMPLATE = {
         'of birth both in frame and no glare. A masked card showing only the last 4 digits '
         '(XXXX XXXX 1234), such as an e-Aadhaar or DigiLocker download, is fine. If it is not '
         'read correctly, you can retake the photo as many times as needed.\n\n'
+        + AADHAAR_LAYOUT_BLOCK + '\n\n'
         '- Access the assessment only through the unique link at the end of this email. This '
         'link is exclusively assigned to you and must not be shared with anyone.\n\n'
         '- Use your registered email address to access the assessment. Only the invited '
@@ -520,6 +553,43 @@ def _cta_button(url, label):
     )
 
 
+def strip_monospace_fences(text):
+    """Drop the fence lines for the plain-text alternative.
+
+    They exist to tell the HTML builder which paragraph is a drawing. A plain-text client has
+    no use for them and would just show ``` above and below the Aadhaar card - and the drawing
+    is already fixed-width there, so nothing is lost by removing them.
+    """
+    return '\n'.join(
+        line for line in text.split('\n') if line.strip() != MONOSPACE_FENCE
+    )
+
+
+def _paragraph_html(paragraph):
+    """One plain-text paragraph as HTML, honouring a monospace fence.
+
+    A paragraph wrapped in MONOSPACE_FENCE lines is a drawing, not prose - the Aadhaar card
+    layout, whose lines are padded to equal width. Rendered in the body's proportional font it
+    collapses into a zigzag, so it goes into a <pre>. Word (which Outlook renders HTML mail
+    through) lays <pre> out properly, unlike the `white-space: pre-wrap` this function already
+    avoids elsewhere for exactly that reason.
+
+    font-size is dropped to 12px and the block is allowed to scroll: the card is 50 characters
+    wide, which overflows a phone at the body's own size.
+    """
+    fence = html_lib.escape(MONOSPACE_FENCE)
+    lines = paragraph.split('\n')
+    if len(lines) > 2 and lines[0].strip() == fence and lines[-1].strip() == fence:
+        drawing = '\n'.join(lines[1:-1])
+        return (
+            '<pre style="margin:0 0 16px 0;font-family:Consolas,Menlo,monospace;'
+            'font-size:12px;line-height:1.35;color:#333;background:#f6f7f9;'
+            'border:1px solid #e3e6ea;border-radius:6px;padding:12px;'
+            'overflow-x:auto;">' + drawing + '</pre>'
+        )
+    return f'<p style="margin:0 0 16px 0;">{paragraph.replace(chr(10), "<br>")}</p>'
+
+
 def text_body_to_html(text, cta_url=None, cta_label='Start Your Assessment'):
     """Build the HTML alternative for a plain-text email body.
 
@@ -556,10 +626,7 @@ def text_body_to_html(text, cta_url=None, cta_label='Start Your Assessment'):
     # signature) becomes <br> rather than starting a new <p>. Consecutive blank lines would
     # otherwise produce empty <p></p> spacers, so those are dropped.
     paragraphs = [p for p in body.split('\n\n') if p.strip('\n')]
-    body_html = ''.join(
-        f'<p style="margin:0 0 16px 0;">{p.replace(chr(10), "<br>")}</p>'
-        for p in paragraphs
-    )
+    body_html = ''.join(_paragraph_html(p) for p in paragraphs)
 
     # Body and card share the same white background on purpose: a lighter shade behind a
     # narrower centered card (the previous #f6f7f9/#ffffff split) reads fine in a client that

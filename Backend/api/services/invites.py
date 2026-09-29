@@ -10,7 +10,9 @@ from django.utils import timezone
 
 from api.models import Batch, Candidate, Invitation
 from api.services.email_errors import EMAIL_SEND_ERRORS
-from api.services.email_templates import render_invitation_email, text_body_to_html
+from api.services.email_templates import (
+    render_invitation_email, strip_monospace_fences, text_body_to_html,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -188,7 +190,11 @@ def send_candidate_email(subject, body, to_address, cta_url=None,
     """
     message = EmailMultiAlternatives(
         subject=subject,
-        body=body,
+        # The fences are a marker for the HTML builder (see email_templates._paragraph_html),
+        # not something a reader should see - a plain-text client would otherwise show ``` on
+        # its own line above and below the Aadhaar card drawing. The drawing itself needs no
+        # help in plain text: it is already monospaced there.
+        body=strip_monospace_fences(body),
         from_email=settings.DEFAULT_FROM_EMAIL,
         to=[to_address],
     )
