@@ -40,9 +40,7 @@ def html():
 
 
 class TestEveryFactReachesTheCandidate:
-    @pytest.mark.parametrize('key', [
-        'name', 'link', 'seb_config_link', 'seb_config_zip_link', 'start', 'end', 'support_email',
-    ])
+    @pytest.mark.parametrize('key', ['name', 'link', 'start', 'end', 'support_email'])
     def test_the_value_appears(self, html, key):
         assert VALUES[key] in html
 
@@ -50,9 +48,21 @@ class TestEveryFactReachesTheCandidate:
         """A candidate opening this in SEB must be able to click, not copy out of prose."""
         assert f'href="{VALUES["link"]}"' in html
 
-    def test_both_seb_links_are_anchors(self, html):
-        assert f'href="{VALUES["seb_config_link"]}"' in html
-        assert f'href="{VALUES["seb_config_zip_link"]}"' in html
+    def test_the_seb_configuration_links_are_deliberately_not_here(self, html):
+        """They live on the assessment page instead - ExamSebChoice.jsx renders both.
+
+        Pinned as an absence because the obvious "fix" on reading step 2 is to paste them back:
+        it mentions a configuration file and then does not link it. The reasoning is that the
+        email reaches a candidate before SEB is installed, which is the one moment those URLs
+        are useless, and they were the bulk of the longest step in the message. Re-adding them
+        here would put the same two URLs in two places and make this step long again.
+        """
+        assert VALUES['seb_config_link'] not in html
+        assert VALUES['seb_config_zip_link'] not in html
+
+    def test_the_candidate_is_still_told_where_the_configuration_file_is(self, html):
+        """Removing the links must not leave "install SEB" with no next step."""
+        assert 'configuration file is offered on the assessment page' in html
 
     def test_the_support_address_is_mailto(self, html):
         assert f'href="mailto:{VALUES["support_email"]}"' in html
@@ -77,8 +87,7 @@ class TestItAgreesWithThePlainTextHalf:
         values = invitation_values(candidate, invitation, link, ta_user, seb, seb_zip)
         return text, render_invitation_html(values), values
 
-    @pytest.mark.parametrize('key', ['link', 'seb_config_link', 'seb_config_zip_link',
-                                     'start', 'end', 'support_email'])
+    @pytest.mark.parametrize('key', ['link', 'start', 'end', 'support_email'])
     def test_the_same_value_is_in_both_halves(self, both, key):
         text, html, values = both
 
@@ -114,12 +123,19 @@ class TestItSurvivesRealEmailClients:
         """
         assert '<img' not in html
 
-    def test_outlook_gets_a_real_table_for_the_two_column_band(self, html):
-        """inline-block wraps on a phone and is ignored by Word, so Outlook is handed a table
-        through conditional comments instead.
+    def test_no_panel_is_laid_out_in_columns(self, html):
+        """Every step is full width, so nothing depends on a fixed pixel column.
+
+        A column in email can only be a fixed width - Gmail strips media queries - which meant
+        ~300px of text on a phone and a reading order that ran 1, 3, 2, 4 down the page. The
+        inline-block/MSO machinery that made columns work at all went with them, so there is now
+        one layout rather than two that had to agree.
         """
-        assert '<!--[if mso]>' in html
-        assert 'display:inline-block' in html
+        assert 'display:inline-block' not in html
+        assert 'max-width:308px' not in html
+
+    def test_every_panel_is_full_width(self, html):
+        assert 'width:100%' in html
 
     def test_colour_is_set_by_attribute_as_well_as_css(self, html):
         """Word honours bgcolor and ignores some CSS background shorthands."""
@@ -155,3 +171,61 @@ class TestEscaping:
         """
         assert '&amp;amp;' not in html
         assert 'Install &amp; Open Safe Exam Browser' in html
+
+
+class TestThePaletteMatchesTheApp:
+    """The email's colours must be the app's colours, not a near-miss of them.
+
+    This is asserted against Frontend/src/styles/theme.css directly, because nothing else can:
+    no email client resolves CSS variables, so the values have to be duplicated as literals here,
+    and duplicated constants drift silently. They already had - every one of navy, ink, muted,
+    line, blue, green, amber and red sat a shade off the app's own, which is the kind of thing
+    nobody sees in isolation and everybody feels when the email and the first screen are open
+    side by side.
+    """
+
+    @staticmethod
+    def _theme_variables():
+        import re
+        from pathlib import Path
+
+        theme = (Path(__file__).resolve().parents[3]
+                 / 'Frontend' / 'src' / 'styles' / 'theme.css')
+        if not theme.is_file():
+            pytest.skip('Frontend/src/styles/theme.css not present in this checkout')
+        return dict(re.findall(r'(--[a-z-]+):\s*(#[0-9a-fA-F]{3,8})\s*;', theme.read_text()))
+
+    @pytest.mark.parametrize('constant, variable', [
+        ('NAVY', '--brand-navy'),
+        ('INK', '--text'),
+        ('MUTED', '--muted'),
+        # --line-soft, not --line: panel edges are the soft weight in the app too.
+        ('LINE', '--line-soft'),
+        # --brand-blue-dark, not --brand-blue: this colours text on white.
+        ('BLUE', '--brand-blue-dark'),
+        ('GREEN', '--green'),
+        ('AMBER', '--amber'),
+        # theme.css aliases --red to --brand-red-dark, which a hex-only parse cannot follow.
+        ('RED', '--brand-red-dark'),
+    ])
+    def test_the_constant_matches_its_theme_variable(self, constant, variable):
+        from api.services import invitation_email_html
+
+        theme = self._theme_variables()
+        assert variable in theme, f'{variable} is gone from theme.css'
+
+        assert getattr(invitation_email_html, constant).lower() == theme[variable].lower()
+
+    @pytest.mark.parametrize('tone, variable', [
+        ('blue', '--accent-soft'),
+        ('green', '--green-bg'),
+        ('amber', '--amber-bg'),
+        ('red', '--red-bg'),
+    ])
+    def test_the_note_tints_match_too(self, tone, variable):
+        """A red warning here should be the red the exam screens use, not a similar one."""
+        from api.services.invitation_email_html import _STEP_TONES
+
+        theme = self._theme_variables()
+
+        assert _STEP_TONES[tone][0].lower() == theme[variable].lower()

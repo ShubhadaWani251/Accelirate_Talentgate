@@ -545,38 +545,44 @@ class TestInvitationEmailBody:
 
         assert 'shared-inbox@accelirate.com' in mail.outbox[0].body
 
-    def test_the_seb_config_link_is_a_real_clickable_anchor_in_the_html(
+    def test_neither_part_carries_the_seb_config_links_any_more(
         self, ta_user, make_batch, make_candidate, make_invitation
     ):
-        """A plain https:// URL, not the seb:// launch scheme - see
-        render_invitation_email's own docstring for why only this one is safe to put in an
-        email. _linkify auto-links any bare https:// URL in the body, so this needs no special
-        cta_url-style handling to become clickable.
+        """Both halves agree that these belong on the assessment page, not in the email.
+
+        ExamSebChoice.jsx offers the configuration file and its zip fallback at the point the
+        candidate can actually use them - after SEB is installed. Carrying them here as well put
+        the same two URLs in two places, at the one moment they are useless. Asserted across both
+        parts together because the failure that matters is them coming back in only one, which
+        would hand the same candidate two different sets of instructions.
         """
         invitation = make_invitation(make_candidate(make_batch(ta_user), ta_user), ta_user)
 
         invites.send_invite_and_record(invitation, 'https://exam.example.test')
 
-        expected_url = (
+        config_url = (
             'https://exam.example.test/api/exam/token/%s/seb-config/'
             % invitation.unique_link_token
         )
         html = mail.outbox[0].alternatives[0][0]
-        assert f'<a href="{expected_url}"' in html
+
+        assert config_url not in html
+        assert config_url not in mail.outbox[0].body
+        # The seb:// launch scheme was never safe to put in an email and still is not - see
+        # render_invitation_email's docstring.
         assert 'seb://' not in html
 
-    def test_the_seb_config_link_survives_in_the_plain_text_part(
+    def test_both_parts_still_say_where_the_configuration_file_is(
         self, ta_user, make_batch, make_candidate, make_invitation
     ):
+        """Dropping the links must not leave "install SEB" as a step with no ending."""
         invitation = make_invitation(make_candidate(make_batch(ta_user), ta_user), ta_user)
 
         invites.send_invite_and_record(invitation, 'https://exam.example.test')
 
-        expected_url = (
-            'https://exam.example.test/api/exam/token/%s/seb-config/'
-            % invitation.unique_link_token
-        )
-        assert expected_url in mail.outbox[0].body
+        assert 'configuration file is offered on the assessment page' in (
+            mail.outbox[0].alternatives[0][0])
+        assert 'assessment page offers your configuration file' in mail.outbox[0].body
 
     def test_important_instructions_are_highlighted_red_in_the_html(
         self, ta_user, make_batch, make_candidate, make_invitation
@@ -592,11 +598,15 @@ class TestInvitationEmailBody:
 
         invites.send_invite_and_record(invitation, 'https://exam.example.test')
 
+        from api.services.invitation_email_html import RED
+
         html = mail.outbox[0].alternatives[0][0]
         assert 'Required: this assessment must be taken inside Safe Exam Browser' in html
         assert 'Your camera and microphone must remain enabled' in html
-        # Both sit in a red-toned note, not in the body colour.
-        assert html.count('#b3261e') >= 2
+        # Both sit in a red-toned note, not in the body colour. Read from the constant rather
+        # than hardcoded: this test is about the emphasis surviving, not about which red it is.
+        # Which red it is belongs to test_invitation_html's palette check against theme.css.
+        assert html.count(RED) >= 2
         assert '**' not in html
 
 

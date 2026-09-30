@@ -27,29 +27,38 @@ grid, no `white-space`, and drops `border-radius`. So:
     image-built version of this design arrives as a column of empty boxes for a large share of
     candidates. Drawn in HTML, it looks the same for everybody, needs no hosting, and cannot be
     broken by a blocked request.
-  * The two-column band uses the fluid-hybrid pattern: inline-block divs that wrap naturally on
-    a phone, with MSO conditional comments giving Outlook a real table to lay out instead. The
-    parent sets font-size:0 to kill the whitespace gap between inline-block children.
+  * Every panel is full width, one per step, stacked in step order. There is deliberately no
+    multi-column band: a column here can only be a fixed pixel width (no media queries - Gmail
+    strips them), which reads as a cramped ~300px of text on a phone, and it breaks the top-to-
+    bottom reading order that numbered steps depend on.
 """
 
 import html as html_lib
 
-# Palette. Kept together so a change is one edit rather than a search through string literals.
-NAVY = '#14213d'
-INK = '#1c1e21'
-MUTED = '#5f6b7a'
-LINE = '#e3e6ea'
-BLUE = '#0b5cab'
-GREEN = '#1a7f37'
-AMBER = '#9a6700'
-RED = '#b3261e'
+# Palette, taken from Frontend/src/styles/theme.css so this email and the screens a candidate
+# lands on immediately afterwards are recognisably one product. The comment on each line names
+# the variable it mirrors; these are literals because no email client resolves CSS variables.
+# Values previously drifted a shade off the app's own on every one of these.
+NAVY = '#0b1f4d'   # --brand-navy
+INK = '#23272b'    # --text
+MUTED = '#6b7280'  # --muted
+LINE = '#d7dce2'   # --line-soft, deliberately not --line: these are panel edges, which in the
+                   # app are the soft weight; --line (#9aa1a9) is for hard dividers and reads
+                   # as a heavy box around every step here.
+BLUE = '#0b63b8'   # --brand-blue-dark, deliberately not --brand-blue: this colours text and
+                   # links on white, where the brighter #1289e8 is uncomfortably low-contrast.
+GREEN = '#276b46'  # --green
+AMBER = '#9a7b1f'  # --amber
+RED = '#a80017'    # --red, which theme.css aliases to --brand-red-dark
 
+# Tints are the app's own *-bg variables, so a red warning here is the red a candidate will see
+# on the exam screens rather than a near-miss of it.
 _STEP_TONES = {
-    'blue': ('#eef4fc', BLUE),
-    'green': ('#edf7f0', GREEN),
-    'amber': ('#fdf6e6', AMBER),
-    'red': ('#fdeeec', RED),
-    'grey': ('#f5f6f8', NAVY),
+    'blue': ('#e6f2fd', BLUE),    # --accent-soft
+    'green': ('#e4f2e9', GREEN),  # --green-bg
+    'amber': ('#fbf3dd', AMBER),  # --amber-bg
+    'red': ('#fce9eb', RED),      # --red-bg
+    'grey': ('#f5f6f8', NAVY),    # no theme equivalent - a neutral panel tint
 }
 
 FONT = 'Segoe UI,Helvetica,Arial,sans-serif'
@@ -125,28 +134,6 @@ def _spacer(height=14):
     return f'<div style="height:{height}px;line-height:{height}px;font-size:0;">&nbsp;</div>'
 
 
-def _two_columns(left, right):
-    """Side by side on a desktop, stacked on a phone.
-
-    inline-block wraps by itself when the screen is narrower than both columns, which needs no
-    media query - Gmail strips those. Outlook ignores inline-block entirely, so the MSO comments
-    hand it a real two-cell table instead.
-    """
-    return (
-        '<div style="font-size:0;">'
-        '<!--[if mso]><table role="presentation" width="640" cellpadding="0" cellspacing="0" '
-        'border="0"><tr><td width="308" valign="top"><![endif]-->'
-        '<div style="display:inline-block;width:100%;max-width:308px;vertical-align:top;">'
-        f'{left}</div>'
-        '<!--[if mso]></td><td width="24">&nbsp;</td><td width="308" valign="top"><![endif]-->'
-        '<div style="display:inline-block;width:24px;">&nbsp;</div>'
-        '<div style="display:inline-block;width:100%;max-width:308px;vertical-align:top;">'
-        f'{right}</div>'
-        '<!--[if mso]></td></tr></table><![endif]-->'
-        '</div>'
-    )
-
-
 def _aadhaar_card_mock():
     """The front of an Aadhaar card, drawn in table cells.
 
@@ -154,47 +141,68 @@ def _aadhaar_card_mock():
     this second construction. It marks the two fields verification reads and carries no real
     identity data: every value is a placeholder.
     """
-    stripe = (
-        f'<tr><td bgcolor="#ff9933" style="background:#ff9933;height:5px;line-height:5px;'
-        f'font-size:0;">&nbsp;</td></tr>'
-        f'<tr><td bgcolor="#138808" style="background:#138808;height:5px;line-height:5px;'
-        f'font-size:0;">&nbsp;</td></tr>'
+    # A saffron band with the wording in it, rather than a thin stripe above separate grey text.
+    # The real card leads with that band, and it is most of what makes this readable as a card at
+    # a glance instead of a shaded strip.
+    header = (
+        f'<tr><td bgcolor="#ff9933" style="background:#ff9933;padding:6px 12px;'
+        f'font-family:{FONT};font-size:10.5px;font-weight:700;color:#ffffff;'
+        f'letter-spacing:.3px;">Government of India</td></tr>'
     )
     photo = (
-        f'<td width="52" valign="top" style="width:52px;">'
+        f'<td width="58" valign="top" style="width:58px;">'
         + _table(
-            f'<tr><td height="62" bgcolor="#eef0f3" style="background:#eef0f3;height:62px;'
-            f'border:1px solid {LINE};border-radius:4px;text-align:center;font-family:{FONT};'
+            # Portrait, near the 3:4 of the real photo box - a square read as an avatar.
+            f'<tr><td height="72" bgcolor="#eef0f3" style="background:#eef0f3;height:72px;'
+            f'border:1px solid {LINE};text-align:center;font-family:{FONT};'
             f'font-size:9px;color:{MUTED};">photo</td></tr>',
-            width='52', style='width:52px;',
+            width='58', style='width:58px;',
         )
         + '</td>'
     )
     fields = (
         f'<td valign="top" style="padding-left:10px;font-family:{FONT};font-size:11px;'
-        f'color:{MUTED};line-height:1.6;">'
+        f'color:{INK};line-height:1.7;">'
         f'Your Name<br>'
         f'<span style="color:{RED};font-weight:700;">DOB : DD/MM/YYYY</span><br>'
-        f'Male / Female'
+        f'<span style="color:{MUTED};">Male / Female</span>'
         f'</td>'
     )
+    body = _table(f'<tr>{photo}{fields}</tr>', width='100%', style='width:100%;')
+    # The number sits on its own band across the foot of the card, which is where the real one is
+    # and what makes the layout recognisable rather than just a bordered box of text.
     number = (
-        f'<tr><td colspan="2" style="padding-top:8px;text-align:center;'
-        f'font-family:Consolas,Menlo,monospace;font-size:15px;letter-spacing:2px;'
-        f'font-weight:700;color:{RED};">XXXX XXXX 1234</td></tr>'
+        f'<tr><td bgcolor="#f7f8fa" style="background:#f7f8fa;border-top:1px solid {LINE};'
+        f'padding:7px 12px;text-align:center;font-family:Consolas,Menlo,monospace;'
+        f'font-size:15px;letter-spacing:2px;font-weight:700;color:{RED};">'
+        f'XXXX XXXX 1234</td></tr>'
     )
-    body = _table(
-        f'<tr>{photo}{fields}</tr>{number}',
-        width='100%', style='width:100%;',
+    footer_stripe = (
+        f'<tr><td bgcolor="#138808" style="background:#138808;height:5px;line-height:5px;'
+        f'font-size:0;">&nbsp;</td></tr>'
     )
-    return _table(
-        stripe
-        + f'<tr><td style="padding:10px 12px 12px;font-family:{FONT};font-size:10px;'
-          f'color:{MUTED};text-align:center;">Government of India</td></tr>'
-          f'<tr><td style="padding:0 12px 12px;">{body}</td></tr>',
-        width='100%',
-        style=f'width:100%;border:1px solid {LINE};border-radius:8px;background:#ffffff;',
+    # Fixed 320px and centred, NOT full width. A card that stretches to the panel is a strip, not
+    # a card - the shape is most of the recognition, so it is pinned to roughly the real card's
+    # 1.6:1 proportions and stays there however wide the panel gets.
+    #
+    # The width is given twice on purpose. The `width` ATTRIBUTE is what Outlook uses, since Word
+    # ignores max-width; the CSS `width:100%;max-width:320px` is what every other client uses, and
+    # is what keeps the card inside a 375px phone, where the panel's own padding leaves it well
+    # under 320px to work with. align=center is the only centring Word honours.
+    card = _table(
+        header + f'<tr><td style="padding:12px;">{body}</td></tr>' + number + footer_stripe,
+        width='320', align='center',
+        # text-align:left stops the centring wrapper below from cascading into the card. Without
+        # it the name, date of birth and gender centre themselves in their cell and float away
+        # from the photo they belong beside - which is not how the document looks, and the whole
+        # point of drawing it is that a candidate recognises their own card in it. The number
+        # sets its own centring explicitly, so it is unaffected.
+        style=f'width:100%;max-width:320px;border:1px solid {LINE};background:#ffffff;'
+              f'text-align:left;',
     )
+    # Wrapped because align="center" on the table is what Word honours, and this is what
+    # everything else honours.
+    return f'<div style="text-align:center;">{card}</div>'
 
 
 def render_invitation_html(values):
@@ -261,16 +269,17 @@ def render_invitation_html(values):
                 'It is free, and it stops other applications and notifications reaching you '
                 'during the exam.', 'red')
         + _spacer(10)
+        # The two per-candidate configuration links that used to sit here are gone deliberately.
+        # The assessment page offers both of them itself (ExamSebChoice.jsx renders the config
+        # file and the zip fallback), so carrying them in the email duplicated the same URLs at
+        # the point a candidate can least act on them - before SEB is even installed - and made
+        # this the longest step in the message. They are still reachable, one step later, where
+        # the candidate is already in front of the thing that uses them.
         + _lines([
             'Download and install it from ' + _link('https://safeexambrowser.org/download_en.html'),
-            'Then open your configuration link:<br>' + _link(values['seb_config_link']),
+            'Your configuration file is offered on the assessment page itself when you open '
+            'your link in step 6 - there is nothing to download from this email.',
         ], marker='&#8227;', colour=BLUE)
-        + _note(
-            'If that download is blocked by your browser or IT security software, use the ZIP '
-            'version instead, extract it, and open the .seb file inside:<br>'
-            + _link(values['seb_config_zip_link']),
-            'amber',
-        )
     )
 
     step_aadhaar = _card(
@@ -360,16 +369,26 @@ def render_invitation_html(values):
         f'Accelirate Softech Pvt. Ltd.</div>'
     )
 
+    # One full-width panel per step, in step order, with an even gap between each.
+    #
+    # This replaced a two-column band for steps 1-4 and 7-8. Side by side, each panel was capped
+    # at 308px, so text that reads as a short line on a desktop preview wrapped to five or six on
+    # a phone, and the numbered steps no longer ran top to bottom - 1 and 3 were in the left
+    # column while 2 and 4 sat to their right, which is the wrong reading order for something
+    # whose whole structure is "do these in order". Full width also drops the fluid-hybrid
+    # inline-block/MSO machinery the columns needed, so there is one layout to get right instead
+    # of two that had to agree.
     content = (
         header + _spacer(18)
         + window_banner + _spacer(16)
-        + _two_columns(step_prepare + _spacer(16) + step_aadhaar,
-                       step_seb + _spacer(16) + step_camera)
-        + _spacer(16)
+        + step_prepare + _spacer(16)
+        + step_seb + _spacer(16)
+        + step_aadhaar + _spacer(16)
+        + step_camera + _spacer(16)
         + step_rules + _spacer(16)
         + step_start + _spacer(16)
-        + _two_columns(step_timing, step_help)
-        + _spacer(20)
+        + step_timing + _spacer(16)
+        + step_help + _spacer(20)
         + footer
     )
 
