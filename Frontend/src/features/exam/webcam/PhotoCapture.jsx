@@ -2,6 +2,19 @@ import { useEffect, useRef, useState } from 'react';
 import { isBlockedFrame, statsFromVideo } from './frameCheck';
 import { beginNativeDialog } from '../proctoring/nativeDialogGuard';
 
+// Mirrors the server's own allowlist and size cap exactly - Backend/api/services/
+// image_validation.py (ALLOWED_IMAGE_CONTENT_TYPES | ALLOWED_DOCUMENT_CONTENT_TYPES, and
+// MAX_PHOTO_SIZE_BYTES). That file stays the security boundary; this is only here so a candidate
+// finds out before an upload rather than after one. Keep the two in step: anything accepted here
+// and refused there is a candidate told "fine" and then "no".
+//
+// The `accept` attribute alone does not do this job. It filters what the file picker shows by
+// default, but every OS picker offers an "All Files" escape, so an unsupported file reached the
+// server and came back as a failed upload with no clear reason - which is exactly what this
+// catches now.
+const UPLOAD_CONTENT_TYPES = ['image/jpeg', 'image/png', 'application/pdf'];
+const UPLOAD_MAX_BYTES = 5 * 1024 * 1024;
+
 // Live camera preview + a snapshot-to-Blob capture button. Used twice on the identity-capture
 // screen (Aadhaar Card, then live face) sharing the same underlying stream.
 //
@@ -29,7 +42,7 @@ export default function PhotoCapture({
   captureBlocked, allowUpload,
 }) {
   const videoRef = useRef(null);
-  const [blankError, setBlankError] = useState('');
+  const [captureError, setCaptureError] = useState('');
   const [previewUrl, setPreviewUrl] = useState(null);
   // Holds the current native-dialog end() between the upload input's onClick (which opens it)
   // and whichever of onChange/window-focus resolves it first - see nativeDialogGuard.js.
@@ -61,13 +74,13 @@ export default function PhotoCapture({
     // could open the shutter to pass that check and close it again before capturing, leaving the
     // TA with two black rectangles as their only identity evidence.
     if (isBlockedFrame(statsFromVideo(video))) {
-      setBlankError(
+      setCaptureError(
         'No image is coming through - please open your camera\'s privacy shutter (or remove any '
         + 'cover over the lens) and capture again.'
       );
       return;
     }
-    setBlankError('');
+    setCaptureError('');
 
     const canvas = document.createElement('canvas');
     canvas.width = video.videoWidth || 640;
@@ -81,7 +94,7 @@ export default function PhotoCapture({
   function retake() {
     // Clearing the blob swings this card back to the live preview; the parent holds the state,
     // so nothing is uploaded until Start Exam is pressed and a retake costs nothing.
-    setBlankError('');
+    setCaptureError('');
     onCapture(null);
   }
 
@@ -156,14 +169,40 @@ export default function PhotoCapture({
               endUploadDialogRef.current?.();
               endUploadDialogRef.current = null;
               const file = e.target.files?.[0];
+              // Reset before validating, so picking the same file twice still fires onChange -
+              // a candidate who fixes nothing and retries should see the message again, not
+              // silence.
               e.target.value = '';
-              if (file) onCapture(file);
+              if (!file) return;
+
+              // Named rather than just "invalid file": a candidate looking at their own file
+              // manager needs to know which of their files is the problem and what to pick
+              // instead. A bare "upload failed" leaves them retrying the same document.
+              if (!UPLOAD_CONTENT_TYPES.includes(file.type)) {
+                setCaptureError(
+                  `"${file.name}" is not a supported file. Please upload a JPG or PNG image, `
+                  + 'or your official e-Aadhaar PDF.'
+                );
+                return;
+              }
+              if (file.size > UPLOAD_MAX_BYTES) {
+                // Phone cameras clear 5MB routinely, so this is the likelier of the two to be
+                // hit by somebody doing nothing wrong - hence the second way out.
+                const mb = (file.size / (1024 * 1024)).toFixed(1);
+                setCaptureError(
+                  `"${file.name}" is ${mb}MB, and the limit is 5MB. Please upload a smaller `
+                  + 'file, or photograph the card with your camera instead.'
+                );
+                return;
+              }
+              setCaptureError('');
+              onCapture(file);
             }}
           />
         </div>
       )}
 
-      {blankError && <div className="alert error" style={{ marginTop: 8 }}>{blankError}</div>}
+      {captureError && <div className="alert error" style={{ marginTop: 8 }}>{captureError}</div>}
 
       <div className="btn-row" style={{ marginTop: 10, display: 'flex', gap: 8 }}>
         {captured ? (
