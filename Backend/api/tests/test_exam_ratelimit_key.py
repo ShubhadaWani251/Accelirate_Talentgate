@@ -28,6 +28,26 @@ from api.utils.net import ratelimit_attempt_key, ratelimit_token_key
 pytestmark = pytest.mark.django_db
 
 
+@pytest.fixture(autouse=True)
+def fixed_ratelimit_window(monkeypatch):
+    """Holds django-ratelimit's time window still for the duration of each test.
+
+    The counter's cache key embeds the window that `django_ratelimit.core._get_window` derives
+    from `int(time.time())`. A burst that straddles a window edge therefore starts counting from
+    zero again part-way through, and the request that should have been the one over the limit is
+    allowed instead. Both burst tests below send 10 and 30 requests expecting the next to be
+    refused, so both were a coin toss against wherever the clock happened to be: they passed all
+    day locally and failed on CI at the "31st upload is refused" assertion.
+
+    Pinning the window rather than the clock keeps the patch to the single function whose result
+    these tests depend on, and leaves everything else measuring real time. Safe against counts
+    leaking between tests because conftest's clear_cache empties the cache around each one.
+    """
+    from django_ratelimit import core
+
+    monkeypatch.setattr(core, '_get_window', lambda value, period: 2_000_000_000)
+
+
 def _invitation(ta_user, make_batch, make_candidate, make_invitation):
     batch = make_batch(ta_user, logical_questions=0, quantitative_questions=0,
                        verbal_questions=0, programming_questions=0)
