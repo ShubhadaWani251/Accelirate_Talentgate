@@ -310,8 +310,22 @@ def render_invitation_html(values):
         ])
     )
 
+    # Two red notes bracket the bullets rather than joining them, because both carry a
+    # consequence the bullets do not: what is being watched, and what happens when it sees
+    # something. A candidate who learns either of these for the first time mid-exam has a
+    # worse experience than one told here, and a termination nobody warned them about is the
+    # complaint this panel exists to prevent.
     step_rules = _card(
         _step_heading(5, 'During the Assessment', 'amber')
+        + _note(
+            '<b>This assessment is AI-proctored.</b> Your camera and microphone are monitored '
+            'for the whole assessment. Talking, looking away from the screen for a sustained '
+            'period, another person appearing on camera, a phone or second screen in view, '
+            'leaving the assessment window, and your face leaving the frame are all detected '
+            'automatically.',
+            'red',
+        )
+        + _spacer(10)
         + _lines([
             'Take the assessment alone and without assistance',
             'Do not share your assessment link with anyone',
@@ -320,6 +334,21 @@ def render_invitation_html(values):
             'Complete it in one uninterrupted session',
             'Submit before the window closes - it cannot be resumed afterwards',
         ], marker='&#8227;', colour=AMBER)
+        # MAX_WARNINGS in services/exam_session.py. Stated as "the fourth ends it" rather than
+        # "three strikes" because those are different rules and a candidate on their third
+        # warning needs to know which one they are under. The keyboard shortcuts are called out
+        # separately because they are NOT in WARNABLE_REASONS - they end an attempt outright,
+        # and somebody who believed they had warnings in hand would be wrong about that.
+        + _note(
+            # "Your fourth violation", not "anything above": the bullets include things that are
+            # not detectable events at all (sharing your link), so counting them would promise a
+            # rule the server does not actually run. Violation is the system's own term for what
+            # it records against an attempt.
+            '<b>You are allowed three warnings.</b> Your fourth violation ends the assessment '
+            'immediately and submits your answers as they are. Print Screen, F12 and Ctrl+U '
+            'are never warned - they end it the first time.',
+            'red',
+        )
     )
 
     step_start = _card(

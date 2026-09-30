@@ -229,3 +229,68 @@ class TestThePaletteMatchesTheApp:
         theme = self._theme_variables()
 
         assert _STEP_TONES[tone][0].lower() == theme[variable].lower()
+
+
+class TestTheProctoringRulesReachTheCandidate:
+    """What is being watched, and what happens when it sees something.
+
+    Both facts are consequences rather than advice, so both are stated in red in the HTML and
+    bolded in the plain text, and both have to survive in either. A candidate who first learns
+    mid-exam that their microphone was live, or that a fourth detection ends the attempt, has a
+    fair complaint - and that complaint is the reason this copy exists.
+    """
+
+    def test_the_html_says_the_assessment_is_ai_proctored(self, html):
+        assert 'This assessment is AI-proctored' in html
+
+    def test_the_html_names_what_is_actually_detected(self, html):
+        """Vague "you are monitored" leaves a candidate guessing which ordinary behaviour is
+        risky. These are the real warnable signals - see exam_session.WARNABLE_REASONS.
+        """
+        for signal in ['Talking', 'looking away', 'another person', 'phone or second screen',
+                       'face leaving the frame']:
+            assert signal in html, signal
+
+    def test_the_html_states_the_warning_allowance_and_what_ends_it(self, html):
+        assert 'You are allowed three warnings' in html
+        # "Your fourth violation", deliberately not "the fourth time anything above" - the
+        # bullets beside this note include things that are not detectable events at all, and
+        # counting those would describe a rule the server does not run.
+        assert 'Your fourth violation ends the assessment' in html
+
+    def test_the_html_separates_the_shortcuts_that_are_never_warned(self, html):
+        """Print Screen, F12 and Ctrl+U are not in WARNABLE_REASONS - they end an attempt
+        outright. A candidate who thought they still had warnings in hand would be wrong.
+        """
+        assert 'Print Screen, F12 and Ctrl+U are never warned' in html
+
+    def test_the_stated_allowance_matches_the_server(self):
+        """The number in the copy is a duplicate of MAX_WARNINGS and can drift from it.
+
+        If the server's allowance changes, this fails and the copy has to change with it, rather
+        than the email quietly promising candidates an allowance they do not have.
+        """
+        from api.services.exam_session import MAX_WARNINGS
+
+        words = {1: 'one', 2: 'two', 3: 'three', 4: 'four', 5: 'five'}
+
+        assert f'allowed {words[MAX_WARNINGS]} warnings' in render_invitation_html(VALUES), (
+            f'MAX_WARNINGS is {MAX_WARNINGS}; the invitation still says something else'
+        )
+
+    def test_both_halves_carry_both_facts(self, ta_user, make_batch, make_candidate):
+        """Neither fact may exist in only one format."""
+        batch = make_batch(ta_user)
+        candidate = make_candidate(batch, ta_user)
+        invitation = Invitation.objects.create(
+            candidate=candidate, batch=batch, unique_link_token='proctoring-parity',
+            link_expired_at=timezone.now() + timedelta(days=2), sent_by=ta_user,
+        )
+        link = 'https://example.test/t/proctoring-parity'
+        _subject, text = render_invitation_email(candidate, invitation, link, ta_user, 's', 'z')
+        html = render_invitation_html(
+            invitation_values(candidate, invitation, link, ta_user, 's', 'z'))
+
+        for fact in ['This assessment is AI-proctored', 'allowed three warnings']:
+            assert fact in text, f'missing from plain text: {fact}'
+            assert fact in html, f'missing from HTML: {fact}'

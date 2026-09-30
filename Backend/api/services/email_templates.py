@@ -256,6 +256,17 @@ INVITATION_TEMPLATE = {
         '- **Your camera and microphone must remain enabled for the entire assessment** - '
         'they are used for continuous proctoring, and switching either off is treated as a '
         'violation.\n\n'
+        # Same two facts the HTML half states in red, in the same order. They are here rather
+        # than only there because a candidate reading the plain-text part must not be the one
+        # who finds out mid-exam that anything was being watched, or that a fourth detection
+        # ends the attempt.
+        '- **This assessment is AI-proctored.** Your camera and microphone are monitored for '
+        'the whole assessment. Talking, looking away from the screen for a sustained period, '
+        'another person appearing on camera, a phone or second screen in view, leaving the '
+        'assessment window, and your face leaving the frame are all detected automatically.\n\n'
+        '- **You are allowed three warnings.** Your fourth violation ends the assessment '
+        'immediately and submits your answers as they are. Print Screen, F12 and Ctrl+U are '
+        'never warned - they end it the first time.\n\n'
         '- Do not read questions aloud or talk during the assessment - sustained talking is '
         'detected and treated as a violation. Brief background noise is fine.\n\n'
         '- Use a laptop or desktop with a stable internet connection and complete the '
