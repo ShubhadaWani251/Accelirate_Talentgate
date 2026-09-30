@@ -1,5 +1,15 @@
 """Converts a candidate-uploaded Aadhaar PDF into a PNG image the rest of the pipeline can read.
 
+NOT CURRENTLY WIRED UP. PDF was withdrawn as an accepted upload format on request - the capture
+endpoint now takes JPEG and PNG only (views/exam.py, validate_identity_photo without allow_pdf),
+so nothing calls into this module at runtime. It is kept, and kept under test, because the hard
+part below is the UIDAI password derivation, which is worth more than the few lines that call
+it: re-enabling is `allow_pdf=True` plus restoring the conversion block in
+ExamIdentityAadhaarCaptureView, not rewriting this.
+
+The reasoning that argued FOR accepting PDFs is left intact below, because it is the case anyone
+reconsidering this decision needs to weigh.
+
 Candidates overwhelmingly have their Aadhaar as a PDF, not a photo: the official copy from the
 UIDAI site (and the mAadhaar app) downloads as an e-Aadhaar PDF, so "upload your Aadhaar" and
 "upload an image" are not the same request. Refusing PDFs meant asking every such candidate to

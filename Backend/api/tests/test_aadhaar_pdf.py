@@ -139,7 +139,15 @@ class TestPdfUploadThroughTheCaptureEndpoint:
             format='multipart',
         )
 
-    def test_a_pdf_upload_is_accepted(self, api_client, small_invitation, settings):
+    def test_a_pdf_upload_is_refused(self, api_client, small_invitation, settings):
+        """PDF is no longer an accepted format for the Aadhaar capture - JPEG and PNG only.
+
+        Removed on request. The front of the card, photographed or screenshotted, is what
+        verification reads, and a second accepted format doubled the ways a capture could arrive
+        unreadable. The endpoint is what enforces it: the file input's `accept` attribute only
+        filters the picker's default view, and every OS picker offers an "All Files" escape, so
+        a client can always send whatever it likes.
+        """
         settings.AZURE_STORAGE_CONNECTION_STRING = ''
         settings.DEBUG = True
         settings.AADHAAR_VERIFICATION_ENABLED = True
@@ -149,16 +157,17 @@ class TestPdfUploadThroughTheCaptureEndpoint:
 
         response = self._capture_pdf(api_client, token, MINIMAL_PDF)
 
-        # 200 regardless of the verification verdict - this test is about the PDF being READ at
-        # all, which previously failed at the content-type allowlist before any of that.
-        assert response.status_code == 200, response.data
+        assert response.status_code == 400, response.data
+        assert 'JPEG or PNG' in response.data['detail']
 
-    def test_what_gets_stored_is_an_image_not_the_pdf(
+    def test_a_refused_pdf_stores_nothing_and_costs_no_attempt(
         self, api_client, small_invitation, settings
     ):
-        """The conversion has to happen before storage. A stored PDF would be handed to a TA who
-        may well be unable to open it (an e-Aadhaar is encrypted), and to a QR/OCR pipeline that
-        only decodes images.
+        """The rejection happens before any state changes, which is what makes it safe to retry.
+
+        validate_identity_photo runs ahead of start_or_resume_attempt, so a candidate who picks
+        the wrong file has not burned one of their AADHAAR_CAPTURE_MAX_ATTEMPTS retries and has
+        nothing stored against them - they simply pick a different file.
         """
         settings.AZURE_STORAGE_CONNECTION_STRING = ''
         settings.DEBUG = True
@@ -170,13 +179,24 @@ class TestPdfUploadThroughTheCaptureEndpoint:
         self._capture_pdf(api_client, token, MINIMAL_PDF)
 
         from api.models import ExamAttempt
-        attempt = ExamAttempt.objects.get(invitation=small_invitation)
-        assert attempt.aadhaar_capture_url
-        assert not attempt.aadhaar_capture_url.lower().endswith('.pdf')
+        assert not ExamAttempt.objects.filter(invitation=small_invitation).exists()
 
-    def test_an_unreadable_pdf_is_a_400_not_a_500(
-        self, api_client, small_invitation, settings
+    @pytest.mark.parametrize('filename, content_type', [
+        ('scan.pdf', 'application/pdf'),
+        ('aadhaar.docx',
+         'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
+        ('card.heic', 'image/heic'),
+        ('card.gif', 'image/gif'),
+        ('nothing.txt', 'text/plain'),
+    ])
+    def test_any_format_that_is_not_jpeg_or_png_is_refused(
+        self, api_client, small_invitation, settings, filename, content_type
     ):
+        """Parametrised rather than PDF-only because PDF is not special here - it is simply the
+        one candidates reach for most, the official e-Aadhaar being one. HEIC earns its row too:
+        it is what an iPhone produces by default, so it is the likeliest accidental upload after
+        a PDF, and it has never been accepted.
+        """
         settings.AZURE_STORAGE_CONNECTION_STRING = ''
         settings.DEBUG = True
         settings.AADHAAR_VERIFICATION_ENABLED = True
@@ -184,7 +204,13 @@ class TestPdfUploadThroughTheCaptureEndpoint:
         api_client.post(f'/api/exam/token/{token}/verify-email/',
                         {'email': small_invitation.candidate.email})
 
-        response = self._capture_pdf(api_client, token, b'not really a pdf')
+        response = api_client.post(
+            f'/api/exam/token/{token}/identity/aadhaar/',
+            {'id_photo': SimpleUploadedFile(filename, b'bytes', content_type=content_type)},
+            format='multipart',
+        )
 
-        assert response.status_code == 400
-        assert 'photo' in response.data['detail'].lower()
+        assert response.status_code == 400, response.data
+        assert 'JPEG or PNG' in response.data['detail']
+        # No "or a PDF" tail any more - the message has to name only what is actually accepted.
+        assert 'PDF' not in response.data['detail']

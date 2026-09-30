@@ -12,7 +12,7 @@ import { beginNativeDialog } from '../proctoring/nativeDialogGuard';
 // default, but every OS picker offers an "All Files" escape, so an unsupported file reached the
 // server and came back as a failed upload with no clear reason - which is exactly what this
 // catches now.
-const UPLOAD_CONTENT_TYPES = ['image/jpeg', 'image/png', 'application/pdf'];
+const UPLOAD_CONTENT_TYPES = ['image/jpeg', 'image/png'];
 const UPLOAD_MAX_BYTES = 5 * 1024 * 1024;
 
 // Live camera preview + a snapshot-to-Blob capture button. Used twice on the identity-capture
@@ -146,17 +146,16 @@ export default function PhotoCapture({
       {!captured && allowUpload && (
         <div style={{ marginTop: 8 }}>
           <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 6 }}>
-            Or upload your Aadhaar instead — an image (JPG/PNG) or the official e-Aadhaar PDF.
-            Make sure the Aadhaar number and your date of birth are both in frame; a masked
-            card showing only the last 4 digits is fine. If your PDF is password-protected, we
-            will try to open it using your registered name and date of birth.
+            Or upload your Aadhaar instead — a <b>JPG or PNG image only</b>. Make sure the
+            Aadhaar number and your date of birth are both in frame; a masked card showing only
+            the last 4 digits is fine. If you have an e-Aadhaar PDF, open it and take a
+            screenshot or photo of the front of the card, then upload that.
           </div>
           <input
             type="file"
-            // PDF included because the official e-Aadhaar download is one - see
-            // Backend/api/services/aadhaar_pdf.py, which renders page 1 to an image server-side
-            // so nothing downstream has to know a PDF was ever involved.
-            accept="image/jpeg,image/png,application/pdf"
+            // Advisory only - every OS picker offers an "All Files" escape, so onChange below
+            // does the real check and Backend/api/services/image_validation.py is the boundary.
+            accept="image/jpeg,image/png"
             onClick={() => {
               // Must be armed before the native dialog opens (onClick fires first) - see
               // nativeDialogGuard.js. window regaining focus is the one signal common to every
@@ -179,9 +178,18 @@ export default function PhotoCapture({
               // manager needs to know which of their files is the problem and what to pick
               // instead. A bare "upload failed" leaves them retrying the same document.
               if (!UPLOAD_CONTENT_TYPES.includes(file.type)) {
+                // A PDF gets its own sentence because it is the wrong file candidates are
+                // likeliest to reach for - the official e-Aadhaar downloads as one - so
+                // "not allowed" without telling them what to do instead would strand them.
+                const isPdf = file.type === 'application/pdf'
+                  || /\.pdf$/i.test(file.name);
                 setCaptureError(
-                  `"${file.name}" is not a supported file. Please upload a JPG or PNG image, `
-                  + 'or your official e-Aadhaar PDF.'
+                  `"${file.name}" is not allowed. Only JPG, JPEG and PNG images can be `
+                  + 'uploaded.'
+                  + (isPdf
+                    ? ' PDF files are not accepted — please open your e-Aadhaar and upload a'
+                      + ' screenshot or photo of the front of the card instead.'
+                    : '')
                 );
                 return;
               }
