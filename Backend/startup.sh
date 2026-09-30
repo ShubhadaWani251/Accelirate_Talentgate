@@ -112,8 +112,19 @@ echo "==> Starting scheduled jobs"
 # full Django process at ~127MB measured (the urlconf pulls cv2 and numpy in at module scope via
 # services/aadhaar.py, and verify_aadhaar_ocr_fallback reaches ~179MB once RapidOCR loads), so
 # seven at once is ~890MB of housekeeping landing in one burst - at the exact moment gunicorn is
-# preloading that same app and forking its workers. On a 1.75GB plan that is most of the instance
-# spent on background work during the one minute it can least afford it.
+# preloading that same app and forking its workers. The B2 plan behind this app has 3.5GB, but
+# README notes it is SHARED with other internal projects' staging apps, so that headroom is not
+# ours alone.
+#
+# Connections are the tighter constraint, and the reason this matters more than the megabytes.
+# Each of those processes opens its own database connection, and README's deployment section is
+# explicit: the shared Burstable B1ms server admits 35 in total across every internal project,
+# with talentgate_app capped at 15, and overflow "fails with 'too many connections for role'
+# rather than queueing". Seven scheduler processes plus WEB_CONCURRENCY x WEB_THREADS (2 x 2)
+# is 11 per instance, and this app is served by three instances - so the old all-at-once start
+# could demand far more than the whole cap, on every restart. Staggered, only one or two
+# scheduler processes are typically live at a time. Anything added here has to be counted
+# against that 15.
 #
 # Staggering costs nothing: these are backgrounded below, so sleeping here does not hold up the
 # `exec gunicorn` at the end of this file. It only moves the work to after the app is already
