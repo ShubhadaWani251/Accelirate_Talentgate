@@ -226,6 +226,24 @@ def download_recording(attempt_id, dest_path):
     return True
 
 
+def recording_size(attempt_id):
+    """Stored byte count of the raw WebM recording, or None if there isn't one.
+
+    Reads only the blob's properties, never its content - a 45-minute recording must not be
+    pulled down to answer how big it is. Used by views/diagnostics to spot a recording that is
+    far shorter than the exam it belongs to, which is how a silently refused chunk shows up:
+    the browser drops the error, so nothing else anywhere records that evidence went missing.
+    """
+    if _use_local_fallback():
+        source = _local_path(attempt_id, 'session_recording.webm')
+        return source.stat().st_size if source.exists() else None
+
+    blob_client = _container().get_blob_client(f'attempts/{attempt_id}/session_recording.webm')
+    if not blob_client.exists():
+        return None
+    return blob_client.get_blob_properties().size
+
+
 def upload_recording_mp4(attempt_id, local_path):
     """Uploads a transcoded MP4 file from local disk. Returns the unsigned URL to store on the
     attempt, same shape as every other upload_* function here.

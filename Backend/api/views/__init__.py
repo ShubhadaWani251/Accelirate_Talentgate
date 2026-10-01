@@ -1,4 +1,5 @@
 from .health import health_check, readiness_check
+from .diagnostics import DiagnosticsView
 from .auth import (
     LoginView,
     LogoutView,
@@ -71,6 +72,7 @@ __all__ = [
     'AuditLogListView', 'AuditLogFilterOptionsView',
     'health_check',
     'readiness_check',
+    'DiagnosticsView',
     'LoginView', 'LogoutView', 'RefreshView',
     'ForgotPasswordView', 'ResendOtpView', 'VerifyOtpResetView',
     'ChangePasswordView', 'MeView',

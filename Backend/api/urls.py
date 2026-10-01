@@ -8,6 +8,10 @@ urlpatterns = [
     # Separate from liveness above: this one fails when the database is unreachable, so a
     # load balancer stops sending traffic to an instance that cannot serve it.
     path('health/ready/', views.readiness_check, name='health-ready'),
+    # Admin-only runtime state - cache backend, this role's live connection count against
+    # its limit, and optionally whether one attempt's recording matches its exam length.
+    # Exists so those can be answered without Azure portal access; see views/diagnostics.
+    path('diagnostics/', views.DiagnosticsView.as_view(), name='diagnostics'),
 
     path('auth/login/', views.LoginView.as_view(), name='auth-login'),
     path('auth/logout/', views.LogoutView.as_view(), name='auth-logout'),
