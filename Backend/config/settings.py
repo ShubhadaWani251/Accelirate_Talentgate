@@ -451,7 +451,28 @@ LOCAL_MEDIA_BASE_URL = os.environ.get('LOCAL_MEDIA_BASE_URL', 'http://127.0.0.1:
 # Request body / file upload size caps. BatchUploadView additionally enforces its own tighter
 # 5MB limit on the candidate spreadsheet specifically (see MAX_UPLOAD_SIZE_BYTES) - these are the
 # app-wide backstop so no endpoint can be made to buffer an unbounded request body into memory.
-DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
+#
+# Raised from 10MB to cover a recording chunk from a candidate whose camera produces a genuinely
+# noisy picture. Measured with MediaRecorder on a synthetic 640x480@15fps stream:
+#
+#   realistic proctoring scene (static room, head moves a little)  0.37 MB / 10s  (0.31 Mbps)
+#   pure noise (incompressible - an upper bound, not a webcam)     7.23 MB / 10s  (6.06 Mbps)
+#
+# A real camera in a dim room sits between those, nearer the first. The 30s chunk length in
+# useSessionRecorder therefore lands around 0.8MB normally - but a bad case approaches the
+# second column, and exceeding this limit does not degrade gracefully: the request is refused,
+# and that chunk of somebody's proctoring evidence is gone. The ceiling exists to stop an
+# endpoint buffering an UNBOUNDED body, which it still does; it does not have to be tight enough
+# to reject a legitimate one.
+#
+# Bounded in practice by concurrency, not by this number: only WEB_CONCURRENCY x WEB_THREADS
+# (~4) requests are in flight per instance, so the worst case this admits is ~128MB on a plan
+# with 3.5GB.
+#
+# Note the same measurement showed videoBitsPerSecond is a HINT, not a bound - asking for
+# 400kbps against noise still produced 5.90 Mbps. Nothing client-side can be relied on to keep
+# a chunk small, which is exactly why this backstop has to have room in it.
+DATA_UPLOAD_MAX_MEMORY_SIZE = 32 * 1024 * 1024
 FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
 
 # Production transport/cookie hardening - gated so local dev (DEBUG=True) is unaffected.
