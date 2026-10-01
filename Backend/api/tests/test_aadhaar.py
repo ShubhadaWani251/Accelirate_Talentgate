@@ -577,13 +577,25 @@ class TestTryOcrInline:
         # request would leave it. Confirms the guard actually skips work, not just coincidentally
         # returns False.
         photo = _printed_card_photo(['Government of India', 'Aadhaar', VALID_TEST_NUMBER, TEST_DOB_OCR_TEXT])
-        assert aadhaar._ocr_semaphore.acquire(blocking=False) is True
+        # Drains every permit rather than taking one and assuming that is the lot.
+        # AADHAAR_OCR_MAX_CONCURRENT is now set deliberately high - gunicorn's own thread count
+        # is the real ceiling, so bounding it again here only made candidates skip verification
+        # - and holding a single slot no longer exhausts anything. What is under test is the
+        # guard itself: that a full semaphore makes try_ocr_inline return immediately instead of
+        # queueing behind another candidate. That is worth keeping whatever the pool size is,
+        # so this no longer depends on it.
+        held = 0
         try:
+            while aadhaar._ocr_semaphore.acquire(blocking=False):
+                held += 1
+            assert held >= 1, 'semaphore was already exhausted before this test ran'
+
             assert aadhaar.try_ocr_inline(attempt, photo) is False
             attempt.refresh_from_db()
             assert attempt.aadhaar_verification_status == ExamAttempt.AadhaarVerificationStatus.PENDING
         finally:
-            aadhaar._ocr_semaphore.release()
+            for _ in range(held):
+                aadhaar._ocr_semaphore.release()
 
 
 class TestAadhaarCaptureRetryFlow:

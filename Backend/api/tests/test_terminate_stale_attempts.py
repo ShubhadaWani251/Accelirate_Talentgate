@@ -195,3 +195,40 @@ class TestCandidateAttemptAuthenticationStampsTheHeartbeat:
         assert response.status_code == 200
         attempt.refresh_from_db()
         assert attempt.last_activity_at is not None
+
+
+class TestTheHeartbeatThrottleCannotOutrunThisSweep:
+    """The two halves of the liveness signal have to stay in step.
+
+    CandidateAttemptAuthentication no longer writes last_activity_at on every request - it skips
+    the write while the stored value is younger than HEARTBEAT_RESOLUTION, because at several
+    requests a minute per candidate that write was pure amplification against the tightest
+    resource this deployment has.
+
+    The danger that introduces is a live candidate being terminated for silence they are not
+    guilty of: if the throttle ever allowed the column to age past the threshold this command
+    reads, a candidate sitting an exam perfectly normally would be ended mid-attempt. These two
+    constants live in different files and nothing else ties them together.
+    """
+
+    def test_the_throttle_is_well_inside_the_stale_threshold(self):
+        from api.authentication import HEARTBEAT_RESOLUTION
+        from api.management.commands.terminate_stale_attempts import (
+            DEFAULT_THRESHOLD_SECONDS,
+        )
+
+        assert HEARTBEAT_RESOLUTION.total_seconds() < DEFAULT_THRESHOLD_SECONDS, (
+            'last_activity_at would be allowed to go stale enough for terminate_stale_attempts '
+            'to end a live candidate mid-exam'
+        )
+
+    def test_it_leaves_room_for_a_slow_request(self):
+        """Not merely under the threshold - under a third of it, so a request that takes several
+        seconds to arrive cannot close the gap on its own.
+        """
+        from api.authentication import HEARTBEAT_RESOLUTION
+        from api.management.commands.terminate_stale_attempts import (
+            DEFAULT_THRESHOLD_SECONDS,
+        )
+
+        assert HEARTBEAT_RESOLUTION.total_seconds() <= DEFAULT_THRESHOLD_SECONDS / 3

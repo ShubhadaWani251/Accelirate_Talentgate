@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.utils import timezone
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.authentication import JWTAuthentication
@@ -56,6 +58,13 @@ class CustomJWTAuthentication(JWTAuthentication):
         return user
 
 
+# How stale last_activity_at may get before the next authenticated request rewrites it. Must stay
+# comfortably below terminate_stale_attempts' DEFAULT_THRESHOLD_SECONDS (60) - that command reads
+# this column to decide an attempt has gone silent, so writing less often than it checks would end
+# live candidates' exams. 20s is a third of it.
+HEARTBEAT_RESOLUTION = timedelta(seconds=20)
+
+
 class CandidateAttemptAuthentication(JWTAuthentication):
     """Resolves a JWT's `attempt_id` claim to an ExamAttempt, not a User - the exam-taking
     portal's candidates aren't in api.User at all (see services/tokens.issue_attempt_token for
@@ -96,10 +105,24 @@ class CandidateAttemptAuthentication(JWTAuthentication):
         # A heartbeat, not just bookkeeping: this is what
         # management/commands/terminate_stale_attempts.py watches to notice a closed browser/SEB
         # process mid-exam (see ExamAttempt.last_activity_at's own comment for why nothing more
-        # direct is possible). Every authenticated candidate request updates it - not just the
-        # ~10s recording-chunk upload - so an attempt still counts as "alive" for as long as
-        # anything at all is coming from it.
-        attempt.last_activity_at = timezone.now()
-        attempt.save(update_fields=['last_activity_at'])
+        # direct is possible). Every authenticated candidate request refreshes it - not just the
+        # recording-chunk upload - so an attempt still counts as "alive" for as long as anything
+        # at all is coming from it.
+        #
+        # Throttled, because this used to write on EVERY authenticated request. Answer autosaves
+        # and violation reports arrive on top of the chunk uploads, so a busy candidate was
+        # issuing a DB UPDATE several times a minute purely to restate that they were still
+        # there - multiplied by every concurrent candidate, against a database whose connection
+        # budget is the tightest resource this deployment has.
+        #
+        # HEARTBEAT_RESOLUTION has to stay well under terminate_stale_attempts' own threshold
+        # (60s): the sweep treats an attempt as gone when last_activity_at is older than that,
+        # so writing less often than it reads would terminate live candidates. A third of the
+        # threshold leaves room for a slow request without ever approaching it.
+        now = timezone.now()
+        if (attempt.last_activity_at is None
+                or (now - attempt.last_activity_at) >= HEARTBEAT_RESOLUTION):
+            attempt.last_activity_at = now
+            attempt.save(update_fields=['last_activity_at'])
 
         return attempt

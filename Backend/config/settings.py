@@ -289,12 +289,26 @@ AADHAAR_HASH_PEPPER = os.environ.get('AADHAAR_HASH_PEPPER', '')
 AADHAAR_UIDAI_PUBLIC_KEY_PATH = os.environ.get('AADHAAR_UIDAI_PUBLIC_KEY_PATH', '')
 
 # How many RapidOCR inferences (services.aadhaar.try_ocr_inline) may run at once, PER WORKER
-# PROCESS - each one is ~2-3s of CPU time, and a batch of candidates starting together could
-# otherwise tie up a request-handling thread per candidate for that whole window. Deliberately
-# small and conservative; raise only after real batch-start telemetry shows headroom -
-# under-provisioning costs one client-side retry, over-provisioning risks repeating the
-# connection/capacity incidents already seen under concurrent load this session.
-AADHAAR_OCR_MAX_CONCURRENT = int(os.environ.get('AADHAAR_OCR_MAX_CONCURRENT', '1'))
+# PROCESS - each one is ~2-3s of CPU time.
+#
+# Was 1, which is why candidates could not get verified. try_ocr_inline does NOT queue for a
+# slot: if none is free it returns immediately and the attempt stays PENDING, and because exam
+# start gates on a MATCH, that candidate is simply stuck until the deferred ten-minute sweep.
+# At a semaphore of 1 per worker, a batch of candidates starting together had most of them skip
+# verification outright - which is exactly what testers reported.
+#
+# Deliberately well above any value that can actually be reached, because the real ceiling is
+# not this number. The semaphore is per PROCESS, and a worker only ever has WEB_THREADS requests
+# in flight, so concurrency here cannot exceed WEB_THREADS (2) per worker regardless - roughly
+# WEB_CONCURRENCY x WEB_THREADS = 4 per instance. Setting it high says "do not bound this
+# separately"; gunicorn's own thread count is what bounds it.
+#
+# The cost of that is real and worth stating: ~4 CPU-bound inferences per instance on a 2-core
+# B2 plan is oversubscribed, so other requests on the same instance will slow during a batch
+# start. That is the intended trade - a slower request beats a candidate who cannot sit the
+# exam at all. The memory cost does not scale with this number: _get_ocr_engine is a per-process
+# singleton (~52MB), shared by that process's threads, not one engine per concurrent call.
+AADHAAR_OCR_MAX_CONCURRENT = int(os.environ.get('AADHAAR_OCR_MAX_CONCURRENT', '50'))
 
 # The link put in the new-user credentials email specifically. Deliberately a separate setting
 # from FRONTEND_ORIGIN above, not reused: FRONTEND_ORIGIN tracks wherever *this* backend's own

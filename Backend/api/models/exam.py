@@ -159,6 +159,24 @@ class ExamAttempt(models.Model):
         indexes = [
             models.Index(fields=['candidate'], name='ix_attempts_candidate'),
             models.Index(fields=['aadhaar_number_hash'], name='ix_attempts_aadhaar_hash'),
+            # For one specific recurring query, not on general principle:
+            # management/commands/terminate_stale_attempts.py filters
+            # status=IN_PROGRESS AND last_activity_at < cutoff, and runs every 30 seconds on
+            # every instance - so roughly every ten seconds across the deployment. Neither
+            # column was indexed, so each run scanned the whole table.
+            #
+            # Column order matters and is this way round deliberately. status is the equality
+            # term and goes first so the btree can seek straight to the IN_PROGRESS rows, which
+            # are a small and roughly constant slice; last_activity_at is the range term and
+            # goes second, where it narrows what is already a short scan. Reversed, the index
+            # would have to walk every attempt older than the cutoff - a set that grows forever
+            # - and discard the finished ones.
+            #
+            # Costs a write on every last_activity_at update, which is every authenticated
+            # candidate request. Worth it only because that column is also throttled (see
+            # api/authentication.py) rather than written on literally every request.
+            models.Index(fields=['status', 'last_activity_at'],
+                         name='ix_attempts_status_activity'),
         ]
         constraints = [
             models.UniqueConstraint(fields=['invitation'],
