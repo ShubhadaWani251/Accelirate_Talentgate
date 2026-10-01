@@ -222,6 +222,11 @@ INVITATION_TEMPLATE = {
         # "below"/"at the end of this email", never "above". If the link is ever moved back,
         # these have to move with it or they point the candidate the wrong way.
         'Important Instructions\n\n'
+        # Named with its filename, and first in the list, for the same reason the HTML half puts
+        # it in step 1: a guide nobody is told about is a guide nobody opens.
+        '- A step-by-step guide with screenshots is attached to this email as '
+        'TalentGate-Assessment-Setup-SOP.pdf. It walks through everything below, including '
+        'installing Safe Exam Browser and preparing your Aadhaar.\n\n'
         '- Please read these instructions in full before opening the assessment link at the '
         'end of this email.\n\n'
         '- Before opening the assessment link, please clear your browser cache to avoid any '

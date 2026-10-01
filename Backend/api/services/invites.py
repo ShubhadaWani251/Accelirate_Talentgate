@@ -13,7 +13,7 @@ from api.services.email_errors import EMAIL_SEND_ERRORS
 from api.services.email_templates import (
     invitation_values, render_invitation_email, strip_monospace_fences, text_body_to_html,
 )
-from api.services.invitation_email_html import render_invitation_html
+from api.services.invitation_email_html import SOP_ATTACHMENT_NAME, render_invitation_html
 
 logger = logging.getLogger(__name__)
 
@@ -176,7 +176,7 @@ def summarize_send_error(exc):
 
 
 def send_candidate_email(subject, body, to_address, cta_url=None,
-                        cta_label='Start Your Assessment', html_body=None):
+                        cta_label='Start Your Assessment', html_body=None, attachments=None):
     """Send one candidate-facing email as multipart text + HTML.
 
     Single seam for every candidate email (invitation, notifications, certification) so they
@@ -207,9 +207,40 @@ def send_candidate_email(subject, body, to_address, cta_url=None,
     message.attach_alternative(
         html_body or text_body_to_html(body, cta_url=cta_url, cta_label=cta_label), 'text/html',
     )
+    # (filename, bytes, mimetype) triples. The Graph backend builds its payload field by field
+    # rather than posting a MIME blob, so it translates these itself - see graph_email._attachments,
+    # which must keep up with anything attached here or the mail sends with nothing on it.
+    for attachment in attachments or []:
+        message.attach(*attachment)
     # Matches the previous send_mail(fail_silently=False): callers rely on the exception to
     # mark an invitation FAILED rather than reporting a silent success.
     message.send(fail_silently=False)
+
+
+# The step-by-step setup guide, attached to every invitation. Lives in the repo rather than blob
+# storage so it deploys with the code that references it and cannot go missing independently of
+# it; the pipeline rsyncs all of Backend/, so it ships as-is.
+SOP_PATH = settings.BASE_DIR / 'api' / 'assets' / SOP_ATTACHMENT_NAME
+
+
+def sop_attachment():
+    """The SOP as a single (filename, bytes, mimetype) triple, or nothing if it is unreadable.
+
+    Deliberately never raises. The invitation is the one email a candidate cannot do without -
+    it carries their assessment link - and a missing or unreadable attachment is not a reason to
+    withhold it. A failure here is logged and the invitation goes out without the guide, rather
+    than being marked FAILED and retried forever against a file that is still not there.
+
+    Read per send rather than cached: an invitation batch is paced by INVITE_SEND_DELAY_SECONDS
+    anyway, so the re-read costs nothing a candidate would notice, and caching ~1.6MB per worker
+    process matters more on a shared plan than the read does.
+    """
+    try:
+        return [(SOP_ATTACHMENT_NAME, SOP_PATH.read_bytes(), 'application/pdf')]
+    except OSError:
+        logger.exception('Could not read the setup SOP at %s; sending the invitation without it',
+                         SOP_PATH)
+        return []
 
 
 def send_invite_email(invitation, base_url):
@@ -243,7 +274,8 @@ def send_invite_email(invitation, base_url):
     html_body = render_invitation_html(invitation_values(
         candidate, invitation, link, invitation.sent_by, seb_config_link, seb_config_zip_link,
     ))
-    send_candidate_email(subject, body, candidate.email, html_body=html_body)
+    send_candidate_email(subject, body, candidate.email, html_body=html_body,
+                         attachments=sop_attachment())
 
 
 def send_invite_and_record(invitation, base_url):

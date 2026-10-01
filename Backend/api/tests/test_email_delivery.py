@@ -6,6 +6,7 @@ failure, and must never leave a failure without a reason attached - "unverified 
 them.
 """
 
+import base64
 from datetime import timedelta
 
 import pytest
@@ -726,3 +727,103 @@ class TestTheAssessmentLinkComesAfterTheInstructions:
         body = message.body
 
         assert body.index('Assessment Window:') < body.index('Important Instructions')
+
+
+class TestTheSetupGuideIsAttached:
+    """The SOP PDF rides on every invitation, and actually reaches the wire.
+
+    The wire part is the whole point of these tests. GraphEmailBackend builds Graph's payload
+    field by field rather than posting a MIME blob, so anything Django attached is simply absent
+    unless graph_email._attachments translates it - and that failure is silent: the mail sends,
+    looks entirely normal, and has nothing attached. A test that only checked
+    EmailMessage.attachments would pass against exactly that bug.
+    """
+
+    def test_the_invitation_carries_the_guide(
+        self, ta_user, make_batch, make_candidate, make_invitation
+    ):
+        from api.services.invitation_email_html import SOP_ATTACHMENT_NAME
+
+        invitation = make_invitation(make_candidate(make_batch(ta_user), ta_user), ta_user)
+
+        invites.send_invite_and_record(invitation, 'https://exam.example.test')
+
+        attachments = mail.outbox[0].attachments
+        assert len(attachments) == 1
+        name, content, mimetype = attachments[0]
+        assert name == SOP_ATTACHMENT_NAME
+        assert mimetype == 'application/pdf'
+        assert content.startswith(b'%PDF'), 'the attached bytes are not a PDF'
+
+    def test_graph_actually_puts_it_on_the_payload(self):
+        """The translation step the Graph backend needs, and would otherwise drop in silence."""
+        from django.core.mail import EmailMultiAlternatives
+
+        from api.services.graph_email import _to_graph_message
+
+        message = EmailMultiAlternatives(
+            subject='s', body='b', from_email='from@accelirate.com', to=['to@example.test'])
+        message.attach('guide.pdf', b'%PDF-1.7 pretend', 'application/pdf')
+
+        payload = _to_graph_message(message)['message']
+
+        assert 'attachments' in payload, 'Graph payload dropped the attachment'
+        attachment = payload['attachments'][0]
+        assert attachment['@odata.type'] == '#microsoft.graph.fileAttachment'
+        assert attachment['name'] == 'guide.pdf'
+        assert attachment['contentType'] == 'application/pdf'
+        assert base64.b64decode(attachment['contentBytes']) == b'%PDF-1.7 pretend'
+
+    def test_a_message_with_no_attachment_sends_without_the_key(self):
+        """Graph rejects some empty collections, and every other candidate email has none."""
+        from django.core.mail import EmailMultiAlternatives
+
+        from api.services.graph_email import _to_graph_message
+
+        message = EmailMultiAlternatives(
+            subject='s', body='b', from_email='from@accelirate.com', to=['to@example.test'])
+
+        assert 'attachments' not in _to_graph_message(message)['message']
+
+    def test_an_oversized_attachment_is_refused_by_name(self):
+        """Graph caps a sendMail body at 4MB and base64 inflates by a third. Failing here names
+        the file and its size; letting it through produces a 413 that names neither.
+        """
+        from django.core.mail import EmailMultiAlternatives
+
+        from api.services.graph_email import GRAPH_SENDMAIL_MAX_BYTES, _to_graph_message
+
+        message = EmailMultiAlternatives(
+            subject='s', body='b', from_email='from@accelirate.com', to=['to@example.test'])
+        message.attach('huge.pdf', b'x' * (GRAPH_SENDMAIL_MAX_BYTES + 1), 'application/pdf')
+
+        with pytest.raises(ValueError, match='huge.pdf'):
+            _to_graph_message(message)
+
+    def test_a_missing_guide_does_not_stop_the_invitation(
+        self, ta_user, make_batch, make_candidate, make_invitation, monkeypatch
+    ):
+        """The invitation carries the assessment link; the guide is help. If the file cannot be
+        read the candidate still gets their link, rather than the send failing and retrying
+        forever against a file that is still not there.
+        """
+        from pathlib import Path
+
+        monkeypatch.setattr(invites, 'SOP_PATH', Path('/no/such/guide.pdf'))
+        invitation = make_invitation(make_candidate(make_batch(ta_user), ta_user), ta_user)
+
+        sent = invites.send_invite_and_record(invitation, 'https://exam.example.test')
+
+        assert sent
+        assert mail.outbox[0].attachments == []
+
+    def test_both_halves_tell_the_candidate_it_is_attached(
+        self, ta_user, make_batch, make_candidate, make_invitation
+    ):
+        invitation = make_invitation(make_candidate(make_batch(ta_user), ta_user), ta_user)
+
+        invites.send_invite_and_record(invitation, 'https://exam.example.test')
+
+        html = mail.outbox[0].alternatives[0][0]
+        assert 'TalentGate-Assessment-Setup-SOP.pdf' in html
+        assert 'TalentGate-Assessment-Setup-SOP.pdf' in mail.outbox[0].body

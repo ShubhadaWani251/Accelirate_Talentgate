@@ -63,6 +63,13 @@ _STEP_TONES = {
 
 FONT = 'Segoe UI,Helvetica,Arial,sans-serif'
 
+# The filename of the setup guide attached to every invitation, named here rather than in
+# services/invites.py (which does the attaching) so the copy below and the attachment itself
+# cannot drift apart - an email naming a file that arrives under a different name is worse than
+# one that names no file at all. invites.py imports this module already, so this direction of
+# the dependency is the one that does not create a cycle.
+SOP_ATTACHMENT_NAME = 'TalentGate-Assessment-Setup-SOP.pdf'
+
 
 def _esc(value):
     return html_lib.escape(str(value or ''))
@@ -257,6 +264,16 @@ def render_invitation_html(values):
             'Your Aadhaar Card (for identity verification)',
             'Safe Exam Browser (SEB) installed',
         ])
+        # Named with its filename, and placed in step 1 rather than beside the SEB step: the
+        # guide covers the whole journey, and an attachment nobody is told about is one nobody
+        # opens. Blue, not red - it is help, not a rule.
+        + _note(
+            f'A step-by-step guide with screenshots is attached to this email as '
+            f'<b>{_esc(SOP_ATTACHMENT_NAME)}</b>. It walks through everything below, including '
+            f'installing Safe Exam Browser and preparing your Aadhaar. Open it first if you '
+            f'would rather follow along with pictures.',
+            'blue',
+        )
     )
 
     step_seb = _card(

@@ -223,7 +223,53 @@ def _to_graph_message(message):
         payload['message']['bccRecipients'] = _recipients(message.bcc)
     if message.reply_to:
         payload['message']['replyTo'] = _recipients(message.reply_to)
+    attachments = _attachments(message)
+    if attachments:
+        payload['message']['attachments'] = attachments
     return payload
+
+
+# Graph refuses a sendMail request whose whole JSON body exceeds 4MB, and base64 inflates a file
+# by about a third - so roughly 3MB of actual file is the real ceiling once the HTML body is
+# counted too. Checked here, with the offending filename and size named, because the alternative
+# is a 413 from Graph that says nothing about which attachment caused it.
+GRAPH_SENDMAIL_MAX_BYTES = 3 * 1024 * 1024
+
+
+def _attachments(message):
+    """Django's attachments, as Graph fileAttachment objects.
+
+    Needed because this backend builds Graph's payload by hand rather than posting a MIME blob:
+    anything Django attached is simply absent from the dict above unless it is translated here.
+    That failure mode is silent and worse than an error - the mail sends, looks completely
+    normal, and just has nothing attached to it.
+    """
+    out = []
+    for attachment in getattr(message, 'attachments', []) or []:
+        # Django stores either a (filename, content, mimetype) tuple or a ready MIMEBase part.
+        # Only the tuple form is produced by attach()/attach_file(), which is all this app uses;
+        # a MIMEBase part would need its own encoding and is refused rather than half-handled.
+        if not isinstance(attachment, (tuple, list)):
+            raise ValueError(
+                'Graph email backend cannot send a pre-built MIME attachment; '
+                'use EmailMessage.attach() or attach_file() instead.'
+            )
+        name, content, mimetype = attachment
+        if isinstance(content, str):
+            content = content.encode('utf-8')
+        if len(content) > GRAPH_SENDMAIL_MAX_BYTES:
+            raise ValueError(
+                f'Attachment {name} is {len(content) / 1048576:.1f}MB, over the '
+                f'{GRAPH_SENDMAIL_MAX_BYTES / 1048576:.0f}MB this backend can send in one '
+                f'sendMail call.'
+            )
+        out.append({
+            '@odata.type': '#microsoft.graph.fileAttachment',
+            'name': name,
+            'contentType': mimetype or 'application/octet-stream',
+            'contentBytes': base64.b64encode(content).decode('ascii'),
+        })
+    return out
 
 
 class GraphEmailBackend(BaseEmailBackend):
