@@ -55,7 +55,6 @@ export default function ExamInstructions() {
                 </div>
               </li>
               <li>Please start the assessment at least 30 minutes before your assessment window closes, to allow sufficient time to complete it</li>
-              <li><b style={{ color: 'var(--brand-red)' }}>This assessment must be taken inside Safe Exam Browser (SEB)</b> - see the next step to launch it</li>
               <li><b style={{ color: 'var(--brand-red)' }}>Your camera and microphone must stay on for the entire assessment</b> for identity verification and continuous proctoring. Switching your camera off, or covering it, is treated the same as leaving the window - it earns a warning from the same three-warning allowance</li>
               <li>Do not read questions aloud or talk during the assessment - sustained talking is detected and treated as a violation. Brief background noise is fine</li>
               {/* Stated as an explicit allowed/not-allowed list because the object detector had
@@ -64,28 +63,19 @@ export default function ExamInstructions() {
                   visionModels.FORBIDDEN_OBJECT_CATEGORIES exactly - if that list changes, this
                   sentence has to change with it. */}
               <li><b>Allowed on your desk:</b> blank paper and a pen for rough work, and a drink. <b style={{ color: 'var(--brand-red)' }}>Not allowed in view of your camera:</b> a mobile phone, a second laptop or monitor, a TV, or a remote. Keep any electronic device out of frame for the whole assessment</li>
-              <li>You're now in full-screen mode for the rest of this assessment</li>
               <li>Do not switch browser tabs, minimize, exit full-screen, or open other applications once the exam begins</li>
-              {/* Without this, a candidate who chose Safe Exam Browser could reasonably read the
-                  surrounding checks as a leftover bug ("isn't SEB supposed to handle this?") and
-                  start ignoring them - these guards run as a second layer on top of SEB's own
-                  lockdown, not instead of it, whichever browser choice a candidate made. */}
-              <li>These checks stay active and enforced even if you're using Safe Exam Browser - it adds a layer on top, it doesn't replace them</li>
-              <li>Close other applications and turn off notifications before you begin — on Windows, turn on <b>Focus Assist</b> (search "Focus assist" in the Start menu, or Settings → System → Focus assist); on a Mac, turn on <b>Do Not Disturb / Focus</b> from Control Center. If a system popup or notification (email, chat, a call, an OS update prompt) still appears during the assessment, <b>do not click, interact with, or dismiss it</b> — leave it alone and stay on the assessment window; interacting with it can end your attempt the same way switching windows does</li>
               {/* Stated precisely, because a candidate who is told "one warning" for everything
                   would reasonably feel misled when a Print Screen ends the attempt outright.
-                  The split is defined server-side in exam_session.WARNABLE_REASONS. */}
-              <li><b style={{ color: 'var(--brand-red)' }}>You get up to three warnings</b> for leaving the assessment window. After your third warning, the next occurrence ends your attempt immediately and your answers are submitted as they are. Take the time to read each warning — there is no time limit on dismissing it, but your exam timer keeps running while it is open</li>
-              <li>Keyboard shortcuts like Print Screen, F12 or Ctrl+U end your attempt <b>immediately, with no warning</b></li>
-              <li>Every such event is logged and shown to the Staffing team, with the specific reason shown to you too</li>
+                  The split is defined server-side in exam_session.WARNABLE_REASONS, and the
+                  signals named here are that set in plain words - if it changes, this changes.
+                  The three-warning figure is exam_session.MAX_WARNINGS. */}
+              <li><b style={{ color: 'var(--brand-red)' }}>This assessment is AI-proctored.</b> Your microphone is listened to continuously and your camera is checked throughout. Talking, looking away from the screen, your face leaving the frame, another person appearing behind you, and <b>any electronic device in view</b> - a phone, a second screen, a TV or a remote - are all detected automatically. <b style={{ color: 'var(--brand-red)' }}>You get up to three warnings</b> across all of these together. The fourth ends your attempt immediately and your answers are submitted as they are. Take the time to read each warning — there is no time limit on dismissing it, but your exam timer keeps running while it is open</li>
+              <li>Keyboard shortcuts like Print Screen, F12 or Ctrl+U are <b>not warned at all</b> - they end your attempt <b>immediately, the first time you press them</b></li>
               {/* Stated explicitly because candidates routinely assume the opposite and leave
                   questions blank to avoid a penalty that does not exist. Accurate as written:
                   finalize_attempt scores a section as its count of correct answers, with no
                   deduction for a wrong one. */}
               <li>There is <b>no negative marking</b> - a wrong answer scores zero, exactly like an unanswered one, so there is nothing to lose by attempting every question</li>
-              <li>The timer cannot be paused once started</li>
-              <li>You may submit the assessment early at any time from the Submit button</li>
-              <li>You will see only your section-wise marks at the end</li>
             </ol>
           </div>
 
