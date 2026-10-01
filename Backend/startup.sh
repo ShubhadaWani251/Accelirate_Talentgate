@@ -117,10 +117,12 @@ echo "==> Starting scheduled jobs"
 # ours alone.
 #
 # Connections are the tighter constraint, and the reason this matters more than the megabytes.
-# Each of those processes opens its own database connection, and README's deployment section is
-# explicit: the shared Burstable B1ms server admits 35 in total across every internal project,
-# with talentgate_app capped at 15, and overflow "fails with 'too many connections for role'
-# rather than queueing". Seven scheduler processes plus WEB_CONCURRENCY x WEB_THREADS (2 x 2)
+# Each of those processes opens its own database connection. Read live from the server via
+# /api/diagnostics/: the shared Burstable B1ms admits 50 in total across every internal project,
+# with talentgate_app capped at 15, and overflow fails with "too many connections for role"
+# rather than queueing. The 15 is what binds here, not the 50 - this comment and README both
+# said 35 for the server total until the endpoint was pointed at it.
+# Seven scheduler processes plus WEB_CONCURRENCY x WEB_THREADS (2 x 2)
 # is 11 per instance, and this app is served by three instances - so the old all-at-once start
 # could demand far more than the whole cap, on every restart. Staggered, only one or two
 # scheduler processes are typically live at a time. Anything added here has to be counted

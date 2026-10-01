@@ -305,12 +305,17 @@ Because App Service runs the app from a zip on its own Python image, it never in
 **it is the only thing that applies migrations on this host**, so keep the two files in step.
 
 **The database server is shared, and so is its connection budget.** It holds every internal
-project's staging database and, on its Burstable B1ms tier, admits 35 client connections in total
+project's staging database and, on its Burstable B1ms tier, admits 50 client connections in total
 across all of them. `talentgate_app` is capped at 15 of those (`CONNECTION LIMIT`), owns only
 `talentgate_stg`, and has no rights on anything else there; keep `WEB_CONCURRENCY` ×
 `WEB_THREADS` plus the scheduler loops in `startup.sh` under that cap, or the overflow fails with
 "too many connections for role" rather than queueing. Production (`pgsql-accelinternal-prod-eastus`)
 is not deployed for this project.
+
+Both figures are read live by `GET /api/diagnostics/` (admin only, see `views/diagnostics.py`),
+which is how the server-wide number was corrected from the 35 stated here previously - it is 50.
+The per-role cap of 15 was right. Check the endpoint rather than this paragraph if the two ever
+disagree again: it asks Postgres, and this is a document.
 
 The pipeline needs two things that are not in source control: the `Aptitude-Staging` service
 connection (the `azureServiceConnection` variable) and the role assignment behind it. The
