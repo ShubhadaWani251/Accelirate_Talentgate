@@ -215,7 +215,7 @@ stages:
   # feature/*, with nothing in the runs list to open and no useful notification.
   #
   # A DeployProduction stage naming Aptitude-Production was added in d5b2cd0 on 2026-10-05 and
-  # removed here. Production is not provisioned to receive it yet: per README, the deploy
-  # identity id-aptitude-deploy-prod-eastus still has no Website Contributor role assignment,
-  # which only an Owner can grant. Restore the stage once that is done and the connection
-  # exists - the README section it belongs to is still there, with the prerequisites.
+  # removed here, because naming that connection stopped runs from being created at all. An
+  # Owner granted id-aptitude-deploy-prod-eastus Website Contributor on app-aptitude-prod-eastus
+  # later that day. Restore the stage only once the connection resolves at queue time. The
+  # README section it belongs to is still there.

@@ -390,10 +390,9 @@ deploy stage's branch condition skips them, so the gate is never even reached.
 > **Not in the pipeline right now.** The `DeployProduction` stage was removed on 2026-10-05:
 > it named the `Aptitude-Production` service connection, and because connections are resolved
 > at queue time (above), naming one that is not usable stopped every push to `main` from
-> producing a build at all. The prerequisites below — chiefly the role assignment an Owner has
-> to grant — were never completed, so the stage could not have deployed successfully either.
-> This section is kept as the record of what production is and what it still needs; restore
-> the stage once the role assignment exists and the connection resolves.
+> producing a build at all. An Owner granted the identity its Website Contributor role later
+> that day. The stage stays out of this file until that connection can be named without
+> blocking the queue. The steps below describe the stage once it is restored.
 
 Production gets the **same artifact** a staging deploy already ran, not a copy of staging and not
 a second build. The database, evidence and secrets stay where they are.
