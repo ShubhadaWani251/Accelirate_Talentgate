@@ -4,7 +4,11 @@ const ROLE_LABELS = {
   candidate: 'Candidate Exam Portal',
 };
 
-export default function BrandHeader({ roleCode }) {
+// `children` is an optional right-hand slot, filled only by ProtectedLayout (with the signed-in
+// account and Logout). It is a slot rather than something this component renders for itself
+// because the same header sits above the candidate exam portal, the login screen and the legal
+// pages - none of which have an account to show or a session to end.
+export default function BrandHeader({ roleCode, children }) {
   return (
     <header className="brand-header">
       <div className="brand-left">
@@ -14,7 +18,10 @@ export default function BrandHeader({ roleCode }) {
           <div className="brand-tagline">Candidate Evaluation Platform</div>
         </div>
       </div>
-      {roleCode && <span className="brand-role-badge">{ROLE_LABELS[roleCode] || roleCode}</span>}
+      <div className="brand-right">
+        {roleCode && <span className="brand-role-badge">{ROLE_LABELS[roleCode] || roleCode}</span>}
+        {children}
+      </div>
     </header>
   );
 }

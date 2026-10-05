@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useSelector } from 'react-redux';
 import toast from 'react-hot-toast';
+import { LuChevronRight, LuCircleCheckBig, LuLayers, LuSearch, LuTrendingUp, LuTrophy, LuUsers } from 'react-icons/lu';
 import { selectRoleCode } from '../features/auth/authSlice';
 import * as dashboardApi from '../api/dashboardApi';
 import * as candidateApi from '../api/candidateApi';
@@ -15,6 +16,73 @@ import { extractErrorMessage } from '../utils/passwordSchema';
 import DeleteDraftBatchModal from '../features/batches/DeleteDraftBatchModal';
 
 const STATUS_PILL = { draft: 'gray', in_progress: 'blue', completed: 'green', cancelled: 'red' };
+
+// The four numbers the dashboard endpoint returns, each with its own count of what arrived in
+// the last seven days (serializers/dashboard._build_stats).
+//
+// Worded "+N this week", not the reference design's "N more than last week". For a running
+// total those mean the same thing, and this is the one that says what was actually measured:
+// the figure counts rows whose timestamp falls in the window, because no previous-period
+// snapshot is stored for anything to be compared against.
+const STAT_CARDS = [
+  { key: 'active_batches', label: 'Active Batches', to: '/batches', Icon: LuLayers, tone: 'blue' },
+  { key: 'total_candidates', label: 'Total Candidates', to: '/candidates', Icon: LuUsers, tone: 'indigo' },
+  { key: 'completed', label: 'Completed', to: '/candidates?status=completed', Icon: LuCircleCheckBig, tone: 'violet' },
+  { key: 'total_pass', label: 'Passed', to: '/candidates?result=pass', Icon: LuTrophy, tone: 'green' },
+];
+
+const RESULT_BANDS = [
+  { key: 'pass_count', label: 'Pass', tone: 'green' },
+  { key: 'fail_count', label: 'Fail', tone: 'red' },
+  { key: 'borderline_count', label: 'Borderline', tone: 'amber' },
+];
+
+function ResultsSummary({ batches }) {
+  // Summed from the batch rows already on screen rather than from a new endpoint - every batch
+  // carries its own pass/fail/borderline counts and the whole list is sent, not a page of it.
+  //
+  // It therefore describes the batches CURRENTLY FILTERED, not all time, because that list
+  // follows the Batch Status filter below. The caption says so: a total that silently changes
+  // when a filter moves is worse than one that admits its own scope.
+  const totals = RESULT_BANDS.map(({ key, label, tone }) => ({
+    label,
+    tone,
+    value: (batches || []).reduce((sum, b) => sum + (b[key] || 0), 0),
+  }));
+  const graded = totals.reduce((sum, t) => sum + t.value, 0);
+
+  return (
+    <div className="stat-card results-summary">
+      <div className="stat-lbl">Results Summary</div>
+      {graded === 0 ? (
+        <div className="results-empty">No graded results in these batches yet.</div>
+      ) : (
+        <>
+          <div className="results-bar" role="img"
+               aria-label={totals.map((t) => `${t.label} ${t.value}`).join(', ')}>
+            {totals.filter((t) => t.value > 0).map((t) => (
+              <span key={t.label} className={`results-seg tone-${t.tone}`}
+                    style={{ width: `${(t.value / graded) * 100}%` }} />
+            ))}
+          </div>
+          <div className="results-legend">
+            {totals.map((t) => (
+              <div key={t.label} className="results-item">
+                <span className={`results-dot tone-${t.tone}`} />
+                <span className="results-item-label">{t.label}</span>
+                <span className="results-item-value">{t.value}</span>
+                <span className="results-item-pct">
+                  {((t.value / graded) * 100).toFixed(1)}%
+                </span>
+              </div>
+            ))}
+          </div>
+          <div className="results-scope">across the batches shown below</div>
+        </>
+      )}
+    </div>
+  );
+}
 const EMPTY_MESSAGE = {
   active: 'No active batches found.',
   draft: 'No Draft batches found.',
@@ -27,6 +95,10 @@ export default function Dashboard() {
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [batchStatus, setBatchStatus] = useState('active');
+  // Filters the rows already loaded rather than re-querying: the dashboard sends every batch for
+  // the selected status, not a page of them, so there is nothing further to fetch and no reason
+  // to make typing wait on the network.
+  const [batchSearch, setBatchSearch] = useState('');
   const [tableLoading, setTableLoading] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -94,20 +166,50 @@ export default function Dashboard() {
 
   const { stats, batches_overview: batches, question_bank_health: qbankHealth, ta_accounts: taAccounts } = summary;
 
+  // Matched against exactly the fields this table shows, with no exceptions, so every hit has a
+  // visible reason for being in the list. college_name was briefly included and is not any more:
+  // it is real data, but there is no college column here, so matching on it returned rows the
+  // reader could not account for - and the placeholder then had to name a column that does not
+  // exist to explain them.
+  const query = batchSearch.trim().toLowerCase();
+  const visibleBatches = query
+    ? (batches || []).filter((b) => [
+        b.batch_name, b.status_display, b.primary_ta_user_name,
+      ].some((field) => (field || '').toLowerCase().includes(query)))
+    : (batches || []);
+
   return (
     <div>
       <h3>{isAdmin ? 'Administrator Dashboard' : 'TA Dashboard'}</h3>
+      <div className="page-sub">
+        Overview of your aptitude test batches and candidate performance
+      </div>
 
-      <div className="grid-4" style={{ marginBottom: 20 }}>
-        <div className="stat-card"><div className="stat-num">{stats.active_batches}</div><div className="stat-lbl">Active Batches</div></div>
-        <div className="stat-card"><div className="stat-num">{stats.total_candidates}</div><div className="stat-lbl">Total Candidates</div></div>
-        <div className="stat-card"><div className="stat-num">{stats.completed}</div><div className="stat-lbl">Completed</div></div>
-        <div className="stat-card"><div className="stat-num">{stats.total_pass}</div><div className="stat-lbl">Total Pass Students</div></div>
+      <div className="stat-row">
+        {STAT_CARDS.map(({ key, label, to, Icon, tone }) => (
+          // Each card links to where its number comes from, which is what the chevron promises.
+          <Link key={key} to={to} className={`stat-card tone-${tone}`}>
+            <span className="stat-icon"><Icon aria-hidden="true" /></span>
+            <span className="stat-text">
+              <span className="stat-lbl">{label}</span>
+              <span className="stat-num">{stats[key]}</span>
+              {/* Hidden at zero rather than shown as "+0 this week": a quiet week is not news,
+                  and a row of zeroes would train people to stop reading the line entirely. */}
+              {stats[`${key}_this_week`] > 0 && (
+                <span className="stat-trend">
+                  <LuTrendingUp aria-hidden="true" /> +{stats[`${key}_this_week`]} this week
+                </span>
+              )}
+            </span>
+            <LuChevronRight className="stat-chevron" aria-hidden="true" />
+          </Link>
+        ))}
+        <ResultsSummary batches={visibleBatches} />
       </div>
 
       <div className="btn-row" style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
         <Link to="/batches/new" className="btn primary">
-          + Upload New Candidates
+          + Create Batch
         </Link>
         <Link to="/candidates" className="btn">
           View All Candidates
@@ -127,12 +229,29 @@ export default function Dashboard() {
       {exportOpen && <ExportModal onClose={() => setExportOpen(false)} />}
 
       <div className="card" style={{ marginBottom: 20 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                     flexWrap: 'wrap', gap: 10, marginBottom: 10 }}>
-          <div className="box-label" style={{ marginBottom: 0 }}>
-            Batches Overview — status &amp; results in one place
+        <div className="panel-head">
+          <div className="panel-head-text">
+            <div className="box-label" style={{ marginBottom: 0 }}>Batches Overview</div>
+            {/* The old heading's "— status & results in one place" suffix is not repeated here.
+                The table immediately below has Status, Pass, Fail and Borderline columns, so the
+                sentence was describing something already on screen - and at this width it pushed
+                the search and filters onto a second line. */}
+            <div className="box-sub">View and manage all your aptitude test batches</div>
           </div>
-          <BatchStatusFilter value={batchStatus} onChange={handleStatusChange} />
+          <div className="batch-controls">
+            <div className="search-field">
+              <LuSearch className="search-icon" aria-hidden="true" />
+              <input
+                type="search"
+                className="search-input"
+                value={batchSearch}
+                onChange={(e) => setBatchSearch(e.target.value)}
+                placeholder="Search name, owner or status…"
+                aria-label="Search batches"
+              />
+            </div>
+            <BatchStatusFilter value={batchStatus} onChange={handleStatusChange} />
+          </div>
         </div>
         {/* aria-busy on the scroll container, so a filter change is announced once rather than
             per skeleton cell. */}
@@ -157,10 +276,17 @@ export default function Dashboard() {
                   they were the (wrong) result. */}
               {tableLoading ? (
                 <SkeletonTableRows rows={5} columns={isAdmin ? 9 : 8} />
-              ) : batches.length === 0 ? (
-                <tr><td colSpan={isAdmin ? 9 : 8}>{EMPTY_MESSAGE[batchStatus] || 'No batches yet.'}</td></tr>
+              ) : visibleBatches.length === 0 ? (
+                // Two different nothings: no batches in this status at all, versus batches that
+                // exist but none matching what was typed. Showing the status message for a failed
+                // search reads as if the filter were broken.
+                <tr><td colSpan={isAdmin ? 9 : 8}>
+                  {query
+                    ? `No batches match "${batchSearch.trim()}".`
+                    : EMPTY_MESSAGE[batchStatus] || 'No batches yet.'}
+                </td></tr>
               ) : (
-                batches.map((b) => (
+                visibleBatches.map((b) => (
                   <tr key={b.batch_id}>
                     <td>{b.batch_name}</td>
                     {isAdmin && <td>{b.primary_ta_user_name}</td>}

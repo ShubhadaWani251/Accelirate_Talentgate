@@ -1,6 +1,8 @@
 from collections import defaultdict
+from datetime import timedelta
 
 from django.db.models import Case, Count, IntegerField, OuterRef, Q, Subquery, Value, When
+from django.utils import timezone
 
 from api.models import Batch, Candidate, ExamAttempt, Question, QuestionBankSection, User
 from api.serializers.batch import annotate_batch_counts
@@ -35,17 +37,46 @@ def _build_stats(batches_qs, candidates_qs):
         ExamAttempt.objects.filter(candidate=OuterRef('pk'))
         .order_by('-attempt_id').values('status')[:1]
     )
+    # When that same latest attempt finished, which is the only timestamp tied to a candidate's
+    # progress - Candidate.result itself records no date, so "when did this become a pass" can
+    # only be answered by when the attempt it came from was submitted.
+    latest_submitted_at = Subquery(
+        ExamAttempt.objects.filter(candidate=OuterRef('pk'))
+        .order_by('-attempt_id').values('submitted_at')[:1]
+    )
+    # Each *_this_week figure counts what ARRIVED in the last seven days, which for a running
+    # total is exactly how much higher the number is than it was a week ago. No previous-period
+    # snapshot is stored anywhere, so this is derived from timestamps rather than compared
+    # against history - see the frontend, which labels these "+N this week" rather than implying
+    # a stored comparison it cannot make.
+    #
+    # active_batches is the one approximation: a batch can stop being active without leaving a
+    # trace of when, so its figure counts batches CREATED active in the window. The other three
+    # are exact, because a candidate, a submission and a result only ever accumulate.
+    #
+    # Folded into the two aggregates that already run rather than added as fresh queries: this
+    # costs the dashboard no extra round trips.
+    week_ago = timezone.now() - timedelta(days=7)
     candidate_stats = candidates_qs.annotate(
         latest_attempt_status=latest_attempt_status,
+        latest_submitted_at=latest_submitted_at,
     ).aggregate(
         total_candidates=Count('candidate_id'),
         completed=Count('candidate_id', filter=Q(latest_attempt_status=ExamAttempt.Status.SUBMITTED)),
         total_pass=Count('candidate_id', filter=Q(result=Candidate.Result.PASS)),
+        total_candidates_this_week=Count('candidate_id', filter=Q(created_at__gte=week_ago)),
+        completed_this_week=Count('candidate_id', filter=Q(
+            latest_attempt_status=ExamAttempt.Status.SUBMITTED,
+            latest_submitted_at__gte=week_ago)),
+        total_pass_this_week=Count('candidate_id', filter=Q(
+            result=Candidate.Result.PASS, latest_submitted_at__gte=week_ago)),
     )
-    return {
-        'active_batches': batches_qs.filter(status=Batch.Status.IN_PROGRESS).count(),
-        **candidate_stats,
-    }
+    batch_stats = batches_qs.aggregate(
+        active_batches=Count('batch_id', filter=Q(status=Batch.Status.IN_PROGRESS)),
+        active_batches_this_week=Count('batch_id', filter=Q(
+            status=Batch.Status.IN_PROGRESS, created_at__gte=week_ago)),
+    )
+    return {**batch_stats, **candidate_stats}
 
 
 def _build_batches_overview(batches_qs, is_admin, status_group='active'):

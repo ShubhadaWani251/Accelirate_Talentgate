@@ -67,6 +67,33 @@ h1, h2, h3, h4, .brand, .btn, .box-label {
 .brand-header .brand-logo { width: 30px; height: 30px; flex-shrink: 0; }
 .brand-header .brand-name { color: #fff; font-size: 14.5px; font-weight: 700; letter-spacing: .2px; line-height: 1.15; }
 .brand-header .brand-tagline { color: #b9c6e6; font-size: 10px; font-weight: 500; letter-spacing: .3px; }
+
+/* Right-hand side of the header: the portal badge, plus the account strip when there is one.
+   Only the staff shell passes an account, so this collapses to just the badge everywhere else -
+   the candidate exam portal, login and the legal pages all render the same header. */
+.brand-header .brand-right { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.header-account { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.header-account-who { display: flex; align-items: center; gap: 8px; min-width: 0; }
+/* Inverted against the navy header - the shared .avatar is built for a white background. */
+.header-avatar { background: rgba(255,255,255,.16); color: #fff; border-color: rgba(255,255,255,.35); }
+.header-account-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+.header-account-name {
+  font-size: 12.5px; font-weight: 600; color: #fff;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.header-account-role { font-size: 10px; color: #b9c6e6; }
+.btn.header-logout {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; padding: 6px 13px;
+  background: rgba(255,255,255,.1); color: #fff; border: 1px solid rgba(255,255,255,.3);
+}
+.btn.header-logout:hover { background: rgba(255,255,255,.2); color: #fff; }
+
+@media (max-width: 860px) {
+  /* The avatar still identifies the account, and the name is the first thing worth giving up for
+     horizontal space - the sidebar's account card carries the full version anyway. */
+  .header-account-text { display: none; }
+}
+
 .brand-header .brand-role-badge {
   font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px;
   color: #fff; background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.3);
@@ -82,56 +109,159 @@ h1, h2, h3, h4, .brand, .btn, .box-label {
 .brand-footer a:hover, .brand-footer .flink:hover { color: #fff; text-decoration: underline; }
 .brand-footer .foot-links { display: flex; gap: 14px; }
 
-.app-nav {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 12px 24px; border-bottom: 1px solid var(--line-soft); background: #fff;
-}
-.app-nav .nav-left { display: flex; align-items: center; gap: 8px; }
-
 /* Back control - the wireframe's `.persistent-nav` spec, an ordinary small button. The Home
    button it used to sit beside is gone: it went to the same place as the Dashboard link. */
 .btn.small { padding: 5px 13px; font-size: 11.5px; }
 .nav-back { white-space: nowrap; }
 /* Pill-shaped tabs, per the wireframe's "Top nav buttons - highlighted, tab-like" spec. */
-.nav-links { display: flex; gap: 6px; align-items: center; font-size: 12px; }
-.nav-links span {
-  cursor: pointer; padding: 8px 16px; border-radius: 999px; font-weight: 600; color: #5a6272;
-  background: #eef1f6; border: 1px solid transparent; transition: all .15s ease; white-space: nowrap;
-}
-.nav-links span:hover:not(.current) {
-  background: var(--accent-soft); color: var(--brand-blue-dark); transform: translateY(-1px);
-}
-.nav-links span.current {
-  background: linear-gradient(135deg, var(--brand-blue) 0%, var(--indigo) 100%);
-  color: #fff; border-color: transparent; box-shadow: 0 3px 10px rgba(57,73,166,.35);
-}
-
-/* Flex so the standalone Logout button sits beside the avatar trigger, per the wireframe;
-   position:relative still anchors the dropdown. */
-.profile-wrap { position: relative; display: flex; align-items: center; gap: 10px; }
-.profile-trigger {
-  display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12.5px; color: var(--text);
-  background: none; border: none; padding: 4px;
-}
 .avatar {
   width: 28px; height: 28px; border-radius: 50%; background: var(--accent-soft); color: var(--accent);
   font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center;
   border: 1px solid var(--accent); flex-shrink: 0;
 }
-.profile-menu {
-  position: absolute; top: 40px; right: 0; background: #fff; border: 1px solid var(--line-soft); border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(16,24,40,.15); width: 190px; z-index: 30; overflow: hidden;
-}
-.profile-menu .pitem {
+/* The account dropdown. Lived in the old horizontal nav as .profile-menu; it now hangs off the
+   sidebar's user card, which is the only thing that opens it - .profile-wrap, .profile-trigger
+   and the .profile-menu positioning went with the bar itself, since nothing rendered them any
+   more. Positioning for this one is in the sidebar block below (it opens upward). */
+.sidebar-user-menu .pitem {
   padding: 10px 14px; font-size: 12.5px; color: var(--text); border-bottom: 1px solid var(--line-soft);
   cursor: pointer; background: none; width: 100%; text-align: left; border-left: none; border-right: none; border-top: none;
 }
-.profile-menu .pitem:last-child { border-bottom: none; }
-.profile-menu .pitem:hover { background: var(--accent-soft); color: var(--brand-blue); }
-.profile-menu .pitem.logout { color: var(--red); }
-.profile-menu .pitem.logout:hover { background: var(--red-bg); }
+.sidebar-user-menu .pitem:last-child { border-bottom: none; }
+.sidebar-user-menu .pitem:hover { background: var(--accent-soft); color: var(--brand-blue); }
+.sidebar-user-menu .pitem.logout { color: var(--red); }
+.sidebar-user-menu .pitem.logout:hover { background: var(--red-bg); }
 
 .page-body { flex: 1; padding: 28px 24px; }
+
+/* ---- Staff shell: sidebar beside the page ----------------------------------------------
+   Replaced a horizontal nav bar. The brand header and footer still span the full width; only
+   this row splits, so the candidate exam portal - which renders BrandHeader and has no sidebar
+   - is untouched. min-height:0 lets the page column scroll inside the row instead of forcing
+   the whole shell taller than the viewport. */
+.app-body { display: flex; flex: 1; min-height: 0; align-items: stretch; }
+.page-col { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+
+/* Locks the viewport so the sidebar, brand header and footer stay put and only the page content
+   scrolls underneath them. Without this the sidebar sat in normal flow and scrolled away with
+   the page, taking the account card and Logout off-screen on any long page - which is the whole
+   reason they are pinned to its bottom.
+
+   Its own class rather than a change to .app-shell, for the same reason .exam-shell is: every
+   other page, the candidate portal included, relies on .app-shell being free to grow taller
+   than the viewport. Only these two screens want it truly locked. */
+.staff-shell { height: 100vh; overflow: hidden; }
+/* The scroll lives on .page-body, NOT on .page-col, so the Back/Menu strip above it stays put.
+   Scrolling the whole column took that strip with it - and under 900px the Menu button is the
+   only way to open the sidebar, so scrolling down put navigation out of reach entirely. */
+.staff-shell .page-body { overflow-y: auto; min-height: 0; }
+/* Only the link list scrolls if it ever outgrows the column, so the account card below it stays
+   visible rather than being pushed out of reach. */
+.staff-shell .sidebar-links { flex: 1; overflow-y: auto; min-height: 0; }
+
+/* ---- Sidebar: dark navy, continuous with the brand header ---------------------------------
+   Solid --brand-navy on purpose, not the header's gradient: that gradient runs 90deg from
+   --brand-navy at its LEFT edge, so a solid navy column directly beneath it joins seamlessly
+   rather than showing a seam at the corner.
+
+   Every colour below is from the family the header and footer already use - #d9e3f7 for
+   primary light text (the footer's links), #b9c6e6 for secondary (its body text and the
+   header's tagline) - so this reads as one dark surface rather than a second dark theme
+   invented beside the first. */
+.app-sidebar {
+  display: flex; flex-direction: column; width: 232px; flex-shrink: 0;
+  background: var(--brand-navy); border-right: 1px solid rgba(255,255,255,.07);
+  padding: 14px 12px 12px; gap: 8px;
+}
+.sidebar-links { display: flex; flex-direction: column; gap: 3px; }
+.sidebar-link {
+  display: flex; align-items: center; gap: 11px; padding: 10px 12px; border-radius: 10px;
+  font-size: 12.5px; font-weight: 600; color: #d9e3f7; text-decoration: none;
+  border: 1px solid transparent; transition: background .15s ease, color .15s ease;
+}
+/* A white wash rather than a tint: on navy, any pale blue background would compete with the
+   selected item's own blue and make two rows look chosen at once. */
+.sidebar-link:hover:not(.current) { background: rgba(255,255,255,.08); color: #fff; }
+/* The one saturated element in the column, which is what makes it findable at a glance against
+   a dark field. Blue through to a deeper blue - never blue-to-indigo, which read as purple. */
+.sidebar-link.current {
+  background: linear-gradient(135deg, var(--brand-blue) 0%, var(--brand-blue-dark) 100%);
+  color: #fff; box-shadow: 0 3px 12px rgba(18,137,232,.45);
+}
+.sidebar-icon { width: 17px; height: 17px; flex-shrink: 0; }
+
+/* Actions, not destinations. A step quieter than the nav links and behind a rule, so scanning
+   for "where am I" stops before reaching them. */
+.sidebar-actions {
+  display: flex; flex-direction: column; gap: 2px;
+  margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.12);
+}
+.sidebar-group-label {
+  font-size: 9.5px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase;
+  color: rgba(185,198,230,.75); padding: 0 12px 5px;
+}
+.sidebar-action {
+  display: flex; align-items: center; gap: 11px; padding: 8px 12px; border-radius: 10px;
+  font-size: 12px; font-weight: 500; color: #b9c6e6; text-decoration: none;
+  background: none; border: none; cursor: pointer; width: 100%; text-align: left;
+  font-family: inherit; transition: background .15s ease, color .15s ease;
+}
+.sidebar-action:hover { background: rgba(255,255,255,.08); color: #fff; }
+
+/* Pinned to the bottom: the account is about who you are, not where you are going. */
+.sidebar-user { margin-top: auto; position: relative; border-top: 1px solid rgba(255,255,255,.12); padding-top: 10px; }
+.sidebar-user-trigger {
+  display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px; border-radius: 10px;
+  background: none; border: none; cursor: pointer; text-align: left; color: #fff;
+}
+.sidebar-user-trigger:hover { background: rgba(255,255,255,.08); }
+/* The shared .avatar is built for a white background; inverted here exactly as the header's is. */
+.sidebar-user .avatar { background: rgba(255,255,255,.16); color: #fff; border-color: rgba(255,255,255,.35); }
+.sidebar-user-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.sidebar-user-name {
+  font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sidebar-user-role { font-size: 10.5px; color: #b9c6e6; }
+.sidebar-user-chevron { width: 14px; height: 14px; color: #b9c6e6; flex-shrink: 0; }
+/* Opens upward - anchored to the bottom of the viewport, so a downward menu would be clipped by
+   the footer. Deliberately still a light popover: it is a menu floating ABOVE the column, not
+   part of its surface, and its items are the same ones the rest of the app shows on white. */
+.sidebar-user-menu {
+  position: absolute; bottom: calc(100% + 6px); left: 0; right: 0; background: #fff;
+  border: 1px solid var(--line-soft); border-radius: 10px; box-shadow: 0 10px 28px rgba(0,0,0,.4);
+  padding: 5px; z-index: 40;
+}
+.btn.sidebar-logout {
+  display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%;
+  margin-top: 7px; font-size: 11.5px;
+  background: rgba(255,255,255,.1); color: #fff; border: 1px solid rgba(255,255,255,.3);
+}
+.btn.sidebar-logout:hover { background: rgba(255,255,255,.2); color: #fff; }
+
+.page-topbar { display: flex; align-items: center; gap: 8px; padding: 12px 24px 0; }
+.page-topbar:empty { display: none; }
+.btn.small { display: inline-flex; align-items: center; gap: 6px; }
+/* The sidebar is always visible above 900px, so its opener is not. Qualified with .btn because
+   .btn.small carries display:inline-flex at two-class specificity - an unqualified
+   .sidebar-toggle loses to it and the button stayed visible on desktop. */
+.btn.sidebar-toggle { display: none; }
+.sidebar-scrim {
+  display: none; position: fixed; inset: 0; background: rgba(11,31,77,.4); border: none;
+  padding: 0; z-index: 44; cursor: pointer;
+}
+
+@media (max-width: 900px) {
+  /* A fixed 232px column leaves too little room for a data table on a narrow screen, so the
+     sidebar becomes a slide-over the Menu button opens, rather than shrinking in place. */
+  .app-sidebar {
+    position: fixed; top: 0; bottom: 0; left: 0; width: 248px; z-index: 45;
+    transform: translateX(-100%); transition: transform .2s ease;
+    box-shadow: 0 0 34px rgba(11,31,77,.22); overflow-y: auto;
+  }
+  .app-sidebar.is-open { transform: translateX(0); }
+  .btn.sidebar-toggle { display: inline-flex; }
+  .sidebar-scrim { display: block; }
+}
 
 /* Wide, centred column for data-dense screens (Batch Details): a fixed narrow max-width left
    these pages hugging the left edge on a normal monitor with the wide candidate table cramped
@@ -179,7 +309,7 @@ h1, h2, h3, h4, .brand, .btn, .box-label {
    Print/Save-as-PDF dialog rather than a server-side PDF generator, since the page content is
    already exactly what should appear in the report. */
 @media print {
-  .brand-header, .app-nav, .brand-footer, .no-print { display: none !important; }
+  .brand-header, .app-sidebar, .page-topbar, .brand-footer, .no-print { display: none !important; }
   body { background: #fff; }
 }
 .field input.has-error { border-color: var(--brand-red); }
@@ -407,9 +537,110 @@ table.data-table tbody tr:hover td { background: var(--accent-soft); }
 }
 .dropzone:hover { border-color: var(--brand-blue); background: var(--accent-soft); }
 
-.stat-card { border: 1px solid var(--line-soft); border-radius: 12px; padding: 16px 12px; text-align: center; background: #fbfbfc; border-top: 3px solid var(--brand-blue); }
-.stat-num { font-size: 22px; font-weight: 700; color: var(--brand-navy); }
-.stat-lbl { font-size: 10.5px; color: var(--muted); text-transform: uppercase; margin-top: 4px; letter-spacing: .5px; }
+/* A line of plain description under a heading, saying what the screen or panel is for. Its own
+   class rather than reusing .auth-card .auth-sub, which is scoped to the login cards and carries
+   a 20px bottom margin that is wrong against a table. */
+.page-sub { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin: -6px 0 18px; }
+
+/* A panel heading with its controls on the right. The text side is what gives way when space
+   runs short - its description wraps to a second line - rather than the whole control group
+   dropping below the title, which left the search and filters stranded against the left edge
+   while the heading kept a line to itself. */
+.panel-head {
+  display: flex; justify-content: space-between; align-items: center;
+  flex-wrap: wrap; gap: 10px; margin-bottom: 10px;
+}
+.panel-head-text { flex: 1 1 220px; min-width: 0; }
+
+/* Search + status filter, kept together on the right of a panel heading. flex-shrink:0 so the
+   search keeps its usable width and the heading absorbs the squeeze instead. */
+.batch-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; flex-shrink: 0; }
+.search-field { position: relative; display: flex; align-items: center; }
+.search-icon {
+  position: absolute; left: 10px; width: 14px; height: 14px; color: var(--muted);
+  pointer-events: none;
+}
+.search-input {
+  width: 218px; max-width: 100%; padding: 7px 12px 7px 30px; font-size: 12px;
+  border: 1px solid var(--line-soft); border-radius: 999px; background: #fff; color: var(--text);
+}
+.search-input:focus {
+  outline: none; border-color: var(--brand-blue);
+  box-shadow: 0 0 0 3px rgba(19,101,229,.12);
+}
+.search-input::placeholder { color: var(--muted); }
+
+@media (max-width: 620px) {
+  /* Full width once the pills have dropped to their own line anyway. */
+  .batch-controls { width: 100%; }
+  .search-field { width: 100%; }
+  .search-input { width: 100%; }
+}
+.box-sub { font-size: 11.5px; color: var(--muted); line-height: 1.45; margin-top: 2px; font-weight: 400; }
+
+/* Overview summary. The four counters sit beside a results breakdown rather than above it, so
+   "how many" and "how did they do" read as one band. Auto-fit rather than a fixed 5 columns:
+   the breakdown needs roughly twice a counter's width, and below ~1100px they wrap to two rows
+   instead of being squeezed to unreadable. */
+.stat-row {
+  display: grid; gap: 14px; margin-bottom: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(188px, 1fr));
+}
+.stat-card {
+  display: flex; align-items: center; gap: 12px;
+  border: 1px solid var(--line-soft); border-radius: 14px; padding: 15px 16px;
+  background: #fff; box-shadow: 0 1px 2px rgba(16,24,40,.04);
+  text-decoration: none; color: inherit; transition: box-shadow .15s ease, transform .15s ease;
+}
+a.stat-card:hover { box-shadow: 0 6px 18px rgba(16,24,40,.10); transform: translateY(-1px); }
+.stat-icon {
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 42px; height: 42px; border-radius: 12px; font-size: 19px;
+}
+.stat-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.stat-num { font-size: 26px; font-weight: 700; color: var(--brand-navy); line-height: 1.1; }
+.stat-lbl {
+  font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px;
+  font-weight: 600; margin-bottom: 2px;
+}
+.stat-chevron { width: 16px; height: 16px; color: var(--line); flex-shrink: 0; }
+/* Green because every one of these counts growth - something arrived. There is deliberately no
+   downward variant: none of the four numbers can fall, so a red state would be unreachable. */
+.stat-trend {
+  display: flex; align-items: center; gap: 4px; margin-top: 3px;
+  font-size: 10.5px; font-weight: 600; color: var(--green);
+}
+.stat-trend svg { width: 12px; height: 12px; flex-shrink: 0; }
+/* Tinted icon tile per card, so the four are distinguishable at a glance rather than four
+   identical blue squares. */
+.stat-card.tone-blue .stat-icon { background: var(--accent-soft); color: var(--brand-blue-dark); }
+.stat-card.tone-indigo .stat-icon { background: #e8eaf8; color: var(--indigo); }
+.stat-card.tone-violet .stat-icon { background: #efe9f8; color: #6b3fa0; }
+.stat-card.tone-green .stat-icon { background: var(--green-bg); color: var(--green); }
+
+/* Results breakdown - wider than a counter, and stacked rather than a row. */
+.results-summary { flex-direction: column; align-items: stretch; gap: 8px; grid-column: span 2; }
+.results-bar { display: flex; height: 8px; border-radius: 999px; overflow: hidden; background: var(--line-soft); }
+.results-seg.tone-green { background: var(--green); }
+.results-seg.tone-red { background: var(--brand-red); }
+.results-seg.tone-amber { background: var(--amber); }
+.results-legend { display: flex; gap: 16px; flex-wrap: wrap; }
+.results-item { display: flex; align-items: baseline; gap: 5px; font-size: 11.5px; }
+.results-dot { width: 8px; height: 8px; border-radius: 50%; align-self: center; flex-shrink: 0; }
+.results-dot.tone-green { background: var(--green); }
+.results-dot.tone-red { background: var(--brand-red); }
+.results-dot.tone-amber { background: var(--amber); }
+.results-item-label { color: var(--muted); }
+.results-item-value { font-weight: 700; color: var(--brand-navy); font-size: 14px; }
+.results-item-pct { color: var(--muted); font-size: 10.5px; }
+.results-scope { font-size: 10px; color: var(--muted); }
+.results-empty { font-size: 11.5px; color: var(--muted); }
+
+@media (max-width: 760px) {
+  /* One per row - at this width two counters side by side clip their own numbers. */
+  .stat-row { grid-template-columns: 1fr; }
+  .results-summary { grid-column: span 1; }
+}
 
 .modal-overlay {
   position: fixed; inset: 0; background: rgba(11,31,77,.35); display: flex; align-items: center;
@@ -537,7 +768,6 @@ table.data-table tbody tr:hover td { background: var(--accent-soft); }
 /* The nav toggle exists only for the collapsed mobile layout. Declared BEFORE the breakpoint
    blocks below: it has the same specificity as the rule that reveals it, so if it came after, it
    would win the cascade and leave the mobile nav with hidden links AND no way to open them. */
-.nav-toggle { display: none; align-items: center; gap: 6px; }
 
 /* ---------- Responsive: tablet 768-1023px, mobile <768px ---------- */
 /* The app is a top-nav layout (no sidebar), so the mobile strategy is: collapse the nav links
@@ -571,8 +801,6 @@ table.data-table tbody tr:hover td { background: var(--accent-soft); }
   .exam-main { overflow-y: visible; }
   .modal-box { max-width: 520px; }
   /* Nav wraps rather than squeezing Back/Home off-screen - both must stay reachable. */
-  .app-nav { flex-wrap: wrap; gap: 10px; padding: 12px 16px; }
-  .app-nav .nav-left { flex-wrap: wrap; }
 }
 
 @media (max-width: 767px) {
@@ -585,17 +813,7 @@ table.data-table tbody tr:hover td { background: var(--accent-soft); }
   .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
 
   /* Nav: brand + toggle on one row, links revealed underneath on demand. */
-  .app-nav { flex-wrap: wrap; gap: 8px; padding: 10px 12px; }
-  .app-nav .nav-left { flex-wrap: wrap; width: 100%; gap: 6px; }
-  .app-nav .nav-links { display: none; width: 100%; flex-direction: column; align-items: stretch; gap: 4px; }
-  .app-nav .nav-links.is-open { display: flex; }
-  .app-nav .nav-links a { display: block; }
-  .app-nav .nav-links span { display: block; text-align: left; border-radius: 8px; padding: 10px 14px; }
-  .nav-toggle { display: inline-flex; }
-  .profile-wrap { width: 100%; justify-content: space-between; }
   /* The name beside the avatar is the first thing to sacrifice for width. */
-  .profile-trigger .profile-name { display: none; }
-  .profile-menu { right: 0; left: auto; width: min(230px, calc(100vw - 32px)); }
 
   .btn-row { flex-wrap: wrap; }
 
@@ -631,9 +849,9 @@ table.data-table tbody tr:hover td { background: var(--accent-soft); }
          grow back to something tappable. --- */
   .btn { min-height: 40px; padding: 10px 16px; }
   .btn.small { min-height: 38px; padding: 8px 14px; font-size: 12px; }
-  .nav-back, .nav-toggle { min-height: 38px; }
-  .profile-trigger { min-height: 38px; padding: 6px; }
-  .profile-menu .pitem { padding: 12px 14px; }
+  .nav-back, .sidebar-toggle { min-height: 38px; }
+  .sidebar-user-trigger { min-height: 38px; padding: 6px; }
+  .sidebar-user-menu .pitem { padding: 12px 14px; }
   .link-text { display: inline-block; padding: 4px 0; }
   /* In-row table actions get a bigger hit area, but not the full 40px used for standalone
      buttons - that would nearly double the height of every row in a dense table. */

@@ -6,7 +6,7 @@ the same person - while the All Candidates page itself already collapsed to one 
 (services/access.dedupe_by_profile) so they can't disagree again.
 """
 
-from datetime import date
+from datetime import date, timedelta
 
 from django.utils import timezone
 
@@ -107,3 +107,84 @@ class TestTotalCandidatesCountsPeopleNotRows:
         stats = build_dashboard_summary(admin_user)['stats']
 
         assert stats['completed'] == 0
+
+
+class TestThisWeekFiguresAreMeasuredNotEstimated:
+    """The "+N this week" line beside each counter.
+
+    These exist because the reference design showed a week-on-week trend and nothing in the API
+    carried one - so rather than compute something plausible in the frontend, where an invented
+    number would sit beside real ones and look identical to them, the figures are derived from
+    timestamps here. What they are must therefore be exactly what they claim: a count of what
+    arrived in the last seven days, which for a running total is how much higher the number is
+    than it was a week ago.
+    """
+
+    def test_a_candidate_added_this_week_is_counted(self, admin_user, make_batch, make_candidate):
+        batch = make_batch(admin_user)
+        make_candidate(batch, admin_user)
+
+        stats = build_dashboard_summary(admin_user)['stats']
+
+        assert stats['total_candidates'] == 1
+        assert stats['total_candidates_this_week'] == 1
+
+    def test_a_candidate_added_before_the_window_is_not(
+        self, admin_user, make_batch, make_candidate
+    ):
+        """The one that would pass anyway if the filter did nothing at all."""
+        batch = make_batch(admin_user)
+        old = make_candidate(batch, admin_user)
+        Candidate.objects.filter(pk=old.pk).update(
+            created_at=timezone.now() - timedelta(days=30))
+
+        stats = build_dashboard_summary(admin_user)['stats']
+
+        assert stats['total_candidates'] == 1, 'the running total still counts them'
+        assert stats['total_candidates_this_week'] == 0, 'but not as new this week'
+
+    def test_the_boundary_is_seven_days(self, admin_user, make_batch, make_candidate):
+        """Six days ago is inside the window, eight days ago is outside it."""
+        batch = make_batch(admin_user)
+        inside = make_candidate(batch, admin_user)
+        outside = make_candidate(batch, admin_user)
+        Candidate.objects.filter(pk=inside.pk).update(
+            created_at=timezone.now() - timedelta(days=6))
+        Candidate.objects.filter(pk=outside.pk).update(
+            created_at=timezone.now() - timedelta(days=8))
+
+        stats = build_dashboard_summary(admin_user)['stats']
+
+        assert stats['total_candidates'] == 2
+        assert stats['total_candidates_this_week'] == 1
+
+    def test_completed_this_week_follows_when_the_attempt_was_submitted(
+        self, admin_user, make_batch, make_candidate, make_invitation
+    ):
+        """Not when the candidate was created. A candidate added months ago who sat their exam
+        yesterday is new to Completed this week, and that is the number the card reports.
+        """
+        batch = make_batch(admin_user)
+        candidate = make_candidate(batch, admin_user)
+        Candidate.objects.filter(pk=candidate.pk).update(
+            created_at=timezone.now() - timedelta(days=60))
+        invitation = make_invitation(candidate, admin_user)
+        ExamAttempt.objects.create(
+            invitation=invitation, candidate=candidate,
+            status=ExamAttempt.Status.SUBMITTED, submitted_at=timezone.now(),
+        )
+
+        stats = build_dashboard_summary(admin_user)['stats']
+
+        assert stats['completed'] == 1
+        assert stats['completed_this_week'] == 1
+        assert stats['total_candidates_this_week'] == 0, 'the person is not new, the result is'
+
+    def test_every_counter_has_a_this_week_partner(self, admin_user):
+        """The frontend reads `${key}_this_week` for each card, so a counter without one would
+        silently render no trend line rather than fail.
+        """
+        stats = build_dashboard_summary(admin_user)['stats']
+
+        for key in ('active_batches', 'total_candidates', 'completed', 'total_pass'):
+            assert f'{key}_this_week' in stats, f'{key} has no this-week figure'
