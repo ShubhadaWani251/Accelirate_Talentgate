@@ -403,9 +403,11 @@ and production starts without it.
 
 The production stage does not run when `main` is pushed. After a staging deploy has succeeded
 and the build has been used there, open that run and start **Deploy to production**. It
-downloads that run's `talentgate` artifact and zip-deploys it. `talentgate-production` then
-waits for one approver, and the person who queued the run cannot approve it. Approvers are the
-same three people as staging. Approvals expire after 30 days.
+downloads that run's `talentgate` artifact and zip-deploys it. The run has to be one whose
+pipeline file already contains this stage, so the first run that can be promoted is the next
+push to `main` after it landed. `talentgate-production` then waits for one approver, and the
+person who queued the run cannot approve it. Approvers are the same three people as staging.
+Approvals expire after 30 days.
 
 **The production identity cannot deploy until an Owner grants its role.** Same constraint as
 staging: this project's maintainers cannot write role assignments. Until the following has been
