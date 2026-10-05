@@ -173,6 +173,11 @@ h1, h2, h3, h4, .brand, .btn, .box-label {
   background: var(--brand-navy); border-right: 1px solid rgba(255,255,255,.07);
   padding: 14px 12px 12px; gap: 8px;
 }
+/* Collapsed outright by the brand header's toggle rather than narrowed to an icon rail: 232px
+   is either worth its width or it is not, and a rail trades the labels for a guessing game.
+   The page simply takes the space back. Overridden inside the 900px query below, where hiding
+   is the transform's job so the slide-over can animate. */
+.app-sidebar:not(.is-open) { display: none; }
 .sidebar-links { display: flex; flex-direction: column; gap: 3px; }
 .sidebar-link {
   display: flex; align-items: center; gap: 11px; padding: 10px 12px; border-radius: 10px;
@@ -241,10 +246,20 @@ h1, h2, h3, h4, .brand, .btn, .box-label {
 .page-topbar { display: flex; align-items: center; gap: 8px; padding: 12px 24px 0; }
 .page-topbar:empty { display: none; }
 .btn.small { display: inline-flex; align-items: center; gap: 6px; }
-/* The sidebar is always visible above 900px, so its opener is not. Qualified with .btn because
-   .btn.small carries display:inline-flex at two-class specificity - an unqualified
-   .sidebar-toggle loses to it and the button stayed visible on desktop. */
-.btn.sidebar-toggle { display: none; }
+
+/* The sidebar's opener, in the brand header beside the logo. Not a .btn: the header is a dark
+   surface and the light button styling would sit on it as a bright slab, so this is a quiet
+   icon that borrows the tagline's colour and only fills in on hover. */
+.brand-nav-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; flex-shrink: 0; margin-right: 2px;
+  background: transparent; border: 1px solid rgba(255,255,255,.14); border-radius: 9px;
+  color: #d9e3f7; font-size: 17px; cursor: pointer;
+  transition: background .15s ease, border-color .15s ease;
+}
+.brand-nav-toggle:hover { background: rgba(255,255,255,.1); border-color: rgba(255,255,255,.28); }
+.brand-nav-toggle:focus-visible { outline: 2px solid #8fb6ff; outline-offset: 2px; }
+
 .sidebar-scrim {
   display: none; position: fixed; inset: 0; background: rgba(11,31,77,.4); border: none;
   padding: 0; z-index: 44; cursor: pointer;
@@ -258,8 +273,10 @@ h1, h2, h3, h4, .brand, .btn, .box-label {
     transform: translateX(-100%); transition: transform .2s ease;
     box-shadow: 0 0 34px rgba(11,31,77,.22); overflow-y: auto;
   }
+  /* Hidden by the transform here, not by display, so it can actually slide. This undoes the
+     desktop rule above, and must stay after it to win on equal specificity. */
+  .app-sidebar:not(.is-open) { display: flex; }
   .app-sidebar.is-open { transform: translateX(0); }
-  .btn.sidebar-toggle { display: inline-flex; }
   .sidebar-scrim { display: block; }
 }
 
@@ -849,7 +866,9 @@ a.stat-card:hover { box-shadow: 0 6px 18px rgba(16,24,40,.10); transform: transl
          grow back to something tappable. --- */
   .btn { min-height: 40px; padding: 10px 16px; }
   .btn.small { min-height: 38px; padding: 8px 14px; font-size: 12px; }
-  .nav-back, .sidebar-toggle { min-height: 38px; }
+  .nav-back { min-height: 38px; }
+  /* The only way to reach navigation on a phone, so it gets a full touch target. */
+  .brand-nav-toggle { width: 38px; height: 38px; }
   .sidebar-user-trigger { min-height: 38px; padding: 6px; }
   .sidebar-user-menu .pitem { padding: 12px 14px; }
   .link-text { display: inline-block; padding: 4px 0; }

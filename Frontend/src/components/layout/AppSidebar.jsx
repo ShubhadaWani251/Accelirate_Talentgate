@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useSelector } from 'react-redux';
 import {
-  LuArrowLeft, LuBookOpen, LuChevronRight, LuDownload, LuLayoutDashboard, LuLogOut, LuMenu,
+  LuArrowLeft, LuBookOpen, LuChevronRight, LuDownload, LuLayoutDashboard, LuLogOut,
   LuPlus, LuScrollText, LuSettings, LuUserCog, LuUsers,
 } from 'react-icons/lu';
 import { selectUser } from '../../features/auth/authSlice';
@@ -49,7 +49,12 @@ const ACTIONS = [
 // Renders the whole body row - sidebar beside the page - rather than just the sidebar, because
 // the Back/Menu strip belongs above the page content and the open/closed state is shared between
 // the two. Keeping both here keeps that state local instead of threading it through the layout.
-export default function AppSidebar({ children }) {
+// navOpen/onCloseNav are owned by ProtectedLayout, because the toggle that drives them lives in
+// the brand header - a sibling of this component, not a descendant. Below 900px "open" means the
+// sidebar slides over the page (see theme.css); above it, open or closed is simply whether the
+// column is there, since a fixed 232px column leaves too little room for a data table on a phone
+// but is worth its width on a monitor.
+export default function AppSidebar({ children, navOpen = true, onCloseNav }) {
   const user = useSelector(selectUser);
   const navigate = useNavigate();
   const logout = useLogout();
@@ -59,9 +64,6 @@ export default function AppSidebar({ children }) {
   // works from whichever screen the sidebar is on. ExportModal is self-contained - omitting
   // batchId is what makes it export every candidate rather than one batch's.
   const [exportOpen, setExportOpen] = useState(false);
-  // Below 900px the sidebar slides over the page instead of sitting beside it (see theme.css),
-  // because a fixed 232px column leaves too little room for a data table on a phone.
-  const [navOpen, setNavOpen] = useState(false);
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -72,8 +74,13 @@ export default function AppSidebar({ children }) {
     return () => document.removeEventListener('mousedown', onClickOutside);
   }, []);
 
-  // Close the slide-over on navigation, otherwise it stays open covering the page just asked for.
-  useEffect(() => { setNavOpen(false); }, [location.pathname]);
+  // Close the slide-over on navigation, otherwise it stays open covering the page just asked
+  // for. Guarded by the breakpoint, which matters now the state is shared with the header's
+  // toggle: on a desktop the sidebar is not covering anything, and collapsing it on every click
+  // would make the navigation destroy itself each time it was used.
+  useEffect(() => {
+    if (!window.matchMedia('(min-width: 901px)').matches) onCloseNav?.();
+  }, [location.pathname, onCloseNav]);
 
   const isAdmin = user?.role_code === 'admin';
   const links = NAV_LINKS[user?.role_code] || [];
@@ -98,7 +105,7 @@ export default function AppSidebar({ children }) {
           type="button"
           className="sidebar-scrim"
           aria-label="Close navigation menu"
-          onClick={() => setNavOpen(false)}
+          onClick={onCloseNav}
         />
       )}
 
@@ -130,7 +137,7 @@ export default function AppSidebar({ children }) {
                 key={label}
                 type="button"
                 className="sidebar-action"
-                onClick={() => { setNavOpen(false); setExportOpen(true); }}
+                onClick={() => { onCloseNav?.(); setExportOpen(true); }}
               >
                 <Icon className="sidebar-icon" aria-hidden="true" /><span>{label}</span>
               </button>
@@ -188,18 +195,9 @@ export default function AppSidebar({ children }) {
       <div className="page-col">
         {/* A thin strip above the page rather than inside the sidebar: Back is about the content
             below it, not about navigation, and it only appears on pages with somewhere to go
-            back to. The toggle beside it is the slide-over's only opener under 900px. */}
+            back to. It used to carry a Menu button too; that moved to the brand header, where it
+            sits beside the logo and is reachable at every width rather than only under 900px. */}
         <div className="page-topbar">
-          <button
-            type="button"
-            className="btn small sidebar-toggle"
-            onClick={() => setNavOpen((o) => !o)}
-            aria-expanded={navOpen}
-            aria-controls="app-sidebar"
-            aria-label={navOpen ? 'Hide navigation menu' : 'Show navigation menu'}
-          >
-            <LuMenu aria-hidden="true" /> Menu
-          </button>
           {!atHome && (
             <button className="btn small nav-back" onClick={handleBack}>
               <LuArrowLeft aria-hidden="true" /> Back
