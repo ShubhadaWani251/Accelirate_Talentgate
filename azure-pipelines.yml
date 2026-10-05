@@ -214,7 +214,16 @@ stages:
   # nothing in the artifact is environment-specific.
   - stage: DeployProduction
     displayName: Deploy to production
-    dependsOn: DeployStaging
+    # No dependsOn, deliberately. Azure DevOps rejects the whole file if a `trigger: manual`
+    # stage declares one - "Manually triggered stages cannot have dependencies" - and it
+    # rejects it at trigger time, before a run record exists. The symptom is therefore not a
+    # failed build but pushes to main and feature/* that silently build nothing at all, with
+    # no run to open and no notification worth the name. Do not add it back to express
+    # ordering: the comment above IS the ordering, and a person applies it by choosing which
+    # run to start this from.
+    #
+    # succeeded() consequently has no upstream stage to report on and does not gate this on
+    # staging. The manual trigger and the branch check beside it are the real guards.
     trigger: manual
     condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
     variables:
