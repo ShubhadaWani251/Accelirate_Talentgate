@@ -309,8 +309,9 @@ project's staging database and, on its Burstable B1ms tier, admits 50 client con
 across all of them. `talentgate_app` is capped at 15 of those (`CONNECTION LIMIT`), owns only
 `talentgate_stg`, and has no rights on anything else there; keep `WEB_CONCURRENCY` ×
 `WEB_THREADS` plus the scheduler loops in `startup.sh` under that cap, or the overflow fails with
-"too many connections for role" rather than queueing. Production (`pgsql-accelinternal-prod-eastus`)
-is not deployed for this project.
+"too many connections for role" rather than queueing. Production is a separate app,
+`app-aptitude-prod-eastus`, on the shared prod plan and the shared prod Postgres server. See
+[Promoting a build to production](#promoting-a-build-to-production).
 
 Both figures are read live by `GET /api/diagnostics/` (admin only, see `views/diagnostics.py`),
 which is how the server-wide number was corrected from the 35 stated here previously - it is 50.
@@ -366,9 +367,11 @@ az webapp config appsettings set -g AccelirateInternalProjects -n app-aptitude-s
              GRAPH_CLIENT_SECRET='...' GRAPH_SENDER='...'
 ```
 
-**Only `main` deploys**; feature branches build and test and stop there. The service connection is
-validated at queue time for *every* run, including feature-branch runs whose deploy stage the
-condition skips, so deleting or renaming it breaks all builds rather than only deployments.
+**Only `main` deploys**; feature branches build and test and stop there. Every service
+connection the YAML names is validated when the run is queued, before any stage is skipped. A
+feature branch that has not merged this file still only names `Aptitude-Staging`. A run of
+`main` names `Aptitude-Staging` and `Aptitude-Production`, so deleting or renaming either one
+breaks pushes to `main`.
 
 **The deploy stage waits for a human.** The `talentgate-staging` environment carries a required
 approval, so a push to `main` builds and tests without interruption and then pauses before
@@ -376,6 +379,52 @@ deploying. That gate exists because staging runs against the Postgres server hol
 data, and there should be no unattended path from `git push` to that data. Approvals expire after
 30 days. Validate risky changes on a `feature/*` branch first — the trigger covers them, and the
 deploy stage's branch condition skips them, so the gate is never even reached.
+
+### Promoting a build to production
+
+Production gets the **same artifact** a staging deploy already ran, not a copy of staging and not
+a second build. The database, evidence and secrets stay where they are.
+
+| | Staging | Production |
+|---|---|---|
+| App | `app-aptitude-stg-eastus` | `app-aptitude-prod-eastus` (shared plan `asp-accelinternal-prod-eastus`, Linux B3) |
+| Database | `talentgate_stg` on `pgsql-accelinternal-stg-eastus` | `talentgate_prod` on `pgsql-accelinternal-prod-eastus` |
+| Login role | `talentgate_app`, 15 connections | `talentgate_app`, 15 connections (a different password; roles are per server) |
+| Evidence | `staptitudestgeus` / `proctoring-evidence` | `staptitudeprodeus` / `proctoring-evidence` |
+| Pipeline connection | `Aptitude-Staging` | `Aptitude-Production` |
+| Deploy identity | `id-aptitude-deploy-stg-eastus` | `id-aptitude-deploy-prod-eastus` |
+| Environment gate | `talentgate-staging` | `talentgate-production` |
+
+`talentgate_prod` was created empty on 2026-10-05, owned by `talentgate_app`. An older database
+named `TalentGate` on that server held 29 empty tables and an empty `django_migrations`, which
+`startup.sh` would have crashed on; it was dropped. The first production deploy applies the
+migrations itself. Do not restore `talentgate_stg` into it. Staging holds real candidate data,
+and production starts without it.
+
+The production stage does not run when `main` is pushed. After a staging deploy has succeeded
+and the build has been used there, open that run and start **Deploy to production**. It
+downloads that run's `talentgate` artifact and zip-deploys it. `talentgate-production` then
+waits for one approver, and the person who queued the run cannot approve it. Approvers are the
+same three people as staging. Approvals expire after 30 days.
+
+**The production identity cannot deploy until an Owner grants its role.** Same constraint as
+staging: this project's maintainers cannot write role assignments. Until the following has been
+run, the stage fails on authorization and the app is unchanged.
+
+```bash
+az role assignment create --role "Website Contributor" \
+  --assignee-object-id f8fabe31-66a3-40dc-a0ed-9a015fa70b3a --assignee-principal-type ServicePrincipal \
+  --scope /subscriptions/20bc5b3e-36db-4f0e-b0ef-6c66e3bac173/resourceGroups/AccelirateInternalProjects/providers/Microsoft.Web/sites/app-aptitude-prod-eastus
+```
+
+In the portal that is `app-aptitude-prod-eastus` → Access control (IAM) → Add role assignment →
+Website Contributor → **Managed identity** → `id-aptitude-deploy-prod-eastus`.
+
+Production app settings are its own: a new `SECRET_KEY`, a new database password, a new
+`AADHAAR_HASH_PEPPER`, and `FRONTEND_ORIGIN` / `STAFF_APP_URL` /
+`ALLOWED_HOSTS` pointing at `https://app-aptitude-prod-eastus.azurewebsites.net`. The Graph
+mail settings match staging, so production sends as the same mailbox, with production links.
+`REDIS_URL` and `SUPPORT_EMAIL` are still unset, as they are on staging.
 
 #### Migration state: `main` and the database are in step
 

@@ -23,9 +23,11 @@ variables:
   # differently across minor versions fails in CI rather than only after deployment.
   pythonVersion: '3.13'
   nodeVersion: '24.x'
-  # Signs in as the managed identity id-aptitude-deploy-stg-eastus, whose only role is Website
-  # Contributor on webAppName: it can deploy this one app and nothing else in the shared resource
-  # group, so pointing webAppName anywhere else needs a role assignment there first.
+  # Staging defaults. The production stage below overrides the connection and the app name.
+  # Each identity's only role is Website Contributor on its own app, so a stage cannot deploy
+  # the other environment, and neither can touch the rest of the shared resource group.
+  # Both connections are validated when a main run is queued, including one whose production
+  # stage nobody starts.
   azureServiceConnection: 'Aptitude-Staging'
   resourceGroupName: 'AccelirateInternalProjects'
   webAppName: 'app-aptitude-stg-eastus'
@@ -203,4 +205,40 @@ stages:
                     # Runs migrations and collectstatic before handing off to gunicorn. App Service
                     # never runs docker-entrypoint.sh on a code deployment, so this script is the
                     # only thing that applies migrations - see Backend/startup.sh.
+                    startUpCommand: 'sh startup.sh'
+
+  # Manual on purpose. Depending on staging and waiting for its approval would raise a
+  # production approval on every push to main. This stage stays idle until someone opens a
+  # main run whose staging deploy succeeded and starts it, which deploys that run's artifact
+  # again. App settings on the production app supply its own database, storage and secrets;
+  # nothing in the artifact is environment-specific.
+  - stage: DeployProduction
+    displayName: Deploy to production
+    dependsOn: DeployStaging
+    trigger: manual
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    variables:
+      azureServiceConnection: 'Aptitude-Production'
+      webAppName: 'app-aptitude-prod-eastus'
+    jobs:
+      - deployment: DeployProdWebApp
+        displayName: Deploy App Service
+        pool:
+          vmImage: ubuntu-latest
+        environment: talentgate-production
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: talentgate
+
+                - task: AzureWebApp@1
+                  displayName: Deploy to $(webAppName)
+                  inputs:
+                    azureSubscription: '$(azureServiceConnection)'
+                    appType: webAppLinux
+                    appName: '$(webAppName)'
+                    resourceGroupName: '$(resourceGroupName)'
+                    package: '$(Pipeline.Workspace)/talentgate/talentgate.zip'
                     startUpCommand: 'sh startup.sh'
