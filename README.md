@@ -368,10 +368,15 @@ az webapp config appsettings set -g AccelirateInternalProjects -n app-aptitude-s
 ```
 
 **Only `main` deploys**; feature branches build and test and stop there. Every service
-connection the YAML names is validated when the run is queued, before any stage is skipped. A
-feature branch that has not merged this file still only names `Aptitude-Staging`. A run of
-`main` names `Aptitude-Staging` and `Aptitude-Production`, so deleting or renaming either one
-breaks pushes to `main`.
+connection the YAML names is validated when the run is queued, before any stage is skipped, so
+deleting or renaming one breaks pushes rather than only deployments. `Aptitude-Staging` is the
+only connection the pipeline names.
+
+This is worth knowing precisely, because the failure is silent. When a run's YAML names a
+connection that cannot be resolved, Azure DevOps does not create the run at all: there is no
+failed build to open, and the runs list simply stops growing. Between 2026-10-05 00:47 and
+11:50 every push to `main` and `feature/*` produced nothing for this reason, and staging served
+a four-day-old build throughout without anything reporting an error.
 
 **The deploy stage waits for a human.** The `talentgate-staging` environment carries a required
 approval, so a push to `main` builds and tests without interruption and then pauses before
@@ -381,6 +386,14 @@ data, and there should be no unattended path from `git push` to that data. Appro
 deploy stage's branch condition skips them, so the gate is never even reached.
 
 ### Promoting a build to production
+
+> **Not in the pipeline right now.** The `DeployProduction` stage was removed on 2026-10-05:
+> it named the `Aptitude-Production` service connection, and because connections are resolved
+> at queue time (above), naming one that is not usable stopped every push to `main` from
+> producing a build at all. The prerequisites below — chiefly the role assignment an Owner has
+> to grant — were never completed, so the stage could not have deployed successfully either.
+> This section is kept as the record of what production is and what it still needs; restore
+> the stage once the role assignment exists and the connection resolves.
 
 Production gets the **same artifact** a staging deploy already ran, not a copy of staging and not
 a second build. The database, evidence and secrets stay where they are.
