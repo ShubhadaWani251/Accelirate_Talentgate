@@ -422,9 +422,13 @@ push to `main` after it landed. `talentgate-production` then waits for one appro
 person who queued the run cannot approve it. Approvers are the same three people as staging.
 Approvals expire after 30 days.
 
-**The production identity cannot deploy until an Owner grants its role.** Same constraint as
-staging: this project's maintainers cannot write role assignments. Until the following has been
-run, the stage fails on authorization and the app is unchanged.
+**Rebuilding the app means granting this identity's role again.** An Owner granted it on
+2026-10-05. Granting roles takes Owner or User Access Administrator, which this project's
+maintainers don't hold. Without it the production stage fails on authorization
+(`does not have authorization to perform action 'Microsoft.Web/sites/config/list/action'`)
+and the app is unchanged. The role belongs to the identity, not a person: in the portal choose
+**Managed identity** on the Members tab. Azure can take up to 10 minutes to honor a new
+assignment.
 
 ```bash
 az role assignment create --role "Website Contributor" \
