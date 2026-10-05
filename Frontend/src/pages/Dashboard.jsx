@@ -24,11 +24,20 @@ const STATUS_PILL = { draft: 'gray', in_progress: 'blue', completed: 'green', ca
 // total those mean the same thing, and this is the one that says what was actually measured:
 // the figure counts rows whose timestamp falls in the window, because no previous-period
 // snapshot is stored for anything to be compared against.
+// All four describe the work currently running - candidates sitting in a batch that is In
+// Progress (see serializers/dashboard.build_dashboard_summary, which scopes the numbers the same
+// way). Each link carries that scope as `batch_status`, so following a card lands on exactly the
+// rows it counted rather than on a longer list the reader has to re-filter themselves.
+//
+// Completed is `status=completed`, which the candidates endpoint resolves through the latest
+// attempt rather than Candidate.status - nothing ever writes COMPLETED to that field. Before
+// this, the link already said status=completed and the endpoint simply ignored it, so the card
+// led to an unfiltered list.
 const STAT_CARDS = [
   { key: 'active_batches', label: 'Active Batches', to: '/batches', Icon: LuLayers, tone: 'blue' },
-  { key: 'total_candidates', label: 'Total Candidates', to: '/candidates', Icon: LuUsers, tone: 'indigo' },
-  { key: 'completed', label: 'Completed', to: '/candidates?status=completed', Icon: LuCircleCheckBig, tone: 'violet' },
-  { key: 'total_pass', label: 'Passed', to: '/candidates?result=pass', Icon: LuTrophy, tone: 'green' },
+  { key: 'total_candidates', label: 'Total Candidates', to: '/candidates?batch_status=in_progress', Icon: LuUsers, tone: 'indigo' },
+  { key: 'completed', label: 'Completed', to: '/candidates?batch_status=in_progress&status=completed', Icon: LuCircleCheckBig, tone: 'violet' },
+  { key: 'total_pass', label: 'Passed', to: '/candidates?batch_status=in_progress&result=pass', Icon: LuTrophy, tone: 'green' },
 ];
 
 const RESULT_BANDS = [
@@ -181,8 +190,12 @@ export default function Dashboard() {
   return (
     <div>
       <h3>{isAdmin ? 'Administrator Dashboard' : 'TA Dashboard'}</h3>
+      {/* The second sentence is not decoration. "Total Candidates" over a scoped figure reads as
+          every candidate who has ever been uploaded, so the scope has to be stated once, here,
+          where it governs the whole row below. */}
       <div className="page-sub">
-        Overview of your aptitude test batches and candidate performance
+        Overview of your aptitude test batches and candidate performance.
+        {' '}Figures below cover batches that are currently In Progress.
       </div>
 
       <div className="stat-row">

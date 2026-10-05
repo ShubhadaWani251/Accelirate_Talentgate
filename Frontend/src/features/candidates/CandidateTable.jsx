@@ -1,7 +1,9 @@
+import { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { SkeletonTableRows } from '../../components/loading/Skeleton';
 import { formatDateDMY } from '../../utils/datetime';
+import { allSelectedOnPage, selectedOffPageCount, someSelectedOnPage } from './selection';
 
 const STATUS_PILL = {
   pending_invite: 'gray', invited: 'blue', in_progress: 'blue',
@@ -27,6 +29,16 @@ export default function CandidateTable({
   // 19 fixed columns plus one per section - the count is no longer a constant, and the skeleton
   // and empty-state row have to match the header or the table renders visibly ragged.
   const columnCount = 19 + sections.length;
+
+  // Select All describes THIS PAGE, and the selection outlives pagination - see ./selection.
+  const allOnPage = allSelectedOnPage(selected, candidates);
+  const someOnPage = someSelectedOnPage(selected, candidates);
+  const offPage = selectedOffPageCount(selected, candidates);
+  // indeterminate is a DOM property with no HTML attribute, so React cannot set it as a prop.
+  const selectAllRef = useRef(null);
+  useEffect(() => {
+    if (selectAllRef.current) selectAllRef.current.indeterminate = someOnPage;
+  }, [someOnPage]);
   // Only checked rows are emailed, so an empty selection is a mistake worth naming rather
   // than a silently dead button.
   function requireSelection(action) {
@@ -43,9 +55,21 @@ export default function CandidateTable({
     <>
       <div className="btn-row" style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 12 }}>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5 }}>
-          <input type="checkbox" checked={selected.size === candidates.length && candidates.length > 0} onChange={onToggleSelectAll} />
+          <input
+            type="checkbox"
+            ref={selectAllRef}
+            checked={allOnPage}
+            onChange={onToggleSelectAll}
+          />
           <b>Select All</b>
         </label>
+        {/* Named because the buttons beside this can otherwise read "(12)" while twelve rows
+            are visibly not on screen, which looks like a bug rather than a working selection. */}
+        {offPage > 0 && (
+          <span className="muted" style={{ fontSize: 12.5 }}>
+            +{offPage} selected on other pages
+          </span>
+        )}
         {/* Passed by both Batch Details and All Candidates. Sends a genuinely NEW token, so it
             also covers candidates whose original link expired. Still prop-gated rather than
             always-on, so a future caller can render this table without the email actions. */}

@@ -14,7 +14,12 @@
 //
 // Clearing still works because both callers REPLACE the filter state with this object rather
 // than merging into it, which drops any section keys that had been typed in.
+// batch_status and status have no control in CandidateFilters on purpose. They arrive from the
+// dashboard's stat cards as URL scope, and AllCandidates announces them in a banner with a way
+// out - the same treatment batch_id already gets. A filter the panel cannot show but the request
+// still carries is otherwise a table quietly hiding rows for no visible reason.
 export const EMPTY_CANDIDATE_FILTERS = {
   name: '', email: '', aadhaar: '', batch_id: '', result: '',
+  batch_status: '', status: '',
   score_min: '', score_max: '',
 };

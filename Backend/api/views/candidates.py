@@ -260,6 +260,18 @@ class CandidateListView(APIView):
         if aadhaar:
             qs = qs.filter(aadhaar_last4__icontains=aadhaar)
 
+        # Scopes the list to candidates sitting in a batch of this status - how the dashboard's
+        # stat cards hand their own scope across (?batch_status=in_progress), so clicking a
+        # number lands on exactly the rows it counted.
+        #
+        # Applied BEFORE the dedupe below, for the reason build_dashboard_summary applies it
+        # before its own: dedupe keeps each person's most recently created batch membership, so
+        # deduping first would drop someone whose newest membership is in a finished batch even
+        # though they are also sitting in a running one.
+        batch_status = request.query_params.get('batch_status', '').strip()
+        if batch_status:
+            qs = qs.filter(batch__status=batch_status)
+
         batch_id = request.query_params.get('batch_id')
         if batch_id:
             qs = qs.filter(batch_id=batch_id)
@@ -272,6 +284,21 @@ class CandidateListView(APIView):
         result = request.query_params.get('result', '').strip()
         if result:
             qs = qs.filter(result=result)
+
+        # `status=completed` deliberately does NOT read Candidate.status: nothing ever writes
+        # COMPLETED there (see serializers/candidates._effective_status). A candidate has
+        # finished when their most recent attempt was submitted, which is what the Status column
+        # and the dashboard's Completed card already both mean by it - and the dashboard counts
+        # it with this same -attempt_id subquery, so the number and this list cannot disagree.
+        # Named attempt_status locally because `status` here is rest_framework's status module.
+        attempt_status = request.query_params.get('status', '').strip()
+        if attempt_status == 'completed':
+            qs = qs.annotate(
+                latest_attempt_status=Subquery(
+                    ExamAttempt.objects.filter(candidate=OuterRef('pk'))
+                    .order_by('-attempt_id').values('status')[:1]
+                )
+            ).filter(latest_attempt_status=ExamAttempt.Status.SUBMITTED)
 
         qs = _apply_score_filters(qs, request.query_params)
 

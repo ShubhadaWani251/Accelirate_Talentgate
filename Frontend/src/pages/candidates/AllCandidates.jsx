@@ -7,6 +7,7 @@ import * as questionApi from '../../api/questionApi';
 import CandidateFilters from '../../features/candidates/CandidateFilters';
 import { EMPTY_CANDIDATE_FILTERS } from '../../features/candidates/candidateFilterDefaults';
 import CandidateTable from '../../features/candidates/CandidateTable';
+import { togglePageSelection } from '../../features/candidates/selection';
 import EditCandidateModal from '../../features/candidates/EditCandidateModal';
 import NotifyModal from '../../features/candidates/NotifyModal';
 import CertificationModal from '../../features/candidates/CertificationModal';
@@ -21,7 +22,16 @@ const EMPTY_FILTERS = EMPTY_CANDIDATE_FILTERS;
 
 export default function AllCandidates() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [filters, setFilters] = useState({ ...EMPTY_FILTERS, batch_id: searchParams.get('batch') || '' });
+  // Seeded from the URL so the dashboard's stat cards can hand their own scope across: each card
+  // links here carrying the filters it counted with, which is what makes clicking a number land
+  // on exactly the rows behind it.
+  const [filters, setFilters] = useState({
+    ...EMPTY_FILTERS,
+    batch_id: searchParams.get('batch') || '',
+    batch_status: searchParams.get('batch_status') || '',
+    status: searchParams.get('status') || '',
+    result: searchParams.get('result') || '',
+  });
   const [candidates, setCandidates] = useState([]);
   const [page, setPage] = useState(1);
   const [pageMeta, setPageMeta] = useState({ count: 0, next: null, previous: null });
@@ -101,6 +111,23 @@ export default function AllCandidates() {
     refresh(next, 1);
   }
 
+  // batch_status and status have no control in the filter panel (see candidateFilterDefaults),
+  // so arriving from a stat card would otherwise mean a table quietly showing a subset with
+  // nothing on screen explaining why, and no way back to the full list.
+  const scopeNote = useMemo(() => {
+    const parts = [];
+    if (filters.batch_status === 'in_progress') parts.push('in batches that are In Progress');
+    if (filters.status === 'completed') parts.push('who have finished their exam');
+    return parts.length ? parts.join(', ') : null;
+  }, [filters.batch_status, filters.status]);
+
+  function clearScope() {
+    const next = { ...filters, batch_status: '', status: '' };
+    setFilters(next);
+    setSearchParams({});
+    refresh(next, 1);
+  }
+
   function clearFilters() {
     setFilters(EMPTY_FILTERS);
     setSearchParams({});
@@ -144,8 +171,10 @@ export default function AllCandidates() {
     });
   }
 
+  // Adds or removes THIS PAGE, keeping anything selected on the others - see
+  // features/candidates/selection.js for what this used to do instead.
   function toggleSelectAll() {
-    setSelected((prev) => (prev.size === candidates.length ? new Set() : new Set(candidates.map((c) => c.candidate_id))));
+    setSelected((prev) => togglePageSelection(prev, candidates));
   }
 
   return (
@@ -163,6 +192,13 @@ export default function AllCandidates() {
         <div className="alert" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 14 }}>
           <span>Showing candidates from <b>{filterBatchName}</b> only</span>
           <button className="btn small" onClick={clearBatchFilter}>Clear filter — show all batches</button>
+        </div>
+      )}
+
+      {scopeNote && (
+        <div className="alert" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 14 }}>
+          <span>Showing candidates <b>{scopeNote}</b></span>
+          <button className="btn small" onClick={clearScope}>Clear — show all candidates</button>
         </div>
       )}
 

@@ -22,9 +22,11 @@ def _build_stats(batches_qs, candidates_qs):
     # One aggregate query for the candidate-derived numbers (was 3 separate .count() calls),
     # same conditional-Count technique annotate_batch_counts already uses for batches.
     #
-    # candidates_qs is deduped by profile (see services/access.dedupe_by_profile) before it
-    # reaches here - "Total Candidates" counts real PEOPLE, matching what the All Candidates
-    # page itself shows, not one count per batch appearance of the same person.
+    # candidates_qs arrives scoped to In Progress batches and deduped by profile (see
+    # build_dashboard_summary, and services/access.dedupe_by_profile) - so "Total Candidates"
+    # counts real PEOPLE currently being assessed, not one count per batch appearance of the
+    # same person, and not everyone who has ever been uploaded. The All Candidates page reaches
+    # the identical set through ?batch_status=in_progress.
     #
     # "Completed" can't filter on Candidate.status=COMPLETED - nothing ever writes that value.
     # The exam-taking flow only ever moves Candidate.status pending_invite -> invited (see
@@ -179,7 +181,20 @@ def build_dashboard_summary(user, batch_status='active'):
     """
     is_admin = user.role.role_code == 'admin'
     batches_qs = _batches_qs_for(user)
-    candidates_qs = dedupe_by_profile(visible_candidates_qs(user))
+    # Every stat card describes the work CURRENTLY RUNNING: candidates sitting in a batch whose
+    # status is In Progress. "Active Batches" always meant that; the other three now agree with
+    # it, so the row reads as one thought rather than one live number beside three all-time ones.
+    #
+    # Filtered BEFORE dedupe_by_profile, which is load-bearing. Dedupe keeps each person's most
+    # recently created batch membership; deduping first would drop someone whose newest
+    # membership is in a finished batch even though they are also sitting in a running one, and
+    # they would vanish from a count of who is being assessed right now.
+    #
+    # Each card links to the All Candidates list carrying this same scope as `batch_status`
+    # (see views/candidates.CandidateListView), so clicking a number lands on the rows it counts.
+    candidates_qs = dedupe_by_profile(
+        visible_candidates_qs(user).filter(batch__status=Batch.Status.IN_PROGRESS)
+    )
 
     response = {
         'stats': _build_stats(batches_qs, candidates_qs),

@@ -10,7 +10,7 @@ from datetime import date, timedelta
 
 from django.utils import timezone
 
-from api.models import Candidate, ExamAttempt
+from api.models import Batch, Candidate, ExamAttempt
 from api.serializers.dashboard import build_dashboard_summary
 from api.services.candidate_profile import link_profile
 
@@ -188,3 +188,123 @@ class TestThisWeekFiguresAreMeasuredNotEstimated:
 
         for key in ('active_batches', 'total_candidates', 'completed', 'total_pass'):
             assert f'{key}_this_week' in stats, f'{key} has no this-week figure'
+
+
+class TestStatCardsCoverRunningBatchesOnly:
+    """Every stat card describes the work currently running - candidates in an In Progress batch.
+
+    "Active Batches" always meant that. The other three counted all time, so a dashboard could
+    report 22 active batches beside 149 candidates most of whom had finished months ago, and the
+    row read as four unrelated numbers rather than one picture.
+
+    Each card also links to All Candidates carrying ?batch_status=in_progress, so these counts
+    and that list have to agree - the last test here is the one that actually pins that.
+    """
+
+    def test_a_candidate_in_a_finished_batch_is_not_counted(
+        self, admin_user, make_batch, make_candidate, make_invitation,
+    ):
+        done = make_batch(admin_user, status=Batch.Status.COMPLETED)
+        candidate = make_candidate(done, admin_user, result=Candidate.Result.PASS)
+        ExamAttempt.objects.create(
+            candidate=candidate, invitation=make_invitation(candidate, admin_user),
+            status=ExamAttempt.Status.SUBMITTED, submitted_at=timezone.now(),
+        )
+
+        stats = build_dashboard_summary(admin_user)['stats']
+
+        assert stats['total_candidates'] == 0
+        assert stats['completed'] == 0
+        assert stats['total_pass'] == 0
+
+    def test_draft_and_cancelled_batches_are_not_counted_either(
+        self, admin_user, make_batch, make_candidate,
+    ):
+        make_candidate(make_batch(admin_user, status=Batch.Status.DRAFT), admin_user)
+        make_candidate(make_batch(admin_user, status=Batch.Status.CANCELLED), admin_user)
+
+        stats = build_dashboard_summary(admin_user)['stats']
+
+        assert stats['total_candidates'] == 0
+
+    def test_someone_in_both_a_finished_and_a_running_batch_still_counts(
+        self, admin_user, make_batch, make_candidate,
+    ):
+        """The reason the scope is applied BEFORE dedupe_by_profile rather than after.
+
+        Dedupe keeps each person's most recently created batch membership. Deduping first would
+        pick the newer, finished row here and then filter it away, dropping someone who is in
+        fact sitting in a running batch right now - the exact person this number exists to count.
+        """
+        running = make_candidate(make_batch(admin_user), admin_user,
+                                 aadhaar_last4='5678', date_of_birth=DOB)
+        link_profile(running)
+        finished = make_candidate(make_batch(admin_user, status=Batch.Status.COMPLETED),
+                                  admin_user, aadhaar_last4='5678', date_of_birth=DOB)
+        link_profile(finished)
+
+        stats = build_dashboard_summary(admin_user)['stats']
+
+        assert stats['total_candidates'] == 1
+
+    def test_the_card_and_the_list_it_links_to_report_the_same_people(
+        self, admin_user, make_batch, make_candidate, client_for,
+    ):
+        """The invariant that makes the cards clickable rather than merely decorative: following
+        a number must land on exactly the rows it counted.
+
+        Both sides reach it through their own code - build_dashboard_summary aggregates, the
+        list endpoint filters and paginates - so this is the only thing stopping them drifting.
+        """
+        for n in range(3):
+            make_candidate(make_batch(admin_user), admin_user,
+                           aadhaar_last4='90%02d' % n, date_of_birth=date(1997, 3, 1))
+        make_candidate(make_batch(admin_user, status=Batch.Status.COMPLETED), admin_user,
+                       aadhaar_last4='9900', date_of_birth=date(1996, 4, 2))
+
+        stats = build_dashboard_summary(admin_user)['stats']
+        listed = client_for(admin_user).get('/api/candidates/', {'batch_status': 'in_progress'})
+
+        assert listed.status_code == 200
+        assert stats['total_candidates'] == 3
+        assert listed.data['count'] == stats['total_candidates']
+
+    def test_the_completed_card_and_its_list_agree_too(
+        self, admin_user, make_batch, make_candidate, make_invitation, client_for,
+    ):
+        """`status=completed` resolves through the latest attempt, not Candidate.status - which
+        nothing ever writes COMPLETED to. Before this the link carried that parameter and the
+        endpoint ignored it outright, so the card led to an unfiltered list.
+        """
+        running = make_batch(admin_user)
+        finished = make_candidate(running, admin_user)
+        ExamAttempt.objects.create(
+            candidate=finished, invitation=make_invitation(finished, admin_user),
+            status=ExamAttempt.Status.SUBMITTED, submitted_at=timezone.now(),
+        )
+        still_going = make_candidate(running, admin_user)
+        ExamAttempt.objects.create(
+            candidate=still_going, invitation=make_invitation(still_going, admin_user),
+            status=ExamAttempt.Status.IN_PROGRESS,
+        )
+
+        stats = build_dashboard_summary(admin_user)['stats']
+        listed = client_for(admin_user).get(
+            '/api/candidates/', {'batch_status': 'in_progress', 'status': 'completed'})
+
+        assert stats['completed'] == 1
+        assert listed.data['count'] == stats['completed']
+        assert listed.data['results'][0]['candidate_id'] == finished.candidate_id
+
+    def test_an_unfiltered_list_is_still_everyone(
+        self, admin_user, make_batch, make_candidate, client_for,
+    ):
+        """The scope is the card's, not the page's: All Candidates without the parameter must
+        still show candidates from finished batches, or the only way to see them would be gone.
+        """
+        make_candidate(make_batch(admin_user), admin_user)
+        make_candidate(make_batch(admin_user, status=Batch.Status.COMPLETED), admin_user)
+
+        listed = client_for(admin_user).get('/api/candidates/')
+
+        assert listed.data['count'] == 2

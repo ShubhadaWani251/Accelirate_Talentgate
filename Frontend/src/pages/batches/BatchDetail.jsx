@@ -12,6 +12,7 @@ import AddCandidatesModal from '../../features/batches/AddCandidatesModal';
 import CandidateFilters from '../../features/candidates/CandidateFilters';
 import { EMPTY_CANDIDATE_FILTERS } from '../../features/candidates/candidateFilterDefaults';
 import CandidateTable from '../../features/candidates/CandidateTable';
+import { togglePageSelection } from '../../features/candidates/selection';
 import EditCandidateModal from '../../features/candidates/EditCandidateModal';
 import NotifyModal from '../../features/candidates/NotifyModal';
 import CertificationModal from '../../features/candidates/CertificationModal';
@@ -140,8 +141,10 @@ export default function BatchDetail() {
     });
   }
 
+  // Adds or removes THIS PAGE, keeping anything selected on the others - see
+  // features/candidates/selection.js for what this used to do instead.
   function toggleSelectAll() {
-    setSelected((prev) => (prev.size === candidates.length ? new Set() : new Set(candidates.map((c) => c.candidate_id))));
+    setSelected((prev) => togglePageSelection(prev, candidates));
   }
 
   if (loadError === 'notfound') return <NotFoundPage standalone={false} />;
