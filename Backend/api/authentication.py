@@ -96,7 +96,25 @@ class CandidateAttemptAuthentication(JWTAuthentication):
             raise AuthenticationFailed('Attempt not found', code='attempt_not_found')
 
         if attempt.status != ExamAttempt.Status.IN_PROGRESS:
-            raise AuthenticationFailed('This attempt is no longer active', code='attempt_closed')
+            # Carries WHY, not just "no longer active". This 401 is what a terminated candidate's
+            # browser actually receives: the violation that ended their attempt is reported, the
+            # attempt closes, and every request after it - including the report of the violation
+            # that raced it - fails authentication here, before any view runs.
+            #
+            # That makes record_violation's own 'already_closed' branch unreachable over HTTP,
+            # which is how three candidates on 2026-10-05 were shown "your assessment was ended
+            # and could not be reported to the server, please contact the Staffing team". It had
+            # been reported, and recorded, with a specific reason - they were told their exam had
+            # failed to save and sent chasing support over nothing.
+            #
+            # The message is the same one finalize_attempt would have given them, so a candidate
+            # sees the real cause whichever request happens to arrive first.
+            raise AuthenticationFailed({
+                'detail': exam_session.TERMINATION_MESSAGES.get(
+                    attempt.termination_reason, 'This attempt is no longer active.'),
+                'code': 'attempt_closed',
+                'reason': attempt.termination_reason or '',
+            }, code='attempt_closed')
 
         if exam_session.is_expired(attempt):
             exam_session.finalize_attempt(attempt, outcome='submitted')

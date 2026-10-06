@@ -101,6 +101,10 @@ urlpatterns = [
     path('exam/begin/', views.ExamBeginView.as_view(), name='exam-begin'),
     path('exam/session/', views.ExamSessionView.as_view(), name='exam-session'),
     path('exam/answers/<int:question_id>/', views.ExamAnswerView.as_view(), name='exam-answer'),
+    # Issued before the chunks themselves, so the browser can send video straight to storage
+    # instead of through a gunicorn thread - see ExamRecordingUploadUrlView.
+    path('exam/recording/upload-url/', views.ExamRecordingUploadUrlView.as_view(),
+         name='exam-recording-upload-url'),
     path('exam/recording/chunk/', views.ExamRecordingChunkView.as_view(), name='exam-recording-chunk'),
     path('exam/violation/', views.ExamViolationView.as_view(), name='exam-violation'),
     path('exam/submit/', views.ExamSubmitView.as_view(), name='exam-submit'),

@@ -54,10 +54,78 @@ export const saveAnswer = (questionId, selectedOption, timeSpentSeconds, markedF
 export const setMarkedForReview = (questionId, selectedOption, markedForReview) =>
   saveAnswer(questionId, selectedOption, undefined, markedForReview);
 
-export const uploadRecordingChunk = (chunkBlob) =>
-  examAxiosClient.post('/exam/recording/chunk/', chunkBlob, {
+// Recording chunks go STRAIGHT TO AZURE BLOB STORAGE where that is possible, and through the
+// server only when it is not.
+//
+// The server path holds a gunicorn thread for the candidate's upload and then the server's own,
+// and staging has four threads across the whole deployment. On 2026-10-05 chunk uploads ran to a
+// median of 1.6s and a worst case of 36s, in-flight requests hit that ceiling of 4, and ten
+// requests were failed by the platform without reaching Django at all. Video was eating the
+// slots the exam needed.
+//
+// Direct upload needs CORS on the storage account, which is an Azure-side change this code
+// cannot make. So it is written to be deployed BEFORE that exists: every failure falls back to
+// the server path, which is unchanged and still correct. Nothing here is a flag day - the
+// improvement simply starts applying the moment CORS is configured.
+let uploadTarget = null;        // { url, expiresAt } for the current short-lived SAS
+let uploadTargetPromise = null; // in-flight request for one, so N chunks don't fetch N URLs
+let directFailures = 0;
+
+// After this many consecutive failures, stop trying direct upload for the rest of the session.
+// Without it, an account with no CORS rule costs every single chunk a doomed round-trip before
+// the fallback even starts - slower than never having tried.
+const DIRECT_UPLOAD_GIVE_UP_AFTER = 2;
+
+function directUploadUnavailable() {
+  return directFailures >= DIRECT_UPLOAD_GIVE_UP_AFTER;
+}
+
+async function currentUploadTarget() {
+  if (directUploadUnavailable()) return null;
+  if (uploadTarget && Date.now() < uploadTarget.expiresAt) return uploadTarget.url;
+  if (!uploadTargetPromise) {
+    uploadTargetPromise = examAxiosClient
+      .get('/exam/recording/upload-url/')
+      .then((r) => {
+        // ttl_seconds is deliberately shorter than the token really lasts, so a refresh that is
+        // itself slow still lands before the old one dies.
+        uploadTarget = r.data?.url
+          ? { url: r.data.url, expiresAt: Date.now() + (r.data.ttl_seconds || 60) * 1000 }
+          : null;
+        return uploadTarget?.url ?? null;
+      })
+      .catch(() => null)
+      .finally(() => { uploadTargetPromise = null; });
+  }
+  return uploadTargetPromise;
+}
+
+export const uploadRecordingChunk = async (chunkBlob) => {
+  const target = await currentUploadTarget();
+  if (target) {
+    try {
+      // Azure's Append Block operation. The SAS carries add permission only, so this can extend
+      // this one recording and do nothing else - not read it back, not overwrite it, not touch
+      // another attempt.
+      const res = await fetch(`${target}&comp=appendblock`, {
+        method: 'PUT',
+        body: chunkBlob,
+      });
+      if (res.ok) { directFailures = 0; return res; }
+      // A 403 is usually the token having expired early; drop it so the next chunk re-mints one
+      // rather than replaying a dead token.
+      if (res.status === 403) uploadTarget = null;
+      directFailures += 1;
+    } catch {
+      // Thrown rather than returned means the browser blocked it outright - CORS not configured
+      // on the storage account is exactly this shape.
+      directFailures += 1;
+    }
+  }
+  return examAxiosClient.post('/exam/recording/chunk/', chunkBlob, {
     headers: { 'Content-Type': 'application/octet-stream' },
   });
+};
 
 // Reports a proctoring trigger. The SERVER decides whether it's a warning or a termination -
 // leaving the exam window draws on a shared budget of three warnings first, a devtools/screenshot

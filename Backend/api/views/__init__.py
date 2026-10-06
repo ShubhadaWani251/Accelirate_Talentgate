@@ -63,6 +63,7 @@ from .exam import (
     ExamSessionView,
     ExamAnswerView,
     ExamRecordingChunkView,
+    ExamRecordingUploadUrlView,
     ExamViolationView,
     ExamSubmitView,
 )
@@ -96,5 +97,6 @@ __all__ = [
     'ExamIdentityCaptureView', 'ExamSebConfigView',
     'ExamSebConfigZipView',
     'ExamBeginView', 'ExamSessionView', 'ExamAnswerView', 'ExamRecordingChunkView',
+    'ExamRecordingUploadUrlView',
     'ExamViolationView', 'ExamSubmitView',
 ]

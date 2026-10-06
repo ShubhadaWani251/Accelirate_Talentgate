@@ -292,6 +292,24 @@ the resource group Accelirate's internal projects share:
 | Storage (proctoring evidence) | `staptitudestgeus`, container `proctoring-evidence` |
 | Deploy identity | `id-aptitude-deploy-stg-eastus` (user-assigned managed identity behind the pipeline's service connection) |
 
+**The storage account needs a CORS rule before recording uploads stop going through Django.**
+Chunks are PUT straight to the evidence container with a short-lived, append-only SAS
+(`blob_storage.recording_append_url`), which keeps a 30-second video upload from holding one of
+the deployment's four request slots. Until the rule exists the browser is blocked from making
+that request, every chunk falls back to `POST /api/exam/recording/chunk/`, and nothing breaks —
+the improvement simply does not apply yet. Set it once per account:
+
+```bash
+az storage cors add --services b --methods PUT OPTIONS \
+  --origins https://app-aptitude-stg-eastus.azurewebsites.net \
+  --allowed-headers '*' --exposed-headers '*' --max-age 3600 \
+  --account-name staptitudestgeus
+```
+
+Production needs the same with its own origin and account. To confirm it is working, watch for
+`POST /api/exam/recording/chunk/` disappearing from the access log during an exam: that endpoint
+is only reached on the fallback path.
+
 **One App Service serves both the API and the frontend**, for the same-origin reason above.
 There is no Static Web App: routing the API through one would have meant the Standard plan and,
 worse, a hard 45-second ceiling on every `/api` request — which `gunicorn.conf.py` deliberately

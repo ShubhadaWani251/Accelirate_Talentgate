@@ -5,6 +5,8 @@ weaken this app in particular. Each one is a warning rather than an error: every
 below is legitimate in some deployment, and refusing to start would be wrong.
 """
 
+import os
+
 from django.conf import settings
 from django.core.checks import Warning as CheckWarning, register, Tags
 
@@ -80,4 +82,53 @@ def check_corporate_domains_not_public(app_configs, **kwargs):
              'added for deliverability testing and should not survive into production. See '
              'CORPORATE_EMAIL_DOMAIN in .env.',
         id='api.W004',
+    )]
+
+
+@register(deploy=True)
+def check_worker_count_fits_database_connection_limit(app_configs, **kwargs):
+    """Gunicorn's worker x thread count against the login role's CONNECTION LIMIT.
+
+    This exists because raising capacity is the obvious response to the app running out of
+    request slots - staging saturated its four on 2026-10-05 - and it is the one lever that can
+    turn a slow deployment into a broken one. Every gunicorn thread can hold its own database
+    connection, `talentgate_app` is capped at 15 on the server (see README), and the scheduler
+    loops in startup.sh need several more. Past the cap, connections do not queue: Postgres
+    refuses them outright with "too many connections for role", so the symptom is 500s under
+    load rather than slowness.
+
+    Threads are counted rather than workers because gthread gives each thread its own
+    connection. DB_MAX_CONNECTIONS mirrors the role's limit for deployments that have changed
+    it; the default matches what the role is actually set to today.
+    """
+    if settings.DEBUG:
+        return []
+
+    workers = int(os.environ.get('WEB_CONCURRENCY', '0') or 0)
+    threads = int(os.environ.get('WEB_THREADS', '0') or 0)
+    # Nothing set means gunicorn's own defaults are in play and this cannot be reasoned about
+    # from here - a wrong warning about numbers nobody chose is worse than no warning.
+    if not workers or not threads:
+        return []
+
+    role_limit = int(os.environ.get('DB_MAX_CONNECTIONS', '15'))
+    # The scheduler loops in startup.sh each open a connection while their command runs. They do
+    # not all run at once, but several can overlap, and the point of a headroom figure is to be
+    # wrong in the safe direction.
+    scheduler_headroom = int(os.environ.get('DB_SCHEDULER_HEADROOM', '7'))
+    needed = workers * threads + scheduler_headroom
+
+    if needed <= role_limit:
+        return []
+    return [CheckWarning(
+        f'Web workers could need {needed} database connections '
+        f'({workers} workers x {threads} threads, plus {scheduler_headroom} for the scheduler), '
+        f'but the login role is limited to {role_limit}.',
+        hint='Postgres refuses connections past the role limit rather than queueing them, so '
+             'this surfaces as "too many connections for role" under load, not as slowness. '
+             'Either lower WEB_CONCURRENCY/WEB_THREADS, raise the role\'s CONNECTION LIMIT on '
+             'the server, or take load off the request path instead - recording chunks now '
+             'upload directly to blob storage where CORS allows it, which is what freed the '
+             'slots this would otherwise be spent on.',
+        id='api.W005',
     )]

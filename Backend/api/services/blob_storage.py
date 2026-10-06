@@ -46,6 +46,16 @@ logger = logging.getLogger(__name__)
 # a year from now gets a token minted then. Long enough to download a full session recording
 # over a slow connection, short enough that a leaked URL stops working the same day.
 _SAS_VALID_MINUTES = int(os.environ.get('EVIDENCE_URL_TTL_MINUTES', '120'))
+# Much shorter than the read TTL above, and for a different reason. A read URL is handed to a
+# TA who may sit on a page for a while; this one is held by the candidate's own browser, which
+# re-requests it whenever it needs to and is authenticated as the attempt the whole time. There
+# is no benefit to it outliving a few chunks, and every minute it stays valid is a minute a
+# copied token keeps working.
+_RECORDING_SAS_MINUTES = int(os.environ.get('RECORDING_UPLOAD_URL_TTL_MINUTES', '15'))
+# Published so the client can refresh on its own clock instead of discovering expiry as a failed
+# chunk. Deliberately shorter than the token really lasts, so a refresh that is itself slow still
+# lands before the old one dies.
+RECORDING_UPLOAD_TTL_SECONDS = max(_RECORDING_SAS_MINUTES * 60 - 120, 60)
 
 _service_client = None
 
@@ -188,6 +198,53 @@ def start_recording_blob(attempt_id):
     except ResourceExistsError:
         pass
     return _stored_url(blob_client)
+
+
+def recording_append_url(attempt_id):
+    """A short-lived, APPEND-ONLY URL the candidate's browser can PUT chunks to directly.
+
+    This exists to get video off the Django request path. Every chunk used to be POSTed to
+    ExamRecordingChunkView, which read the whole body and re-uploaded it - so one gunicorn
+    thread was held for the candidate's upload AND the server's, for as long as the slower of
+    the two took. Staging logs for 2026-10-05 show a median of 1.6s and a worst case of 36s per
+    chunk, against a deployment with four request slots in total. The slots were the scarce
+    resource and video was eating them; this hands the video straight to storage instead.
+
+    Deliberately the narrowest token that can do the job:
+
+      add only - not write, not create, not read. It can append to this one blob and nothing
+      else. It cannot read back what has been written, overwrite the recording, or touch another
+      candidate's attempt, so a candidate who extracts it from their own browser gains only the
+      ability to add to their own recording, which they can already do.
+
+      minutes, not hours - see _RECORDING_SAS_MINUTES. The client re-requests before expiry
+      (this endpoint is authenticated as the attempt), so a leaked token dies quickly.
+
+    Returns None whenever a direct upload cannot be offered - local-disk fallback, no storage
+    configured, or a signing failure. The caller treats that as "use the server path", which is
+    still there and still works: see ExamRecordingChunkView, kept precisely as the fallback for
+    this returning None, for CORS not being configured on the storage account yet, and for a
+    browser whose direct PUT fails for any reason at all.
+    """
+    if _use_local_fallback() or not settings.AZURE_STORAGE_CONNECTION_STRING:
+        return None
+
+    try:
+        client = _client()
+        blob_name = f'attempts/{attempt_id}/session_recording.webm'
+        sas_token = generate_blob_sas(
+            account_name=client.account_name,
+            container_name=settings.AZURE_STORAGE_CONTAINER_EVIDENCE,
+            blob_name=blob_name,
+            account_key=client.credential.account_key,
+            permission=BlobSasPermissions(add=True),
+            expiry=datetime.now(dt_timezone.utc) + timedelta(minutes=_RECORDING_SAS_MINUTES),
+        )
+        blob_client = _container().get_blob_client(blob_name)
+        return f'{blob_client.url}?{sas_token}'
+    except Exception:
+        logger.exception('Could not mint a direct recording-upload URL for attempt %s', attempt_id)
+        return None
 
 
 def append_recording_chunk(attempt_id, chunk_bytes):

@@ -10,6 +10,7 @@ authenticates via CandidateAttemptAuthentication (api/authentication.py) instead
 import logging
 
 from django.conf import settings
+from django.db import connections
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.http import Http404, HttpResponse
@@ -629,6 +630,43 @@ class ExamAnswerView(APIView):
         })
 
 
+# Bounded because this mints a credential, however narrow. One honest client needs about five an
+# hour (see RECORDING_UPLOAD_TTL_SECONDS); this leaves generous room for retries and reloads
+# while refusing to be a token fountain.
+@method_decorator(ratelimit(key=ratelimit_attempt_key, rate='20/h', method='GET', block=False),
+                  name='get')
+class ExamRecordingUploadUrlView(APIView):
+    """GET /api/exam/recording/upload-url/ - a short-lived, append-only URL for THIS attempt's
+    recording blob, so the browser can send chunks straight to storage.
+
+    The point is capacity, not speed. ExamRecordingChunkView below holds a gunicorn thread for
+    the whole of a chunk's journey - the candidate's upload and then the server's - and staging
+    has four threads in total across the deployment. On 2026-10-05 chunk uploads ran to a median
+    of 1.6s and a maximum of 36s, in-flight requests touched the ceiling of 4, and ten requests
+    were failed by the platform without ever reaching Django. Video was consuming the slots the
+    exam itself needed.
+
+    Returns {'url': null} rather than an error when a direct upload cannot be offered (local
+    fallback, no storage configured, signing failure). The client treats that as "keep using the
+    server path", which is still there and unchanged.
+    """
+    authentication_classes = [CandidateAttemptAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if getattr(request, 'limited', False):
+            # Not an error the candidate should see: the client falls back to the server upload
+            # path on anything other than a usable url, which is the correct behaviour here too.
+            return Response({'url': None, 'ttl_seconds': 0})
+        url = blob_storage.recording_append_url(request.user.attempt_id)
+        return Response({
+            'url': url,
+            # The client refreshes on its own clock rather than waiting for a 403 from storage,
+            # because a failed chunk is a hole in the evidence, not something to retry into.
+            'ttl_seconds': blob_storage.RECORDING_UPLOAD_TTL_SECONDS if url else 0,
+        })
+
+
 @method_decorator(ratelimit(key=ratelimit_attempt_key, rate='30/m', method='POST', block=False), name='post')
 class ExamRecordingChunkView(APIView):
     """POST /api/exam/recording/chunk/ - raw binary body, one ~10s MediaRecorder chunk,
@@ -646,9 +684,30 @@ class ExamRecordingChunkView(APIView):
     def post(self, request):
         if getattr(request, 'limited', False):
             return Response({'detail': 'Too many chunks.'}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+
+        # Hand the database connection back BEFORE reading the body.
+        #
+        # Everything needing the database has already happened: CandidateAttemptAuthentication
+        # looked the attempt up and wrote its heartbeat. Nothing below this line touches it. But
+        # ReleaseDbConnectionMiddleware only closes connections once the response is finished,
+        # so without this the connection opened by authentication is held for the whole upload -
+        # and staging logs for 2026-10-05 show those running to a median of 1.6s and a worst
+        # case of 36s. A connection sat idle inside the shared Postgres server's 15-slot role
+        # limit for 36 seconds, for a request that had stopped needing it in the first few
+        # milliseconds.
+        #
+        # This is also what makes raising WEB_THREADS safe (see api/checks.py's api.W005): the
+        # cap exists because every thread could hold a connection, and a thread parked on a slow
+        # candidate uplink is exactly the one that should not be.
+        #
+        # attempt_id is read first because request.user is lazy and resolving it after the close
+        # would simply open another connection.
+        attempt_id = request.user.attempt_id
+        connections.close_all()
+
         if not request.body:
             return Response({'detail': 'Empty chunk.'}, status=status.HTTP_400_BAD_REQUEST)
-        blob_storage.append_recording_chunk(request.user.attempt_id, request.body)
+        blob_storage.append_recording_chunk(attempt_id, request.body)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

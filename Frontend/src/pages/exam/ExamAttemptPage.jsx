@@ -220,10 +220,23 @@ export default function ExamAttemptPage() {
           setTerminationMessage(data.detail);
           setView('terminated');
         })
-        .catch(() => {
-          // Only reached when the call itself failed, so the real outcome is unknown. Ending
-          // the attempt is the safe default - treating an unreachable server as "warning
-          // granted" would let a dropped connection buy unlimited tab switches. Deliberately
+        .catch((err) => {
+          // A 401 here is not a failure to report - it means the attempt was ALREADY closed,
+          // and this request lost the race with the one that closed it. The server sends the
+          // real termination message with that 401 (see authentication.py), so show it. Three
+          // candidates on 2026-10-05 were told their exam "could not be reported to the server"
+          // and to contact the Staffing team, when in fact it had been reported, recorded and
+          // terminated for a named reason.
+          const closed = err?.response?.status === 401
+            && err.response.data?.code === 'attempt_closed';
+          if (closed && err.response.data?.detail) {
+            setTerminationMessage(err.response.data.detail);
+            setView('terminated');
+            return;
+          }
+          // Anything else: the call itself failed, so the real outcome is unknown. Ending the
+          // attempt is the safe default - treating an unreachable server as "warning granted"
+          // would let a dropped connection buy unlimited tab switches. Deliberately
           // cause-agnostic: it must NOT claim a specific cause (it previously asserted
           // camera/mic loss, which was simply wrong for e.g. a devtools attempt).
           setTerminationMessage(
