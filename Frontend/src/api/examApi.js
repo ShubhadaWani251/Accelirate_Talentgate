@@ -20,9 +20,14 @@ export const captureAadhaarPhoto = (token, idPhotoBlob) => {
 
 // Second identity-capture step - the face photo, only reachable once the Aadhaar step above has
 // resolved (matched, or retries exhausted and flagged - never blocked).
-export const submitIdentity = (token, facePhotoBlob) => {
+// extraFaceSeen reports that more than one person was on camera at some point during identity
+// verification. It never blocks anything - capture is already disabled while a second face is
+// visible, so this always arrives after they have stepped away - it exists so the TA can see
+// afterwards that it happened at all, which previously nothing recorded.
+export const submitIdentity = (token, facePhotoBlob, extraFaceSeen = false) => {
   const form = new FormData();
   form.append('face_photo', facePhotoBlob, 'face_photo.jpg');
+  if (extraFaceSeen) form.append('extra_face_seen', 'true');
   return examAxiosClient.post(`/exam/token/${token}/identity/`, form).then((r) => r.data);
 };
 

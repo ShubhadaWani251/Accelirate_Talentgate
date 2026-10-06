@@ -118,10 +118,19 @@ export default function ExamIdVerify() {
 
   // Hooks must run unconditionally (before any early return below), even though its result is
   // only meaningful once the Aadhaar step has resolved and the face card is actually showing.
-  const { faceCount } = useLiveFaceCheck(mediaStreamRef, aadhaarResolved && !facePhoto && !noVideo);
+  const { faceCount, sawExtraFace } = useLiveFaceCheck(
+    mediaStreamRef, aadhaarResolved && !facePhoto && !noVideo);
+  // A second face is RED, not grey. Grey was the same weight as "no face detected yet", so it
+  // read as "not ready" rather than "this is a problem" - a tester sat through identity
+  // verification with another person beside them and reasonably reported that nothing flagged
+  // it. Only you may be on camera is a rule, and the screen now says so in the colour it uses
+  // for rules. Zero faces stays grey: that genuinely is just "not ready".
   const liveHint = faceCount == null ? null
     : faceCount === 1 ? { tone: 'green', text: 'Face detected — good to capture' }
-      : { tone: 'gray', text: faceCount === 0 ? 'No face detected yet' : 'More than one face detected' };
+      : faceCount === 0 ? { tone: 'gray', text: 'No face detected yet' }
+        : { tone: 'red',
+            text: 'More than one person is on camera — only you may be visible. '
+                  + 'This has been recorded.' };
 
   useEffect(() => {
     if (!instructions) {
@@ -216,7 +225,7 @@ export default function ExamIdVerify() {
     setSubmitError('');
     setSubmitting(true);
     try {
-      const data = await examApi.submitIdentity(token, facePhoto);
+      const data = await examApi.submitIdentity(token, facePhoto, sawExtraFace);
       applyAttemptToken(data.attempt_token, token);
       setSessionState({ remaining_seconds: data.remaining_seconds, sections: data.sections });
       navigate(`/t/${token}/exam`);

@@ -31,7 +31,9 @@ const UPLOAD_MAX_BYTES = 5 * 1024 * 1024;
 //                    outcome to report, i.e. the face-photo card, and the Aadhaar card whenever
 //                    AADHAAR_VERIFICATION_ENABLED is off)
 //   retakeDisabled - hides the Retake button once matched or retries are exhausted
-//   liveHint       - { tone: 'green'|'gray', text } | null - shown above the LIVE preview only
+//   liveHint       - { tone: 'green'|'gray'|'red', text } | null - shown above the LIVE preview
+//                    only. red is a rule being broken (a second person on camera), grey is
+//                    merely not-ready-yet; they must not look alike
 //   captureBlocked - true disables the Capture button entirely (e.g. no face detected yet) -
 //                    unlike liveHint (informational), this actually prevents the click
 //   allowUpload    - true also offers "upload a file instead of the live camera" (Aadhaar Card
@@ -103,9 +105,18 @@ export default function PhotoCapture({
       <div className="box-label">{label}</div>
       {hint && <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 8 }}>{hint}</div>}
 
+      {/* Red is bold as well as coloured: a second person on camera is a rule being broken, and
+          it has to be distinguishable at a glance from "not ready yet", which is what the grey
+          state means. */}
       {!captured && liveHint && (
-        <div style={{ fontSize: 11.5, marginBottom: 6, color: liveHint.tone === 'green' ? 'var(--green)' : 'var(--muted)' }}>
-          {liveHint.tone === 'green' ? '● ' : '○ '}{liveHint.text}
+        <div style={{
+          fontSize: 11.5,
+          marginBottom: 6,
+          fontWeight: liveHint.tone === 'red' ? 600 : 400,
+          color: liveHint.tone === 'green' ? 'var(--green)'
+            : liveHint.tone === 'red' ? 'var(--brand-red)' : 'var(--muted)',
+        }}>
+          {liveHint.tone === 'green' ? '● ' : liveHint.tone === 'red' ? '⚠ ' : '○ '}{liveHint.text}
         </div>
       )}
 

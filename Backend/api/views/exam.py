@@ -21,7 +21,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from api.authentication import CandidateAttemptAuthentication
-from api.models import ExamAnswer, ExamAttempt, Invitation
+from api.models import ExamAnswer, ExamAttempt, Invitation, ProctoringEvent
 from api.serializers.exam import AnswerSerializer, EmailVerifySerializer, TerminateSerializer
 from api.services import aadhaar, blob_storage, exam_session, seb
 from api.services.image_validation import InvalidImageUpload, validate_identity_photo
@@ -451,6 +451,25 @@ class ExamIdentityCaptureView(APIView):
                 {'detail': 'Your Aadhaar Card could not be verified. Please go back and retake '
                            'the photo - the assessment cannot start until it is verified.'},
                 status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # A second person seen on camera during identity verification. Recorded, never blocking:
+        # capture is already disabled while an extra face is visible (see useLiveFaceCheck), so
+        # by the time this request exists the candidate is alone again - but a tester sat through
+        # the whole step with someone beside them and correctly reported that nothing anywhere
+        # showed it afterwards, because proctoring events only begin once the exam does.
+        #
+        # Not a violation and not warnable: it costs nothing from the warning pool and cannot end
+        # an attempt. It is evidence for a TA reading the attempt later, which is the gap. The
+        # client asserts this, like any other field here, so it can be suppressed by someone
+        # bypassing the frontend - it is a record for honest review, not an enforcement point.
+        if str(request.data.get('extra_face_seen', '')).lower() == 'true':
+            ProctoringEvent.objects.create(
+                attempt=attempt,
+                event_type='extra_person_detected',
+                event_details={'stage': 'identity_verification', 'outcome': 'recorded'},
+                is_violation=False,
+                severity=ProctoringEvent.Severity.INFO,
             )
 
         if not attempt.id_verified_at:

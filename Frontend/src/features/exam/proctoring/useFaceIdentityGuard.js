@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createFrameClock, MAX_CREDIT_FACTOR } from './frameClock';
 import { computeFaceEmbedding, cosineSimilarity } from './faceEmbedding';
 
 // Heavier per-sample cost than useVisionProctoringGuard's checks (a similarity-transform
@@ -51,6 +52,9 @@ export default function useFaceIdentityGuard(streamRef, baselineEmbeddingRef, ac
     let cancelled = false;
     let tickInFlight = false;
     let mismatchStreak = 0;
+
+
+
     // Self-clearing latch, not a rearmKey: face identity is a continuously-observable state, not
     // a one-off discrete event - re-arming on the server's "warned" response (rather than on the
     // condition actually resolving) would let the same ongoing mismatch immediately re-fire and
@@ -62,12 +66,21 @@ export default function useFaceIdentityGuard(streamRef, baselineEmbeddingRef, ac
     video.playsInline = true;
     video.srcObject = stream;
     video.play().catch(() => {});
+    const frameClock = createFrameClock(video);
 
     async function check() {
       // detectForVideo/onnxruntime's session.run are both Promise-based (unlike
       // useVisionProctoringGuard's synchronous MediaPipe calls) - this guard against a slow tick
       // overlapping the next setInterval firing before the previous one resolves.
       if (cancelled || tickInFlight || video.readyState < 2) return;
+
+      // THE STALENESS GATE - see frameClock.js. It matters most here: re-embedding one frozen
+      // frame three times is not three samples, and a single badly-lit or half-turned frame
+      // would clear CONSECUTIVE_LOW_SIMILARITY on its own and accuse the candidate of not being
+      // themselves, which is the heaviest thing this system can say about anyone. Skipped
+      // outright, so a repeat neither builds the streak nor clears it.
+      if (frameClock.observedMs(SAMPLE_MS * MAX_CREDIT_FACTOR) <= 0) return;
+
       tickInFlight = true;
       try {
         if (!baselineEmbeddingRef.current) {
@@ -112,6 +125,7 @@ export default function useFaceIdentityGuard(streamRef, baselineEmbeddingRef, ac
     return () => {
       cancelled = true;
       clearInterval(intervalId);
+      frameClock.stop();
       video.srcObject = null;
     };
   }, [active, streamRef, baselineEmbeddingRef, onViolation]);

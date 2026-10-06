@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createFrameClock, MAX_CREDIT_FACTOR } from './frameClock';
 import { getVisionModels } from './visionModels';
 import { isLookingAway } from './headPose';
 
@@ -21,6 +22,30 @@ import { isLookingAway } from './headPose';
 // main thread.
 const SAMPLE_MS = 1000;
 
+// Every threshold below is MILLISECONDS OF CAMERA FOOTAGE ACTUALLY OBSERVED, not a count of
+// samples, and the difference is the whole reason this file was rewritten on 2026-10-06.
+//
+// These used to be sample counts reasoned about as seconds - "15 samples at 1s is 15 seconds".
+// That holds only while frames keep arriving. The offscreen <video> below lives on the main
+// thread, and when the main thread is starved (two models a second, plus the session recorder's
+// encoder, plus whatever else the machine is doing) it STALLS: readyState stays >= 2, so the old
+// guard happily re-analysed the SAME FRAME every tick and every streak completed on one frame.
+// Head-turn needed two samples - its comment said that was "to discard a single bad frame", and
+// a frozen frame is both of them. Three candidates were terminated this way during load testing
+// on 2026-10-05, for an object, a head turn and a lost camera that the session recordings show
+// never happened. The recording stayed truthful because MediaRecorder reads the MediaStream
+// directly in the media pipeline, not through this element.
+//
+// Time is now measured from video.currentTime, the element's own media clock. It advances only
+// when real frames are decoded, so a stalled element contributes nothing and a throttled timer
+// cannot change what "15 seconds" means. See the staleness check in check().
+const FACE_ABSENT_MS = 15000;
+const LOOKING_AWAY_MS = 2000;
+const FACE_EXTRA_MS = 4000;
+const OBJECT_ABSENT_TO_REARM_MS = 5000;
+
+const MAX_CREDIT_MS = SAMPLE_MS * MAX_CREDIT_FACTOR;
+
 // NO FACE DETECTED AT ALL - 15 seconds.
 //
 // This case is genuinely ambiguous and has to be treated as such. MediaPipe loses the face
@@ -34,26 +59,32 @@ const SAMPLE_MS = 1000;
 // 15s unwarned - is covered by the session recording, and by useFaceIdentityGuard, which still
 // catches a person SWAP within ~6s regardless of this number. That is the threat that actually
 // matters; this check only ever meant "is the candidate visibly present".
-const CONSECUTIVE_FACE_ABSENT = 15;
-
-// FACE DETECTED BUT TURNED AWAY - effectively immediate.
+//
+// FACE DETECTED BUT TURNED AWAY - 2 seconds.
 //
 // The unambiguous half of the split. Here the face IS tracked and is pointing away from the
 // screen (see headPose.js), which nothing about answering a question requires - unlike looking
-// down, which is why that case is handled by the streak above instead.
+// down, which is why that case is handled by the longer tolerance above.
 //
-// 2 samples rather than 1 purely to discard a single bad frame: motion blur or a lighting
-// flicker can momentarily skew the landmark positions, and one glitched frame should not cost a
-// candidate a warning. At a 1s cadence this still reports within about two seconds.
-const CONSECUTIVE_LOOKING_AWAY = 2;
-// A positively-identified second face is more specific evidence than "no face", but a passerby
-// crossing the background for a couple of seconds still deserves the same patience.
-const CONSECUTIVE_FACE_EXTRA = 4;
-// Deliberately 1, not a streak - a forbidden object must warn on the very first confident
-// detection, no delay. Already gated by visionModels.js's own scoreThreshold (0.6) and
-// categoryAllowlist, so "first detection" is still a confidence-checked, allow-listed signal,
-// not a raw, unfiltered one.
-const CONSECUTIVE_OBJECT_PRESENT = 1;
+// 2 seconds rather than instant, to discard a bad frame: motion blur or a lighting flicker can
+// momentarily skew the landmark positions, and one glitched frame should not cost a candidate a
+// warning. That is only true of two seconds of GENUINELY DIFFERENT frames, which is what the
+// staleness check now guarantees and what this tolerance always assumed.
+//
+// EXTRA FACE - 4 seconds. A positively-identified second face is more specific evidence than
+// "no face", but a passerby crossing the background still deserves the same patience.
+//
+// FORBIDDEN OBJECT - no tolerance at all: it warns on the first fresh, confident detection.
+// Already gated by visionModels.js's own scoreThreshold (0.6) and categoryAllowlist, so that is
+// still a confidence-checked, allow-listed signal, not a raw one.
+//
+// ...but re-arming is a different question from firing, and needs OBJECT_ABSENT_TO_REARM_MS of
+// clear view. A detection sitting near the confidence threshold does not hold steady, it
+// oscillates; the latch used to clear on a single clear sample, so detected/gone/detected read
+// as two occurrences a second apart, and four of those spent the whole warning pool in about six
+// seconds. Testers hit exactly that on 2026-10-05. Five seconds of genuinely nothing in frame is
+// what now counts as "put away": someone who pockets a phone waits that out once, a flickering
+// score never does.
 
 // getVisionModels() resets its own cached promise on failure specifically so a later call gets a
 // fresh attempt rather than replaying the same rejection (see visionModels.js) - but neither of
@@ -92,10 +123,15 @@ export default function useVisionProctoringGuard(streamRef, active, onViolation)
     if (!stream || stream.getVideoTracks().length === 0) return undefined;
 
     let cancelled = false;
-    let faceAbsentStreak = 0;
-    let faceExtraStreak = 0;
-    let lookingAwayStreak = 0;
-    let objectStreak = 0;
+    // Milliseconds of observed footage each condition has held for, not sample counts - see the
+    // thresholds at the top of this file.
+    let faceAbsentMs = 0;
+    let faceExtraMs = 0;
+    let lookingAwayMs = 0;
+    // Tracked separately from "object present" rather than inferred from it: presence resets to
+    // 0 on the first clear sample, which cannot distinguish "clear for one frame" from "clear
+    // for five seconds", and that distinction is the whole point of the re-arm delay.
+    let objectAbsentMs = 0;
     let lastObjectSeen = null;
 
     const video = document.createElement('video');
@@ -103,9 +139,10 @@ export default function useVisionProctoringGuard(streamRef, active, onViolation)
     video.playsInline = true;
     video.srcObject = stream;
     video.play().catch(() => {
-      // Same reasoning as useCameraGuard: a slow/blocked autoplay just means detectForVideo sees
-      // a 0-dimension frame for a tick or two, which the streak requirement already absorbs.
+      // Same reasoning as useCameraGuard: a slow/blocked autoplay just means no frames arrive
+      // yet, which the frame clock reports as "nothing observed" rather than as evidence.
     });
+    const frameClock = createFrameClock(video);
 
     let faceLandmarker;
     let objectDetector;
@@ -129,31 +166,40 @@ export default function useVisionProctoringGuard(streamRef, active, onViolation)
       if (cancelled || !faceLandmarker || !objectDetector) return;
       if (video.readyState < 2) return; // no frame decoded yet
 
+      // THE STALENESS GATE - see frameClock.js. Returning early rather than treating a repeated
+      // frame as evidence either way is the point: with no new observation, no condition may
+      // advance AND none may be cleared, so a frozen frame costs exactly nothing in either
+      // direction.
+      const observedMs = frameClock.observedMs(MAX_CREDIT_MS);
+      if (observedMs <= 0) return;
+
       const now = performance.now();
 
       const faceResult = faceLandmarker.detectForVideo(video, now);
       const faceCount = faceResult.faceLandmarks ? faceResult.faceLandmarks.length : 0;
 
       if (faceCount === 0) {
-        faceAbsentStreak += 1;
-        faceExtraStreak = 0;
-        lookingAwayStreak = 0;
+        faceAbsentMs += observedMs;
+        faceExtraMs = 0;
+        lookingAwayMs = 0;
       } else if (faceCount > 1) {
-        faceExtraStreak += 1;
-        faceAbsentStreak = 0;
-        lookingAwayStreak = 0;
+        faceExtraMs += observedMs;
+        faceAbsentMs = 0;
+        lookingAwayMs = 0;
       } else {
-        faceAbsentStreak = 0;
-        faceExtraStreak = 0;
+        faceAbsentMs = 0;
+        faceExtraMs = 0;
         // Exactly one face, so its orientation is a meaningful question. Looking down keeps the
         // nose centred horizontally and so reads as facing forward here - correctly, since the
-        // streak above is what covers that case.
-        lookingAwayStreak = isLookingAway(faceResult.faceLandmarks[0]) ? lookingAwayStreak + 1 : 0;
+        // longer face-absent tolerance is what covers that case.
+        lookingAwayMs = isLookingAway(faceResult.faceLandmarks[0])
+          ? lookingAwayMs + observedMs
+          : 0;
       }
 
-      const faceNotVisible = faceAbsentStreak >= CONSECUTIVE_FACE_ABSENT;
-      const extraPersonDetected = faceExtraStreak >= CONSECUTIVE_FACE_EXTRA;
-      const lookingAway = lookingAwayStreak >= CONSECUTIVE_LOOKING_AWAY;
+      const faceNotVisible = faceAbsentMs >= FACE_ABSENT_MS;
+      const extraPersonDetected = faceExtraMs >= FACE_EXTRA_MS;
+      const lookingAway = lookingAwayMs >= LOOKING_AWAY_MS;
 
       if (faceNotVisible && !faceAbsentFiredRef.current) {
         faceAbsentFiredRef.current = true;
@@ -180,17 +226,19 @@ export default function useVisionProctoringGuard(streamRef, active, onViolation)
       const detection = (objectResult.detections || [])[0];
 
       if (detection) {
-        objectStreak += 1;
+        objectAbsentMs = 0;
         lastObjectSeen = {
           type: detection.categories[0].categoryName,
           confidence: detection.categories[0].score,
         };
       } else {
-        objectStreak = 0;
+        objectAbsentMs += observedMs;
         lastObjectSeen = null;
       }
 
-      const forbiddenObjectDetected = objectStreak >= CONSECUTIVE_OBJECT_PRESENT;
+      // No tolerance: a device warns on the first fresh, confident detection. "Fresh" is now
+      // load-bearing - this is the check that used to fire on a repeat of a frozen frame.
+      const forbiddenObjectDetected = Boolean(detection);
 
       if (forbiddenObjectDetected && !objectFiredRef.current) {
         objectFiredRef.current = true;
@@ -198,7 +246,9 @@ export default function useVisionProctoringGuard(streamRef, active, onViolation)
           detected_object: lastObjectSeen.type,
           confidence: lastObjectSeen.confidence,
         });
-      } else if (!forbiddenObjectDetected) {
+      } else if (objectAbsentMs >= OBJECT_ABSENT_TO_REARM_MS) {
+        // Re-arms only after a sustained clear view, not on the first blank sample - which is
+        // what stops one oscillating detection being charged as several occurrences.
         objectFiredRef.current = false;
       }
 
@@ -217,6 +267,7 @@ export default function useVisionProctoringGuard(streamRef, active, onViolation)
       cancelled = true;
       clearInterval(interval);
       clearTimeout(retryTimer);
+      frameClock.stop();
       video.srcObject = null;
       // Deliberately does NOT close faceLandmarker/objectDetector - they are a page-lifetime
       // singleton owned by visionModels.js, not this hook.

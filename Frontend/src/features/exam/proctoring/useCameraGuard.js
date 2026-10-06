@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createFrameClock, MAX_CREDIT_FACTOR } from './frameClock';
 import { isBlockedFrame, statsFromVideo } from '../webcam/frameCheck';
 
 // Watches the camera for the whole exam and reports when it stops showing the candidate.
@@ -49,9 +50,25 @@ const CONSECUTIVE_BLOCKED_CHECKS = 3;
 // encoding; at this width it is 10-14ms. Verified not to weaken detection - see statsFromVideo.
 const ANALYSIS_WIDTH = 320;
 
-function hasLiveVideo(stream) {
+// The camera is GONE - the track ended or was revoked. Definitive and permanent, so it is
+// reported at once with no tolerance: there is nothing to wait for.
+function hasVideoTrack(stream) {
   return stream.getVideoTracks().some(
-    (track) => track.readyState === 'live' && !track.muted && track.enabled,
+    (track) => track.readyState === 'live' && track.enabled,
+  );
+}
+
+// The track exists but is delivering nothing right now. Split out from the above on 2026-10-06,
+// because the two were checked together and BOTH reported instantly.
+//
+// `muted` is not a candidate covering a lens - it is the browser saying no frames are arriving,
+// which it also does when the source stalls under load. That made this a single-tick path to a
+// violation, with a session recording that shows a working camera throughout, and it is one of
+// the ways three candidates were terminated during load testing on 2026-10-05. It now has to
+// hold as long as a covered lens does.
+function hasFlowingVideo(stream) {
+  return stream.getVideoTracks().some(
+    (track) => track.readyState === 'live' && track.enabled && !track.muted,
   );
 }
 
@@ -98,6 +115,7 @@ export default function useCameraGuard(streamRef, active, onViolation) {
       // camera" - the safe reading, and the streak requirement keeps it from firing on a single
       // slow start.
     });
+    const frameClock = createFrameClock(video);
 
     function report(off) {
       setCameraOff(off);
@@ -112,16 +130,31 @@ export default function useCameraGuard(streamRef, active, onViolation) {
     function check() {
       if (cancelled) return;
 
-      // Track-level first: it is definitive and free. No live track means no frames worth
-      // analysing, so the pixel check would only produce a second opinion on the same fact.
-      if (!hasLiveVideo(stream)) {
+      // Gone for good: definitive, free, and nothing to wait for.
+      if (!hasVideoTrack(stream)) {
         blockedStreak = 0;
         report(true);
         return;
       }
 
-      // Track is live, so the camera claims to be working. Now find out whether it can actually
-      // see anything.
+      // Delivering nothing at the moment. Counted toward the same tolerance as a covered lens
+      // rather than reported outright, because under load this is what a stalled source looks
+      // like, and the frame below would be stale anyway - so there is nothing to analyse and
+      // nothing to clear either.
+      if (!hasFlowingVideo(stream)) {
+        blockedStreak += 1;
+        if (blockedStreak >= CONSECUTIVE_BLOCKED_CHECKS) report(true);
+        return;
+      }
+
+      // THE STALENESS GATE - see frameClock.js. Re-reading one frozen frame three times is not
+      // three checks, and neither counting nor clearing on a repeat is right, so the tick is
+      // skipped outright. The credit value is unused here (this guard counts checks, not
+      // footage) - only whether anything new arrived at all.
+      if (frameClock.observedMs(CHECK_MS * MAX_CREDIT_FACTOR) <= 0) return;
+
+      // Track is live and delivering, so the camera claims to be working. Now find out whether
+      // it can actually see anything.
       const blocked = isBlockedFrame(statsFromVideo(video, ANALYSIS_WIDTH));
       if (blocked) {
         blockedStreak += 1;
@@ -151,6 +184,7 @@ export default function useCameraGuard(streamRef, active, onViolation) {
     return () => {
       cancelled = true;
       clearInterval(interval);
+      frameClock.stop();
       tracks.forEach((track) => {
         events.forEach((name) => track.removeEventListener(name, check));
       });

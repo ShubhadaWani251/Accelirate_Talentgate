@@ -797,3 +797,88 @@ class TestAadhaarCaptureRetryFlow:
 
         face_response = self._face_photo(api_client, token)
         assert face_response.status_code == 200
+
+
+class TestExtraFaceAtIdentityVerificationIsRecorded:
+    """A second person on camera during identity verification leaves a record for the TA.
+
+    Reported after load testing on 2026-10-05: a tester sat through the whole identity step with
+    another person beside them and nothing anywhere showed it afterwards. Capture is blocked
+    while an extra face is visible (useLiveFaceCheck gates PhotoCapture), so they could not
+    proceed with two people in frame - but proctoring events only begin once the exam does, so
+    once they stepped away there was nothing left to see. This is that missing record.
+
+    Deliberately NOT a violation: it costs nothing from the warning pool and cannot end an
+    attempt. The client asserts it, so it is evidence for honest review rather than enforcement.
+    """
+
+    @pytest.fixture
+    def small_invitation(self, ta_user, make_batch, make_candidate, make_invitation, get_section):
+        section = get_section('logical')
+        Question.objects.create(
+            question_code='Q-EXTRA-FACE-1', section=section, question_text='2 + 2 = ?',
+            option_a='3', option_b='4', option_c='5', option_d='6', correct_option='B',
+            difficulty=Question.Difficulty.EASY,
+        )
+        batch = make_batch(ta_user, logical_questions=1, quantitative_questions=0,
+                           verbal_questions=0, programming_questions=0)
+        candidate = make_candidate(batch, ta_user, aadhaar_last4='2346', date_of_birth=TEST_DOB)
+        return make_invitation(candidate, ta_user)
+
+    def _reach_face_capture(self, api_client, settings, invitation):
+        settings.AZURE_STORAGE_CONNECTION_STRING = ''
+        settings.DEBUG = True
+        settings.AADHAAR_VERIFICATION_ENABLED = True
+        token = invitation.unique_link_token
+        api_client.post(f'/api/exam/token/{token}/verify-email/',
+                        {'email': invitation.candidate.email})
+        photo = _legacy_qr_photo(VALID_TEST_NUMBER, dob=TEST_DOB_QR_ATTR)
+        api_client.post(
+            f'/api/exam/token/{token}/identity/aadhaar/',
+            {'id_photo': SimpleUploadedFile('id.png', photo, content_type='image/png')},
+            format='multipart',
+        )
+        return token
+
+    def _face_photo(self, api_client, token, **extra):
+        return api_client.post(
+            f'/api/exam/token/{token}/identity/',
+            {'face_photo': SimpleUploadedFile(
+                'face.jpg', b'\xff\xd8\xff\xe0fake-jpeg-bytes', content_type='image/jpeg',
+            ), **extra},
+            format='multipart',
+        )
+
+    def test_an_extra_face_is_recorded_without_costing_a_warning(
+        self, api_client, small_invitation, settings,
+    ):
+        from api.models import ProctoringEvent
+        from api.services import exam_session
+
+        token = self._reach_face_capture(api_client, settings, small_invitation)
+
+        response = self._face_photo(api_client, token, extra_face_seen='true')
+
+        assert response.status_code == 200
+        attempt = ExamAttempt.objects.get(invitation=small_invitation)
+        event = ProctoringEvent.objects.get(attempt=attempt, event_type='extra_person_detected')
+        assert event.is_violation is False
+        assert event.severity == ProctoringEvent.Severity.INFO
+        assert event.event_details['stage'] == 'identity_verification'
+        # The whole point of INFO + is_violation=False: warnings_used reads WARNING-severity
+        # violations, so this must not move the candidate any closer to termination.
+        assert exam_session.warnings_used(attempt) == 0
+        attempt.refresh_from_db()
+        assert attempt.status == ExamAttempt.Status.IN_PROGRESS
+
+    def test_nothing_is_recorded_when_the_candidate_was_alone(
+        self, api_client, small_invitation, settings,
+    ):
+        from api.models import ProctoringEvent
+
+        token = self._reach_face_capture(api_client, settings, small_invitation)
+
+        assert self._face_photo(api_client, token).status_code == 200
+
+        attempt = ExamAttempt.objects.get(invitation=small_invitation)
+        assert not ProctoringEvent.objects.filter(attempt=attempt).exists()
