@@ -330,3 +330,58 @@ class TestFirstStrikeCausesStillTerminateImmediately:
         attempt.refresh_from_db()
         assert attempt.status == ExamAttempt.Status.TERMINATED
         assert attempt.termination_reason == reason
+
+
+class TestDeviceNamesDoNotDriftFromDetection:
+    """The three strings describing a forbidden-object event must name the same devices.
+
+    They are three copies of one fact - the candidate's warning, their termination message, and
+    the TA's label - and they have drifted before: 'book' was removed from detection after a
+    candidate was warned for rough-work paper, but stayed in the TA label long afterwards, while
+    the other two named 'laptop' and 'TV'. On 2026-10-05 laptop and TV were removed from
+    detection too (the model cannot tell the screen running the exam from a second one, and
+    testers were terminated for hardware in their own room), which is the same drift waiting to
+    happen again.
+
+    This cannot reach across to the frontend list that actually decides what is detected
+    (visionModels.FORBIDDEN_OBJECT_CATEGORIES is JavaScript), so it pins the next best thing:
+    these three agree with each other, and a change to one is not quietly a change to one only.
+    """
+
+    # Every device noun the model has ever been asked to look for, plus the near-synonyms the
+    # copy has reached for. Anything named in one string and not the others is the drift.
+    DEVICE_WORDS = ('phone', 'laptop', 'tv', 'remote', 'book', 'monitor', 'screen', 'tablet')
+
+    def _devices_named_in(self, text):
+        lowered = text.lower()
+        return {word for word in self.DEVICE_WORDS if word in lowered}
+
+    def test_warning_termination_and_label_name_the_same_devices(self):
+        reason = TerminationReason.FORBIDDEN_OBJECT_DETECTED
+        warning = self._devices_named_in(
+            exam_session.warning_message(reason, 1, exam_session.MAX_WARNINGS))
+        termination = self._devices_named_in(exam_session.TERMINATION_MESSAGES[reason])
+        label = self._devices_named_in(exam_session.termination_label(reason))
+
+        assert warning == termination == label, (
+            f'forbidden-object copy disagrees on which devices are detected: '
+            f'warning={sorted(warning)}, termination={sorted(termination)}, '
+            f'label={sorted(label)}'
+        )
+
+    def test_no_device_is_named_that_is_not_detected(self):
+        """Guards the direction that actually harms a candidate: being told to remove a laptop
+        when a laptop is not what fired, and cannot be.
+        """
+        detected = {'phone', 'remote'}
+        reason = TerminationReason.FORBIDDEN_OBJECT_DETECTED
+        for label, text in (
+            ('warning', exam_session.warning_message(reason, 1, exam_session.MAX_WARNINGS)),
+            ('termination', exam_session.TERMINATION_MESSAGES[reason]),
+            ('label', exam_session.termination_label(reason)),
+        ):
+            named = self._devices_named_in(text)
+            assert named <= detected, (
+                f'{label} names {sorted(named - detected)}, which is not detected - '
+                f'keep this in step with visionModels.FORBIDDEN_OBJECT_CATEGORIES'
+            )

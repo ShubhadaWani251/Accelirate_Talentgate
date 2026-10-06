@@ -191,17 +191,30 @@ export default function ExamAttemptPage() {
           if (data.action === 'warned') {
             setWarning({ detail: data.detail, used: data.warnings_used,
                          allowed: data.warnings_allowed });
-            // Re-arm the window guards NOW, not on acknowledgement. Otherwise a candidate
-            // could take their warning and then read notes in another window for as long as
-            // they left the modal open, with every further trigger swallowed by the latches.
-            // The full-screen guard is deliberately left latched until acknowledgeWarning has
-            // actually restored full-screen - re-arming it here would fire it immediately on
-            // the very state the warning was just given for.
-            state.fired = false;
+            // The latch stays HELD until the candidate acknowledges: while a warning is on
+            // screen, no further violation is reported. See acknowledgeWarning, which releases
+            // it and re-arms the guards.
+            //
+            // This used to release here instead, so that a candidate could not take a warning
+            // and then read notes in another window while the modal sat open. That cost more
+            // than it bought. Warnings are counted server-side and the modal is replaced in
+            // place, so a condition that flickers - which is exactly what a false positive
+            // looks like - reported again every second or two, each one silently overwriting
+            // the last. Candidates saw "Warning 3 of 3" having never read 1 or 2, and were
+            // terminated roughly six seconds after the first spurious detection, for devices
+            // that were not in the room. Reported by several testers on 2026-10-05.
+            //
+            // Holding it means each warning is seen, and a persistent condition costs one
+            // warning per acknowledgement rather than one per second. The candidate does not
+            // escape anything: if the cause is still there when they dismiss, the guards
+            // re-arm onto it and the next warning follows immediately.
+            //
+            // The trade-off is deliberate and narrower than it looks: parking the modal buys
+            // unwatched time only AFTER a warning has already been earned, and every violation
+            // that led there is still on the attempt's ProctoringEvent record for the TA.
             state.reason = null;
             state.extra = null;
             state.timer = null;
-            setWindowGuardGen((g) => g + 1);
             return;
           }
           setTerminationMessage(data.detail);
@@ -230,21 +243,35 @@ export default function ExamAttemptPage() {
   // modal rather than a toast that fades on its own.
   const acknowledgeWarning = useCallback(async () => {
     const state = violationRef.current;
-    // Suppressed across the transition only: entering full-screen can itself produce a
-    // transient focus event, and the window guards are live by this point (re-armed when the
-    // warning arrived), so without this the acknowledgement click could terminate the
-    // candidate for the act of complying.
+    // Held across the transition as well: entering full-screen can itself produce a transient
+    // focus event, so releasing before that settles could terminate the candidate for the act
+    // of complying.
     state.fired = true;
     if (state.timer) {
       clearTimeout(state.timer);
       state.timer = null;
     }
     setWarning(null);
-    if (FULLSCREEN_SUPPORTED && !isFullscreen()) await enterFullscreen();
-    state.fired = false;
-    state.reason = null;
-    // Re-armed last, once full-screen is actually back.
-    setFullscreenGuardGen((g) => g + 1);
+    // try/finally because this is now the ONLY thing that releases the latch - the warning
+    // modal has one button and no dismiss-by-overlay or Escape. If this returned early the
+    // candidate would finish the exam entirely unproctored, with every violation swallowed.
+    // enterFullscreen is bounded and resolves rather than rejecting (see fullscreen.js), so
+    // this should be unreachable; the cost of being wrong is too high to rely on that.
+    try {
+      if (FULLSCREEN_SUPPORTED && !isFullscreen()) await enterFullscreen();
+    } finally {
+      state.fired = false;
+      state.reason = null;
+      state.extra = null;
+      // Both guard families re-arm here now, because the latch is held for as long as the
+      // warning is on screen (see onViolation). The window guards used to re-arm the moment
+      // the warning arrived; they wait for the acknowledgement along with everything else.
+      //
+      // Full-screen is re-armed LAST and only once full-screen is actually back: re-arming it
+      // earlier fires it immediately on the very state the warning was just given for.
+      setWindowGuardGen((g) => g + 1);
+      setFullscreenGuardGen((g) => g + 1);
+    }
   }, []);
 
   // There is deliberately no countdown on the warning modal. It used to end the attempt

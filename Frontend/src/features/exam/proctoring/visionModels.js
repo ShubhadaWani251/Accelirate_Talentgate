@@ -16,13 +16,23 @@ const OBJECT_MODEL_PATH = '/models/vision/efficientdet_lite0.tflite';
 // matter how many people are actually in frame - this has to be raised explicitly.
 const MAX_FACES = 3;
 
-// ELECTRONIC DEVICES ONLY. 'book' was removed after a candidate was warned for a sheet of rough
-// paper on their desk: the model reports that as 'book', rough work is a normal and permitted
-// part of sitting an aptitude test, and a warning a candidate cannot avoid by behaving correctly
-// is worse than the cheating it was meant to catch. What remains is the set of things that can
-// actually display or receive information - which is what the rule is really about, and what the
-// candidate-facing instructions can state precisely.
-export const FORBIDDEN_OBJECT_CATEGORIES = ['cell phone', 'laptop', 'remote', 'tv'];
+// ELECTRONIC DEVICES ONLY, and only ones a candidate can actually be expected not to have in
+// frame. The test each entry has to pass is not "could this be used to cheat" but "can an honest
+// candidate reliably avoid being flagged for it".
+//
+// 'book' was removed after a candidate was warned for a sheet of rough paper: the model reports
+// that as 'book', and rough work is a normal, permitted part of sitting an aptitude test.
+//
+// 'laptop' and 'tv' were removed on 2026-10-05 for the same reason, after testers were terminated
+// for devices that were not in the room. Both really mean "a screen is visible" - and a candidate
+// sits an online exam in front of a screen. Their own monitor bezel, a second display, or a
+// television in the room all read as one of these, and the model cannot tell the machine running
+// the exam from a second one showing answers. A signal that fires on the exam device itself has
+// no precision left to spend, and a termination cannot be given back.
+//
+// What is lost: a genuine second laptop or TV is no longer caught automatically. The session
+// recording remains, and is the thing a TA can actually review and judge.
+export const FORBIDDEN_OBJECT_CATEGORIES = ['cell phone', 'remote'];
 const OBJECT_SCORE_THRESHOLD = 0.6;
 
 let modelsPromise = null;

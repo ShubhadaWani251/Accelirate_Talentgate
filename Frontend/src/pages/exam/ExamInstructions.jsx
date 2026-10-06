@@ -59,17 +59,28 @@ export default function ExamInstructions() {
               <li>Do not read questions aloud or talk during the assessment - sustained talking is detected and treated as a violation. Brief background noise is fine</li>
               {/* Stated as an explicit allowed/not-allowed list because the object detector had
                   been flagging a sheet of rough-work paper, and a candidate cannot comply with a
-                  rule they were never told. The not-allowed half matches
-                  visionModels.FORBIDDEN_OBJECT_CATEGORIES exactly - if that list changes, this
-                  sentence has to change with it. */}
+                  rule they were never told.
+
+                  This is the RULE, which is wider than what is detected automatically: a second
+                  screen is still not allowed even though visionModels.FORBIDDEN_OBJECT_CATEGORIES
+                  no longer looks for one, because the session recording is reviewed. The bullet
+                  below is the one that must match that list, and it is kept separate precisely so
+                  this rule can stay as it is without claiming detection that does not happen. */}
               <li><b>Allowed on your desk:</b> blank paper and a pen for rough work, and a drink. <b style={{ color: 'var(--brand-red)' }}>Not allowed in view of your camera:</b> a mobile phone, a second laptop or monitor, a TV, or a remote. Keep any electronic device out of frame for the whole assessment</li>
               <li>Do not switch browser tabs, minimize, exit full-screen, or open other applications once the exam begins</li>
               {/* Stated precisely, because a candidate who is told "one warning" for everything
                   would reasonably feel misled when a Print Screen ends the attempt outright.
                   The split is defined server-side in exam_session.WARNABLE_REASONS, and the
                   signals named here are that set in plain words - if it changes, this changes.
-                  The three-warning figure is exam_session.MAX_WARNINGS. */}
-              <li><b style={{ color: 'var(--brand-red)' }}>This assessment is AI-proctored.</b> Your microphone is listened to continuously and your camera is checked throughout. Talking, looking away from the screen, your face leaving the frame, another person appearing behind you, and <b>any electronic device in view</b> - a phone, a second screen, a TV or a remote - are all detected automatically. <b style={{ color: 'var(--brand-red)' }}>You get up to three warnings</b> across all of these together. The fourth ends your attempt immediately and your answers are submitted as they are. Take the time to read each warning — there is no time limit on dismissing it, but your exam timer keeps running while it is open</li>
+                  The three-warning figure is exam_session.MAX_WARNINGS.
+
+                  The devices named here are visionModels.FORBIDDEN_OBJECT_CATEGORIES exactly -
+                  if that list changes, this sentence changes with it. It used to claim a second
+                  screen and a TV were detected too; they were removed from the list because the
+                  model cannot tell the screen running the exam from an extra one, and candidates
+                  were terminated for hardware in their own room. Promising detection that no
+                  longer happens would be the same failure in the opposite direction. */}
+              <li><b style={{ color: 'var(--brand-red)' }}>This assessment is AI-proctored.</b> Your microphone is listened to continuously and your camera is checked throughout. Talking, looking away from the screen, your face leaving the frame, another person appearing behind you, and <b>a phone or a remote in view of your camera</b> are all detected automatically. Anything else on the not-allowed list above is checked by a person reviewing your recording afterwards. <b style={{ color: 'var(--brand-red)' }}>You get up to three warnings</b> across all of these together. The fourth ends your attempt immediately and your answers are submitted as they are. Take the time to read each warning — there is no time limit on dismissing it, but your exam timer keeps running while it is open</li>
               <li>Keyboard shortcuts like Print Screen, F12 or Ctrl+U are <b>not warned at all</b> - they end your attempt <b>immediately, the first time you press them</b></li>
               {/* Stated explicitly because candidates routinely assume the opposite and leave
                   questions blank to avoid a penalty that does not exist. Accurate as written:

@@ -127,9 +127,12 @@ TERMINATION_MESSAGES = {
     TerminationReason.EXTRA_PERSON_DETECTED:
         'Your assessment was ended because more than one face was detected in the camera '
         'frame. Only you may be visible on camera during the assessment.',
+    # Names only what is actually detected (visionModels.FORBIDDEN_OBJECT_CATEGORIES: phone,
+    # remote). It used to say "phone, laptop or TV", which sent candidates looking for a laptop
+    # that was never the cause - and those two were removed from detection entirely because the
+    # model cannot tell the screen running the exam from an extra one.
     TerminationReason.FORBIDDEN_OBJECT_DETECTED:
-        'Your assessment was ended because an electronic device (such as a phone, laptop or TV) '
-        'was detected in view of the camera.',
+        'Your assessment was ended because a phone or remote was detected in view of the camera.',
     TerminationReason.VOICE_DETECTED:
         'Your assessment was ended because sustained talking was detected during the '
         'assessment. The room must remain quiet other than brief background noise.',
@@ -159,8 +162,10 @@ TERMINATION_LABELS = {
     TerminationReason.FACE_NOT_VISIBLE: 'Face not visible to camera for an extended period',
     TerminationReason.LOOKING_AWAY: 'Turned away from the screen (head turned left/right)',
     TerminationReason.EXTRA_PERSON_DETECTED: 'More than one face detected in camera frame',
+    # 'book' had already been out of detection for some time when this was last read, and
+    # laptop/TV went with it - a TA judging an attempt should see the signal that actually fired.
     TerminationReason.FORBIDDEN_OBJECT_DETECTED:
-        'Unauthorized object detected in camera frame (phone/laptop/book/etc.)',
+        'Phone or remote detected in camera frame',
     TerminationReason.VOICE_DETECTED: 'Sustained talking detected during assessment',
     TerminationReason.FACE_MISMATCH: 'Face no longer matched the verified candidate',
 }
@@ -281,8 +286,7 @@ _WARNING_CAUSES = {
     TerminationReason.EXTRA_PERSON_DETECTED:
         'more than one face was detected in your camera frame',
     TerminationReason.FORBIDDEN_OBJECT_DETECTED:
-        'an electronic device - a phone, laptop, TV or remote - was detected in view of your '
-        'camera',
+        'a phone or remote was detected in view of your camera',
     TerminationReason.VOICE_DETECTED:
         'sustained talking was detected in the room',
     TerminationReason.FACE_MISMATCH:

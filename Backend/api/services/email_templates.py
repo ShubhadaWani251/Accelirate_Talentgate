@@ -265,9 +265,13 @@ INVITATION_TEMPLATE = {
         # than only there because a candidate reading the plain-text part must not be the one
         # who finds out mid-exam that anything was being watched, or that a fourth detection
         # ends the attempt.
+        # "a phone or remote", not "a phone or second screen": second screens and TVs were
+        # removed from automatic detection (see visionModels.FORBIDDEN_OBJECT_CATEGORIES), and
+        # an invitation that promises a check which no longer runs is worse than one that is
+        # quiet about it. The rule against them still stands and is reviewed on the recording.
         '- **This assessment is AI-proctored.** Your camera and microphone are monitored for '
         'the whole assessment. Talking, looking away from the screen for a sustained period, '
-        'another person appearing on camera, a phone or second screen in view, leaving the '
+        'another person appearing on camera, a phone or remote in view, leaving the '
         'assessment window, and your face leaving the frame are all detected automatically.\n\n'
         '- **You are allowed three warnings.** Your fourth violation ends the assessment '
         'immediately and submits your answers as they are. Print Screen, F12 and Ctrl+U are '
