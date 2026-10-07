@@ -612,6 +612,14 @@ def build_session_state(attempt):
         # ExamAttemptPage.jsx, which ANDs this into useVisionProctoringGuard/
         # useVoiceActivityGuard's own `active` argument.
         'ai_proctoring_enabled': attempt.invitation.batch.ai_proctoring_enabled,
+        # So the candidate's on-screen warning counter survives a reload. The violation response
+        # carries these too, but that only exists at the moment a warning fires - a candidate who
+        # reloads, or whose browser crashes mid-exam, would otherwise come back to a counter
+        # reading zero while the server still holds two against them. Read from the same
+        # ProctoringEvent stream record_violation writes, so the screen and the decision to
+        # terminate can never be counting different things.
+        'warnings_used': warnings_used(attempt),
+        'warnings_allowed': MAX_WARNINGS,
     }
 
 

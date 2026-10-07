@@ -12,6 +12,13 @@
   --green: #276b46;
   --green-bg: #e4f2e9;
   --amber: #9a7b1f;
+  /* --amber is a 3.63:1 pairing against --amber-bg, which is fine for a border or an icon but
+     fails AA (4.5:1) for text below 18.66px bold. This is the same hue carried darker, 5.34:1,
+     for amber text that has to be read rather than noticed - starting with the candidate's
+     warning counter, which exists precisely to be read. The existing .pill.amber and
+     .alert.amber still use --amber for their own text and have the same shortfall; changing
+     them is a wider sweep than this. */
+  --amber-text: #7a6118;
   --amber-bg: #fbf3dd;
   --red: var(--brand-red-dark);
   --red-bg: #fce9eb;
@@ -445,6 +452,17 @@ table.data-table tbody tr:hover td { background: var(--accent-soft); }
 }
 .timer-badge.low-time { background: var(--red-bg); color: var(--brand-red-dark); }
 
+/* The candidate's own warning count, beside the timer. Amber while there is still room, red on
+   the last one - the repo's green/amber/red convention, where amber is "worth a look" and red is
+   "a decision has to be made". It is deliberately quieter than the timer at amber: the timer
+   governs the exam and should stay the loudest thing there, right up until the final warning,
+   which is the one piece of information worth interrupting for. */
+.warning-badge {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 999px;
+  font-size: 12.5px; font-weight: 700; background: var(--amber-bg); color: var(--amber-text);
+}
+.warning-badge.final { background: var(--red-bg); color: var(--brand-red-dark); }
+
 .section-marker {
   font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px;
   color: var(--brand-blue-dark); background: var(--accent-soft); padding: 8px 12px;
@@ -851,6 +869,10 @@ a.stat-card:hover { box-shadow: 0 6px 18px rgba(16,24,40,.10); transform: transl
   .q-card { padding: 14px 14px; }
   .option-row { padding: 11px 8px; }
   .timer-badge { font-size: 12px; padding: 5px 11px; }
+  /* The final-warning wording is a sentence. The row it sits in already wraps, so on a narrow
+     screen it takes its own line rather than squeezing the timer - which is the right order of
+     priority at the point someone is one violation from losing their assessment. */
+  .warning-badge { font-size: 11.5px; padding: 5px 11px; }
 }
 
 /* ---------- Phone layout: below 585px ----------

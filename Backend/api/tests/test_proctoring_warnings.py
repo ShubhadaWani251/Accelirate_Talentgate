@@ -385,3 +385,48 @@ class TestDeviceNamesDoNotDriftFromDetection:
                 f'{label} names {sorted(named - detected)}, which is not detected - '
                 f'keep this in step with visionModels.FORBIDDEN_OBJECT_CATEGORIES'
             )
+
+
+class TestTheCandidateCanSeeTheirOwnWarningCount:
+    """The session payload carries the count, so the on-screen badge survives a reload.
+
+    The violation response carries it too, but that only exists at the instant a warning fires.
+    A candidate who reloads - or whose browser crashes, which is exactly the sort of thing that
+    happens on a machine already struggling - would otherwise come back to a screen implying a
+    clean slate while the server still held two warnings against them, and be terminated by a
+    violation they had no reason to expect was their last.
+    """
+
+    def test_the_count_is_reported_and_survives_a_reload(self, attempt):
+        before = exam_session.build_session_state(attempt)
+        assert before['warnings_used'] == 0
+        assert before['warnings_allowed'] == exam_session.MAX_WARNINGS
+
+        exam_session.record_violation(attempt, TerminationReason.CAMERA_OFF)
+        exam_session.record_violation(attempt, TerminationReason.CAMERA_OFF)
+
+        # A fresh read, as a reloaded browser makes - nothing is carried over in the client.
+        after = exam_session.build_session_state(attempt)
+        assert after['warnings_used'] == 2
+
+    def test_the_reported_count_is_the_one_termination_is_decided_on(self, attempt):
+        """Both read warnings_used, so the badge cannot say "1 of 3" while the server is about
+        to end the attempt. Pinned because they are separate call sites that could drift."""
+        exam_session.record_violation(attempt, TerminationReason.CAMERA_OFF)
+        exam_session.record_violation(attempt, TerminationReason.CAMERA_OFF)
+        state = exam_session.build_session_state(attempt)
+        assert state['warnings_used'] == 2
+
+        third = exam_session.record_violation(attempt, TerminationReason.CAMERA_OFF)
+        assert third['action'] == 'warned'
+        assert third['warnings_used'] == 3
+        assert build_session_state_used(attempt) == 3
+
+        # Having shown "3 of 3", the next one must actually be the end - otherwise the badge
+        # promised something the server does not do.
+        fourth = exam_session.record_violation(attempt, TerminationReason.CAMERA_OFF)
+        assert fourth['action'] == 'terminated'
+
+
+def build_session_state_used(attempt):
+    return exam_session.build_session_state(attempt)['warnings_used']

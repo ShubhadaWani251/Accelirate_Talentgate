@@ -73,6 +73,13 @@ export default function ExamAttemptPage() {
   // null. Purely for display - the authoritative count lives on the server, so this is not what
   // stops a further warning being issued.
   const [warning, setWarning] = useState(null);
+  // How many of the shared allowance this attempt has spent, shown on screen throughout rather
+  // than only inside the warning modal. A candidate who dismissed a warning ten minutes ago had
+  // no way to tell whether they were on their first or their second.
+  //
+  // Seeded from the session (so it survives a reload - the server counts these, not the browser)
+  // and updated from each violation response, which is authoritative at the moment it arrives.
+  const [warningsUsed, setWarningsUsed] = useState(0);
   // Re-arm counters for the guards' once-only latches. Two of them, because the window guards
   // and the full-screen guard have to come back at different moments - see onViolation and
   // acknowledgeWarning.
@@ -139,6 +146,7 @@ export default function ExamAttemptPage() {
         setSessionState(data);
         setAnswers(flattenAnswers(data.sections));
         setMarkedForReview(flattenMarks(data.sections));
+        setWarningsUsed(data.warnings_used ?? 0);
         setView('exam');
       })
       .catch(() => navigate(`/t/${token}`, { replace: true }));
@@ -191,6 +199,7 @@ export default function ExamAttemptPage() {
           if (data.action === 'warned') {
             setWarning({ detail: data.detail, used: data.warnings_used,
                          allowed: data.warnings_allowed });
+            setWarningsUsed(data.warnings_used);
             // The latch stays HELD until the candidate acknowledges: while a warning is on
             // screen, no further violation is reported. See acknowledgeWarning, which releases
             // it and re-arms the guards.
@@ -668,6 +677,9 @@ export default function ExamAttemptPage() {
   }
 
   const lowTime = timer.remaining <= 300; // last 5 minutes
+  // From the server rather than hardcoded to 3, so the badge cannot disagree with
+  // exam_session.MAX_WARNINGS about how many the candidate actually gets.
+  const warningsAllowed = sessionState?.warnings_allowed ?? 3;
   const sections = sessionState.sections;
   const activeSection = sections[activeSectionIndex] || sections[0];
 
@@ -685,6 +697,26 @@ export default function ExamAttemptPage() {
           <div className="exam-topbar-inner">
             <h3 style={{ margin: 0 }}>Assessment</h3>
             <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              {/* Shown only once a warning has actually been given. A permanent "0 of 3" on an
+                  exam screen is a standing accusation against someone doing nothing wrong, and
+                  the allowance is already stated on the instructions page - there is nothing to
+                  track until there is something to track. From the first warning onward it
+                  answers the question the modal cannot once it has been dismissed: am I on my
+                  first or my second?
+
+                  aria-live so it is announced when it changes rather than only found by someone
+                  who thinks to go looking. */}
+              {warningsUsed > 0 && (
+                <div
+                  className={`warning-badge${warningsUsed >= warningsAllowed ? ' final' : ''}`}
+                  role="status"
+                  aria-live="polite"
+                >
+                  {warningsUsed >= warningsAllowed
+                    ? '⚠ Final warning — the next one ends your assessment'
+                    : `⚠ ${warningsUsed} of ${warningsAllowed} warnings used`}
+                </div>
+              )}
               <div className={`timer-badge${lowTime ? ' low-time' : ''}`}>⏱ {timer.formatted} remaining</div>
               <button className="btn danger" type="button" onClick={() => setShowConfirm(true)}>
                 Submit Exam
