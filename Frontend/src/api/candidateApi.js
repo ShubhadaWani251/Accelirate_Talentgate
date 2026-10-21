@@ -86,8 +86,16 @@ export const sendCertificationEmail = (
     .then((r) => r.data);
 
 // Same authenticated-blob-download pattern as batchApi.downloadTemplate.
-export const exportCandidates = async ({ from, to, batchId } = {}) => {
+// `filters` is the All Candidates filter state, passed straight through so the spreadsheet holds
+// the rows the table is showing and not the whole database. The backend runs them through the
+// identical code path the list uses (views/candidates.apply_candidate_filters), which is what
+// keeps the two in step - exporting from a list filtered to "Passed" used to return everyone.
+// Omitted by the Dashboard and the sidebar's Export action, which deliberately mean "all of them".
+export const exportCandidates = async ({ from, to, batchId, filters } = {}) => {
   const params = {};
+  Object.entries(filters || {}).forEach(([key, value]) => {
+    if (value !== '' && value !== null && value !== undefined) params[key] = value;
+  });
   if (from) params.from = from;
   if (to) params.to = to;
   if (batchId) params.batch_id = batchId;

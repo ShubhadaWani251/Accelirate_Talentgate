@@ -298,7 +298,11 @@ export default function AllCandidates() {
         </div>
       )}
 
-      {exportOpen && <ExportModal onClose={() => setExportOpen(false)} />}
+      {/* filters, not just batch_id: Export here means "this list as a spreadsheet", so it
+          carries everything the table was filtered by - result, scope, score ranges and all. */}
+      {exportOpen && (
+        <ExportModal filters={filters} onClose={() => setExportOpen(false)} />
+      )}
       </>
       )}
     </div>

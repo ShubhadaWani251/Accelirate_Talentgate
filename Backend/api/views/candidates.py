@@ -242,65 +242,78 @@ def _with_latest_attempt(qs):
     )
 
 
+def apply_candidate_filters(qs, params):
+    """Apply every All Candidates filter to `qs`, in the order the dedupe below depends on.
+
+    Shared by the list and the EXPORT, which is the whole point of it existing: the export
+    used to honour only batch_id and the date range, so downloading from a list filtered to
+    "Passed" handed back every candidate in the system - the opposite of what the button
+    beside the filtered table appears to promise. One function, so a filter added to the
+    screen cannot quietly go missing from the spreadsheet.
+
+    `from`/`to` are deliberately NOT here: they are an export-only control (the date range in
+    ExportModal), with no counterpart on the list, so CandidateExportView applies them itself.
+    """
+    name = (params.get('name') or '').strip()
+    if name:
+        qs = qs.filter(Q(first_name__icontains=name) | Q(last_name__icontains=name))
+
+    email = (params.get('email') or '').strip()
+    if email:
+        qs = qs.filter(email__icontains=email)
+
+    aadhaar = (params.get('aadhaar') or '').strip()
+    if aadhaar:
+        qs = qs.filter(aadhaar_last4__icontains=aadhaar)
+
+    # Scopes the list to candidates sitting in a batch of this status - how the dashboard's
+    # stat cards hand their own scope across (?batch_status=in_progress), so clicking a
+    # number lands on exactly the rows it counted.
+    #
+    # Applied BEFORE the dedupe below, for the reason build_dashboard_summary applies it
+    # before its own: dedupe keeps each person's most recently created batch membership, so
+    # deduping first would drop someone whose newest membership is in a finished batch even
+    # though they are also sitting in a running one.
+    batch_status = (params.get('batch_status') or '').strip()
+    if batch_status:
+        qs = qs.filter(batch__status=batch_status)
+
+    batch_id = params.get('batch_id')
+    if batch_id:
+        qs = qs.filter(batch_id=batch_id)
+    else:
+        # All Candidates, unscoped to one batch: one row per real person rather than one
+        # per batch appearance - see services/access.dedupe_by_profile, shared with the
+        # dashboard's stat cards so the two can't silently disagree on "how many people."
+        qs = dedupe_by_profile(qs)
+
+    result = (params.get('result') or '').strip()
+    if result:
+        qs = qs.filter(result=result)
+
+    # `status=completed` deliberately does NOT read Candidate.status: nothing ever writes
+    # COMPLETED there (see serializers/candidates._effective_status). A candidate has
+    # finished when their most recent attempt was submitted, which is what the Status column
+    # and the dashboard's Completed card already both mean by it - and the dashboard counts
+    # it with this same -attempt_id subquery, so the number and this list cannot disagree.
+    # Named attempt_status locally because `status` here is rest_framework's status module.
+    attempt_status = (params.get('status') or '').strip()
+    if attempt_status == 'completed':
+        qs = qs.annotate(
+            latest_attempt_status=Subquery(
+                ExamAttempt.objects.filter(candidate=OuterRef('pk'))
+                .order_by('-attempt_id').values('status')[:1]
+            )
+        ).filter(latest_attempt_status=ExamAttempt.Status.SUBMITTED)
+
+    return _apply_score_filters(qs, params)
+
+
 class CandidateListView(APIView):
     permission_classes = [IsAdminOrTA]
 
     def get(self, request):
-        qs = visible_candidates_qs(request.user)
-
-        name = request.query_params.get('name', '').strip()
-        if name:
-            qs = qs.filter(Q(first_name__icontains=name) | Q(last_name__icontains=name))
-
-        email = request.query_params.get('email', '').strip()
-        if email:
-            qs = qs.filter(email__icontains=email)
-
-        aadhaar = request.query_params.get('aadhaar', '').strip()
-        if aadhaar:
-            qs = qs.filter(aadhaar_last4__icontains=aadhaar)
-
-        # Scopes the list to candidates sitting in a batch of this status - how the dashboard's
-        # stat cards hand their own scope across (?batch_status=in_progress), so clicking a
-        # number lands on exactly the rows it counted.
-        #
-        # Applied BEFORE the dedupe below, for the reason build_dashboard_summary applies it
-        # before its own: dedupe keeps each person's most recently created batch membership, so
-        # deduping first would drop someone whose newest membership is in a finished batch even
-        # though they are also sitting in a running one.
-        batch_status = request.query_params.get('batch_status', '').strip()
-        if batch_status:
-            qs = qs.filter(batch__status=batch_status)
-
-        batch_id = request.query_params.get('batch_id')
-        if batch_id:
-            qs = qs.filter(batch_id=batch_id)
-        else:
-            # All Candidates, unscoped to one batch: one row per real person rather than one
-            # per batch appearance - see services/access.dedupe_by_profile, shared with the
-            # dashboard's stat cards so the two can't silently disagree on "how many people."
-            qs = dedupe_by_profile(qs)
-
-        result = request.query_params.get('result', '').strip()
-        if result:
-            qs = qs.filter(result=result)
-
-        # `status=completed` deliberately does NOT read Candidate.status: nothing ever writes
-        # COMPLETED there (see serializers/candidates._effective_status). A candidate has
-        # finished when their most recent attempt was submitted, which is what the Status column
-        # and the dashboard's Completed card already both mean by it - and the dashboard counts
-        # it with this same -attempt_id subquery, so the number and this list cannot disagree.
-        # Named attempt_status locally because `status` here is rest_framework's status module.
-        attempt_status = request.query_params.get('status', '').strip()
-        if attempt_status == 'completed':
-            qs = qs.annotate(
-                latest_attempt_status=Subquery(
-                    ExamAttempt.objects.filter(candidate=OuterRef('pk'))
-                    .order_by('-attempt_id').values('status')[:1]
-                )
-            ).filter(latest_attempt_status=ExamAttempt.Status.SUBMITTED)
-
-        qs = _apply_score_filters(qs, request.query_params)
+        qs = apply_candidate_filters(visible_candidates_qs(request.user), request.query_params)
 
         qs = _with_latest_attempt(qs.order_by('-created_at'))
         paginator = StandardResultsPagination()
@@ -736,11 +749,11 @@ class CandidateExportView(APIView):
             return Response({'detail': 'Too many export requests. Please try again shortly.'},
                              status=status.HTTP_429_TOO_MANY_REQUESTS)
 
-        qs = visible_candidates_qs(request.user).order_by('-created_at')
-
-        batch_id = request.query_params.get('batch_id')
-        if batch_id:
-            qs = qs.filter(batch_id=batch_id)
+        # The SAME filters the All Candidates table applied to produce what the user is looking
+        # at - see apply_candidate_filters. Exporting is "give me this list as a spreadsheet",
+        # so it has to start from this list; before this it started from all of them, and a
+        # Passed-only screen exported everyone.
+        qs = apply_candidate_filters(visible_candidates_qs(request.user), request.query_params)
 
         date_from = parse_date(request.query_params.get('from', '') or '')
         if date_from:
@@ -750,9 +763,12 @@ class CandidateExportView(APIView):
         if date_to:
             qs = qs.filter(created_at__date__lte=date_to)
 
-        # attach_latest_activity so exported Status cells match what the table shows.
+        # attach_latest_activity so exported Status cells match what the table shows, and the
+        # same -created_at ordering the table reads in, so row 1 of the spreadsheet is row 1
+        # of the screen.
         wb = generate_candidates_workbook(
-            attach_latest_activity(_with_latest_attempt(qs)), _latest_attempt,
+            attach_latest_activity(_with_latest_attempt(qs.order_by('-created_at'))),
+            _latest_attempt,
             status_display_fn=lambda c: _effective_status(c)[1],
         )
         buffer_response = HttpResponse(
