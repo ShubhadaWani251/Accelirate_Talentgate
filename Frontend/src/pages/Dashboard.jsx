@@ -41,22 +41,24 @@ const STAT_CARDS = [
 ];
 
 const RESULT_BANDS = [
-  { key: 'pass_count', label: 'Pass', tone: 'green' },
-  { key: 'fail_count', label: 'Fail', tone: 'red' },
-  { key: 'borderline_count', label: 'Borderline', tone: 'amber' },
+  { key: 'total_pass', label: 'Pass', tone: 'green' },
+  { key: 'total_fail', label: 'Fail', tone: 'red' },
+  { key: 'total_borderline', label: 'Borderline', tone: 'amber' },
 ];
 
-function ResultsSummary({ batches }) {
-  // Summed from the batch rows already on screen rather than from a new endpoint - every batch
-  // carries its own pass/fail/borderline counts and the whole list is sent, not a page of it.
+function ResultsSummary({ stats }) {
+  // Read from the same `stats` block as the four cards beside it, counted off the one queryset
+  // on the server (serializers/dashboard._build_stats).
   //
-  // It therefore describes the batches CURRENTLY FILTERED, not all time, because that list
-  // follows the Batch Status filter below. The caption says so: a total that silently changes
-  // when a filter moves is worse than one that admits its own scope.
+  // It used to sum each batch row in the table below instead, which made it answer a different
+  // question with the same word: those counts are per batch MEMBERSHIP and followed the table's
+  // own Batch Status filter, while the "Passed" card counts PEOPLE in a running batch. The
+  // panel read Pass 11 next to a card reading 4. Sharing one source is what stops that, not a
+  // caption explaining it.
   const totals = RESULT_BANDS.map(({ key, label, tone }) => ({
     label,
     tone,
-    value: (batches || []).reduce((sum, b) => sum + (b[key] || 0), 0),
+    value: stats?.[key] || 0,
   }));
   const graded = totals.reduce((sum, t) => sum + t.value, 0);
 
@@ -64,7 +66,7 @@ function ResultsSummary({ batches }) {
     <div className="stat-card results-summary">
       <div className="stat-lbl">Results Summary</div>
       {graded === 0 ? (
-        <div className="results-empty">No graded results in these batches yet.</div>
+        <div className="results-empty">No graded results yet.</div>
       ) : (
         <>
           <div className="results-bar" role="img"
@@ -86,14 +88,15 @@ function ResultsSummary({ batches }) {
               </div>
             ))}
           </div>
-          <div className="results-scope">across the batches shown below</div>
+          <div className="results-scope">across batches currently In Progress</div>
         </>
       )}
     </div>
   );
 }
 const EMPTY_MESSAGE = {
-  active: 'No active batches found.',
+  active: 'No In Progress batches found.',
+  completed: 'No Completed batches found.',
   draft: 'No Draft batches found.',
   cancelled: 'No Cancelled batches found.',
   all: 'No batches yet.',
@@ -217,7 +220,7 @@ export default function Dashboard() {
             <LuChevronRight className="stat-chevron" aria-hidden="true" />
           </Link>
         ))}
-        <ResultsSummary batches={visibleBatches} />
+        <ResultsSummary stats={stats} />
       </div>
 
       <div className="btn-row" style={{ display: 'flex', gap: 10, marginBottom: 20 }}>

@@ -66,6 +66,13 @@ def _build_stats(batches_qs, candidates_qs):
         total_candidates=Count('candidate_id'),
         completed=Count('candidate_id', filter=Q(latest_attempt_status=ExamAttempt.Status.SUBMITTED)),
         total_pass=Count('candidate_id', filter=Q(result=Candidate.Result.PASS)),
+        # Fail and Borderline exist only to feed the Results Summary panel, which used to sum
+        # each batch row's own pass/fail/borderline instead. Those row counts are per batch
+        # MEMBERSHIP and follow the table's filter, while "Passed" above counts PEOPLE in a
+        # running batch - so the panel said 11 Pass beside a card reading 4, on the same screen,
+        # about the same word. Counted here, off the one queryset, the two cannot disagree.
+        total_fail=Count('candidate_id', filter=Q(result=Candidate.Result.FAIL)),
+        total_borderline=Count('candidate_id', filter=Q(result=Candidate.Result.BORDERLINE)),
         total_candidates_this_week=Count('candidate_id', filter=Q(created_at__gte=week_ago)),
         completed_this_week=Count('candidate_id', filter=Q(
             latest_attempt_status=ExamAttempt.Status.SUBMITTED,
@@ -82,16 +89,16 @@ def _build_stats(batches_qs, candidates_qs):
 
 
 def _build_batches_overview(batches_qs, is_admin, status_group='active'):
-    # Filtered by the unified Batch Status control - 'active' (In Progress + Completed) by
-    # default, so an unfinished Draft upload or a deactivated batch don't sit in the normal
-    # view reporting zero candidates and zero results. Both remain fully visible by
-    # switching the filter (see filter_batches_by_status_group) - nothing here is hidden
-    # outright, only excluded from the default view.
+    # Filtered by the unified Batch Status control - 'active' (In Progress) by default, so a
+    # finished drive, an unfinished Draft upload or a deactivated batch don't sit in the normal
+    # view alongside the work still being done. All three remain fully visible by switching the
+    # filter (see filter_batches_by_status_group) - nothing here is hidden outright, only
+    # excluded from the default view.
     #
     # Ordered by how much attention a batch still wants, then newest-first within each band.
-    # Sorting by date alone interleaved finished batches with live ones, so the rows a TA can
-    # still act on were scattered down a list they had to read all of - and the default Active
-    # view holds both In Progress and Completed, which is where it showed most.
+    # The default view is one status now, so this orders nothing within it; it still matters
+    # under 'all', where sorting by date alone interleaves finished batches with live ones and
+    # scatters the rows a TA can still act on down a list they have to read all of.
     #
     #   0  in progress (and drafts, in the groups that include them) - live work
     #   1  completed   - done, kept for reference
@@ -174,10 +181,12 @@ def build_dashboard_summary(user, batch_status='active'):
     """Shapes the /api/dashboard/ response: stat cards + batches overview for every caller,
     plus question-bank-health and TA-account summaries for admins only.
 
-    `batch_status` (the dashboard's unified Batch Status filter - active/draft/cancelled/all)
-    only scopes the batches_overview table, not the stat cards above it: "Active Batches",
-    "Total Candidates" etc. describe the org's overall state and shouldn't change just because
-    the reviewer is looking at the Draft or Cancelled list underneath.
+    `batch_status` (the dashboard's unified Batch Status filter -
+    active/completed/draft/cancelled/all) only scopes the batches_overview table, not the stat
+    cards above it: "Active Batches", "Total Candidates" etc. describe the org's overall state
+    and shouldn't change just because the reviewer is looking at the Draft or Cancelled list
+    underneath. The Results Summary panel beside those cards is fed from `stats` for the same
+    reason - it reads as one of them, so it has to be scoped like one of them.
     """
     is_admin = user.role.role_code == 'admin'
     batches_qs = _batches_qs_for(user)

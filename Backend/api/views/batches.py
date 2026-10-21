@@ -105,7 +105,7 @@ class BatchListCreateView(APIView):
         # which batches exist.
         qs = visible_batches_qs(request.user).select_related('primary_ta_user')
 
-        # Unified Batch Status filter - 'active' (In Progress + Completed) by default, or
+        # Unified Batch Status filter - 'active' (In Progress) by default, or 'completed' /
         # 'draft' / 'cancelled' / 'all' on request. Same grouping the dashboard uses, via the
         # shared helper, so "Active" means the same set of statuses in both places.
         qs = filter_batches_by_status_group(qs, request.query_params.get('status'))
@@ -280,12 +280,14 @@ class BatchDeactivateView(APIView):
 
 
 class BatchCompleteView(APIView):
-    """Manually marks a batch Completed. Nothing in the app infers this automatically - see
-    services/batch_status_filter.py, which already groups Completed alongside In Progress under
-    "Active" precisely because nothing ever produced a Completed batch until this. A TA/admin
-    decides when a drive is actually done: "every candidate finished" doesn't account for
-    stragglers written off, and "the link window closed" doesn't account for a TA who
-    deliberately keeps inviting past it.
+    """Manually marks a batch Completed. Nothing in the app infers this automatically: a
+    TA/admin decides when a drive is actually done, because "every candidate finished" doesn't
+    account for stragglers written off, and "the link window closed" doesn't account for a TA
+    who deliberately keeps inviting past it.
+
+    This endpoint is what made Completed a status that real batches reach, which is why
+    services/batch_status_filter.py now gives it a group of its own instead of folding it in
+    with In Progress under "Active".
     """
     permission_classes = [IsAdminOrTA]
 

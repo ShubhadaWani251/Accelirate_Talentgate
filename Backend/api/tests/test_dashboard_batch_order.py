@@ -1,8 +1,9 @@
 """Batches Overview orders by how much attention a batch still wants, not by date alone.
 
-Sorting by date alone interleaved finished batches with live ones, so the rows a TA can still
-act on were scattered down a list they had to read all of. Most visible in the default Active
-view, which holds In Progress and Completed together.
+Sorting by date alone interleaves finished batches with live ones, so the rows a TA can still
+act on get scattered down a list they have to read all of. Only visible under "All" now - the
+default Active view holds In Progress alone, which is what TestActiveMeansInProgressOnly below
+pins down.
 """
 from datetime import timedelta
 
@@ -46,11 +47,11 @@ class TestCompletedBatchesSinkBelowLiveOnes:
         self, admin_user, batches_by_status,
     ):
         """The reported case: a completed batch created today must not sit above an in-progress
-        one from last week.
+        one from last week. Asserted under "All", the only view that now shows both.
         """
         batches_by_status(Batch.Status.IN_PROGRESS, Batch.Status.COMPLETED)
 
-        assert _names(admin_user) == ['in_progress-batch', 'completed-batch']
+        assert _names(admin_user, 'all') == ['in_progress-batch', 'completed-batch']
 
     def test_cancelled_sinks_below_completed(self, admin_user, batches_by_status):
         batches_by_status(
@@ -85,3 +86,34 @@ class TestCompletedBatchesSinkBelowLiveOnes:
                        created_at=now - timedelta(days=5 - index))
 
         assert _names(admin_user, 'draft') == ['draft-new', 'draft-old']
+
+
+class TestActiveMeansInProgressOnly:
+    """"Active" is In Progress and nothing else, in the count AND in the table.
+
+    Completed used to be folded in here, which left the "Active Batches" card reporting one
+    number while the table directly beneath it listed a longer set - the card has always
+    counted In Progress alone. Reported by a tester as "the Active Batches section includes
+    completed batches".
+    """
+
+    def test_completed_is_not_in_the_default_view(self, admin_user, batches_by_status):
+        batches_by_status(Batch.Status.IN_PROGRESS, Batch.Status.COMPLETED)
+
+        assert _names(admin_user) == ['in_progress-batch']
+
+    def test_completed_has_its_own_group(self, admin_user, batches_by_status):
+        """Excluded from the default view, not hidden - one filter click away."""
+        batches_by_status(Batch.Status.IN_PROGRESS, Batch.Status.COMPLETED)
+
+        assert _names(admin_user, 'completed') == ['completed-batch']
+
+    def test_the_card_and_the_table_agree(self, admin_user, batches_by_status):
+        """The actual bug: one number above a list that contradicted it."""
+        batches_by_status(
+            Batch.Status.IN_PROGRESS, Batch.Status.COMPLETED, Batch.Status.CANCELLED,
+        )
+
+        summary = build_dashboard_summary(admin_user, batch_status='active')
+
+        assert summary['stats']['active_batches'] == len(summary['batches_overview']) == 1

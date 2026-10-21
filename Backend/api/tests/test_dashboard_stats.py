@@ -308,3 +308,61 @@ class TestStatCardsCoverRunningBatchesOnly:
         listed = client_for(admin_user).get('/api/candidates/')
 
         assert listed.data['count'] == 2
+
+
+class TestResultsSummaryAgreesWithThePassedCard:
+    """The Results Summary panel and the "Passed" card sit side by side and must say the same
+    thing about the same word.
+
+    Reported by a tester: "The summary shows 11 passed candidates, but the corresponding
+    section shows only 4." The panel used to be summed on the frontend from each batch row's
+    own pass_count, which counts batch MEMBERSHIPS and follows the table's Batch Status filter,
+    while the card counts PEOPLE in a running batch. Both now come off this one queryset.
+    """
+
+    def test_the_panel_reads_the_same_number_as_the_card(
+        self, admin_user, make_batch, make_candidate,
+    ):
+        batch = make_batch(admin_user, status=Batch.Status.IN_PROGRESS)
+        for result in (Candidate.Result.PASS, Candidate.Result.PASS, Candidate.Result.FAIL):
+            make_candidate(batch, admin_user, result=result)
+
+        stats = build_dashboard_summary(admin_user)['stats']
+
+        # One key, read by the card and by the panel's Pass band alike.
+        assert stats['total_pass'] == 2
+        assert stats['total_fail'] == 1
+        assert stats['total_borderline'] == 0
+
+    def test_a_finished_batch_is_in_neither(self, admin_user, make_batch, make_candidate):
+        """The exact shape of the mismatch: results from a Completed batch inflated the panel
+        while the card ignored them.
+        """
+        make_candidate(
+            make_batch(admin_user, status=Batch.Status.COMPLETED), admin_user,
+            result=Candidate.Result.PASS,
+        )
+        make_candidate(
+            make_batch(admin_user, status=Batch.Status.IN_PROGRESS), admin_user,
+            result=Candidate.Result.PASS,
+        )
+
+        stats = build_dashboard_summary(admin_user)['stats']
+
+        assert stats['total_pass'] == 1
+
+    def test_the_same_person_passing_twice_counts_once(
+        self, admin_user, make_batch, make_candidate,
+    ):
+        """Deduped like every other card - the panel's old per-membership sum was not."""
+        for _ in range(2):
+            candidate = make_candidate(
+                make_batch(admin_user, status=Batch.Status.IN_PROGRESS), admin_user,
+                aadhaar_last4='4321', date_of_birth=DOB, first_name='Nikhil', last_name='Shah',
+                result=Candidate.Result.PASS,
+            )
+            link_profile(candidate)
+
+        stats = build_dashboard_summary(admin_user)['stats']
+
+        assert stats['total_pass'] == 1
