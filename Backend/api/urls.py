@@ -26,6 +26,11 @@ urlpatterns = [
     path('batches/defaults/', views.BatchDefaultsView.as_view(), name='batch-defaults'),
     path('batches/template/', views.BatchTemplateDownloadView.as_view(), name='batch-template'),
     path('batches/<int:batch_id>/', views.BatchDetailView.as_view(), name='batch-detail'),
+    # Read-only despite being a POST: it takes a cutoff payload too big and too structured for
+    # a query string, runs the real regrade behind a rolled-back transaction, and changes
+    # nothing. See BatchCutoffPreviewView.
+    path('batches/<int:batch_id>/cutoff-preview/', views.BatchCutoffPreviewView.as_view(),
+         name='batch-cutoff-preview'),
     path('batches/<int:batch_id>/deactivate/', views.BatchDeactivateView.as_view(),
          name='batch-deactivate'),
     path('batches/<int:batch_id>/complete/', views.BatchCompleteView.as_view(),

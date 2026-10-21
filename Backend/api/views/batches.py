@@ -1,6 +1,7 @@
 import io
 import logging
 import zipfile
+from collections import Counter
 from decimal import Decimal, InvalidOperation
 
 from django.db import DataError, transaction
@@ -77,6 +78,30 @@ def _apply_section_cutoffs(batch, section_cutoffs):
     if updates:
         BatchSection.objects.bulk_update(updates, ['cutoff'])
     return bool(updates)
+
+
+class _PreviewInputError(Exception):
+    """A bad cutoff payload found INSIDE the preview's transaction.
+
+    Raised rather than returned because returning from inside `with transaction.atomic()`
+    exits the block normally, which commits - and this one must never commit anything.
+    """
+
+
+def _candidate_results(batch):
+    """{candidate_id: (full_name, result)} for one batch, as it stands right now."""
+    return {
+        c.candidate_id: (c.full_name, c.result)
+        for c in batch.candidate_set.filter(is_deleted=False)
+    }
+
+
+def _tally(rows):
+    """How many candidates sit in each result band, every band present even at zero - a
+    missing key reads on screen as a missing row rather than as nothing to report.
+    """
+    counts = Counter(result for _, result in rows.values())
+    return {result: counts.get(result, 0) for result in Candidate.Result.values}
 
 
 def _get_batch_or_404(user, batch_id):
@@ -916,3 +941,102 @@ class BatchSendInvitesView(APIView):
 
         return Response({'invited_count': len(invitations), 'skipped_count': max(skipped, 0),
                          'detail': detail})
+
+
+class BatchCutoffPreviewView(APIView):
+    """POST /api/batches/<id>/cutoff-preview/ - what a cutoff change WOULD do, without doing it.
+
+    Changing a cutoff re-grades everyone who has already sat the exam (see
+    BatchDetailView.patch), and until now the only way to learn what that did was to do it and
+    read the pass/fail columns afterwards. Reported as "there is no clear option to review or
+    validate an assessment after changing cut-off marks or sections".
+
+    Runs the REAL regrade inside a transaction and rolls it back, rather than reimplementing
+    the arithmetic. That is the point: a preview computed a second way is one that can disagree
+    with the thing it previews, and the grading rules here are genuinely involved - sections are
+    marks-weighted, borderline is its own band, terminated attempts stay FAIL however low the
+    cutoff goes, and decisions a human already made are preserved. An in-memory dry run was
+    never available anyway: exam_session._grade_sections rewrites AttemptSectionScore rows as
+    part of grading.
+
+    Admin-only, matching who is allowed to change a cutoff at all.
+    """
+    permission_classes = [IsAdmin]
+
+    # Enough to recognise the cohort without turning a summary into a second candidate list.
+    # The counts above it are the actual answer; these are for sanity-checking them.
+    MAX_LISTED = 25
+
+    def post(self, request, batch_id):
+        batch = _get_batch_or_404(request.user, batch_id)
+        if batch.status == Batch.Status.CANCELLED:
+            return Response({'detail': 'This batch is deactivated; its configuration can no '
+                                        'longer be changed.'},
+                             status=status.HTTP_400_BAD_REQUEST)
+
+        section_cutoffs = request.data.get('section_cutoffs')
+        if section_cutoffs is None:
+            return Response({'section_cutoffs': 'Send a list of {section_key, cutoff}.'},
+                             status=status.HTTP_400_BAD_REQUEST)
+
+        before_rows = _candidate_results(batch)
+        cutoffs_before = {
+            bs.section.section_key: (bs.section.section_name, bs.cutoff)
+            for bs in batch.sections.select_related('section').all()
+        }
+
+        try:
+            with transaction.atomic():
+                try:
+                    _apply_section_cutoffs(batch, section_cutoffs)
+                except ValueError as exc:
+                    raise _PreviewInputError(str(exc)) from exc
+                exam_session.regrade_batch(batch)
+                after_rows = _candidate_results(batch)
+                # Unconditional, and the last thing in the block: nothing above this line is
+                # allowed to survive the request.
+                transaction.set_rollback(True)
+        except _PreviewInputError as exc:
+            return Response({'section_cutoffs': str(exc)},
+                             status=status.HTTP_400_BAD_REQUEST)
+
+        moved = []
+        for candidate_id, (name, after) in after_rows.items():
+            before = before_rows.get(candidate_id)
+            if before and before[1] != after:
+                moved.append({'candidate_id': candidate_id, 'name': name,
+                              'from': before[1], 'to': after})
+        moved.sort(key=lambda m: m['name'])
+
+        changes = []
+        for entry in section_cutoffs:
+            if not isinstance(entry, dict):
+                continue
+            key = entry.get('section_key')
+            if key not in cutoffs_before:
+                continue
+            section_name, old = cutoffs_before[key]
+            new = Decimal(str(entry['cutoff']))
+            if old != new:
+                changes.append({'section_key': key, 'section_name': section_name,
+                                'from': str(old), 'to': str(new)})
+
+        return Response({
+            'batch_id': batch.batch_id,
+            'cutoff_changes': changes,
+            # Only candidates with a verdict can move; the rest have not sat the exam yet.
+            'graded_candidates': sum(
+                1 for _, result in before_rows.values() if result != Candidate.Result.PENDING
+            ),
+            'before': _tally(before_rows),
+            'after': _tally(after_rows),
+            'changed_count': len(moved),
+            'changed': moved[:self.MAX_LISTED],
+            'changed_truncated': max(0, len(moved) - self.MAX_LISTED),
+            # Borderline calls a human already made survive a regrade (see regrade_attempt), so
+            # they will not move whatever the cutoff does. Said out loud, because a reviewer
+            # expecting them to move would otherwise read the preview as wrong.
+            'decided_by_hand': batch.candidate_set.filter(
+                is_deleted=False, result_decided_by__isnull=False,
+            ).count(),
+        })

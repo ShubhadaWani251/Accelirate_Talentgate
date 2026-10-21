@@ -23,6 +23,14 @@ export const createBatch = (payload) => axiosClient.post('/batches/', payload).t
 export const updateBatch = (id, payload) =>
   axiosClient.patch(`/batches/${id}/`, payload).then((r) => r.data);
 
+// What the same section_cutoffs payload WOULD do if it were sent to updateBatch - who moves
+// between pass/fail/borderline, and how the cohort's totals change. Writes nothing: the server
+// runs the real regrade inside a transaction it rolls back (views/batches.BatchCutoffPreviewView).
+export const previewBatchCutoffs = (id, sectionCutoffs) =>
+  axiosClient
+    .post(`/batches/${id}/cutoff-preview/`, { section_cutoffs: sectionCutoffs })
+    .then((r) => r.data);
+
 // Batches are deactivated, never deleted - candidate and result history stays intact.
 export const deactivateBatch = (id) =>
   axiosClient.post(`/batches/${id}/deactivate/`).then((r) => r.data);

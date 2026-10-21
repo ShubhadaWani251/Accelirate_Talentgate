@@ -5,6 +5,7 @@ import * as batchApi from '../../api/batchApi';
 import { toDatetimeLocalValue } from '../../utils/datetime';
 import { extractErrorMessage } from '../../utils/passwordSchema';
 import { ButtonSpinner } from '../../components/loading/Spinner';
+import CutoffReviewModal from './CutoffReviewModal';
 
 // Read-only display of one batch's configuration, from its own Details page - the exam
 // schedule, question counts and cutoffs it was created with (services/batch_defaults.py sets
@@ -31,6 +32,12 @@ export default function ConfigureBatchStep({
 }) {
   const cutoffsOnly = readOnly && !locked && canEditCutoffs;
   const [submitting, setSubmitting] = useState(false);
+  // The review step between editing a cutoff and applying it. `preview` holds the server's
+  // answer; null means the modal is closed. Submitting now goes through here rather than
+  // straight to the PATCH - a cutoff change silently re-grades everyone who has already sat
+  // the exam, and nothing used to say so before it happened.
+  const [preview, setPreview] = useState(null);
+  const [reviewing, setReviewing] = useState(false);
   // Cutoffs are per-section rows now, not four fixed fields, so they are held as local state
   // keyed by section - the field set isn't known until the batch loads. react-hook-form still
   // drives the read-only display fields above.
@@ -50,8 +57,16 @@ export default function ConfigureBatchStep({
     ));
   }, [existingBatch, reset]);
 
-  async function onSubmit(event) {
-    event.preventDefault();
+  // The payload, built once so the preview and the apply can never be asked about different
+  // numbers - which would make the review worthless in exactly the case it matters.
+  function cutoffPayload() {
+    return sections.map((s) => ({
+      section_key: s.section_key,
+      cutoff: Number(cutoffs[s.section_key]),
+    }));
+  }
+
+  function validate() {
     const found = {};
     sections.forEach((s) => {
       const value = Number(cutoffs[s.section_key]);
@@ -60,16 +75,37 @@ export default function ConfigureBatchStep({
       }
     });
     setCutoffErrors(found);
-    if (Object.keys(found).length > 0) return;
+    return Object.keys(found).length === 0;
+  }
 
+  // Submitting opens the review rather than saving. Apply is in the modal.
+  async function onSubmit(event) {
+    event.preventDefault();
+    if (!validate()) return;
+
+    setReviewing(true);
+    try {
+      setPreview(await batchApi.previewBatchCutoffs(existingBatch.batch_id, cutoffPayload()));
+    } catch (err) {
+      toast.error(extractErrorMessage(err));
+    } finally {
+      setReviewing(false);
+    }
+  }
+
+  async function applyCutoffs() {
     setSubmitting(true);
     try {
       const batch = await batchApi.updateBatch(existingBatch.batch_id, {
-        section_cutoffs: sections.map((s) => ({
-          section_key: s.section_key,
-          cutoff: Number(cutoffs[s.section_key]),
-        })),
+        section_cutoffs: cutoffPayload(),
       });
+      setPreview(null);
+      // The count comes back from the PATCH itself, so this reports what was actually
+      // re-graded rather than repeating what the preview predicted.
+      const regraded = batch.regraded_candidates;
+      toast.success(regraded
+        ? `Cutoffs saved — ${regraded} candidate(s) re-graded.`
+        : 'Cutoffs saved.');
       onCreated(batch);
     } catch (err) {
       toast.error(extractErrorMessage(err));
@@ -147,15 +183,29 @@ export default function ConfigureBatchStep({
         </fieldset>
 
         {!locked && canEditCutoffs && (
-          <div className="btn-row" style={{ display: 'flex', gap: 10, marginTop: 8 }}>
-            <button type="submit" className="btn primary" disabled={submitting}>
-              <ButtonSpinner loading={submitting}>
-                {cutoffsOnly ? 'Save Cutoffs' : 'Save Batch Configuration'}
+          <div className="btn-row" style={{ display: 'flex', gap: 10, marginTop: 8, alignItems: 'center' }}>
+            {/* "Review" rather than "Save": the button no longer writes anything, and naming
+                it Save while it opened a dialog would be the same surprise in reverse. */}
+            <button type="submit" className="btn primary" disabled={reviewing || submitting}>
+              <ButtonSpinner loading={reviewing}>
+                {cutoffsOnly ? 'Review Cutoff Changes' : 'Review Batch Configuration'}
               </ButtonSpinner>
             </button>
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+              You&apos;ll see what changes before anything is saved.
+            </span>
           </div>
         )}
       </form>
+
+      {preview && (
+        <CutoffReviewModal
+          preview={preview}
+          applying={submitting}
+          onApply={applyCutoffs}
+          onClose={() => setPreview(null)}
+        />
+      )}
     </div>
   );
 }
