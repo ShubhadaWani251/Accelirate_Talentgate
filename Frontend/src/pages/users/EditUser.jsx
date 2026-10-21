@@ -14,6 +14,8 @@ import { extractErrorMessage } from '../../utils/passwordSchema';
 import { ButtonSpinner } from '../../components/loading/Spinner';
 
 const BATCH_STATUS_PILL = { draft: 'gray', in_progress: 'blue', completed: 'green', cancelled: 'red' };
+// Same three states and the same tones as the User Management list - see its own copy.
+const STATUS_PILL = { active: 'green', invited: 'amber', inactive: 'gray' };
 
 export default function EditUser() {
   const { id } = useParams();
@@ -109,8 +111,20 @@ export default function EditUser() {
         </div>
         <div className="field">
           <label>Account Status</label>
+          {/* The derived status first - the toggle below is the Active/Inactive switch only,
+              and cannot show "Invited" (credentials issued, own password not yet set). */}
+          <div style={{ marginBottom: 8 }}>
+            <span className={`pill ${STATUS_PILL[user.status] || 'gray'}`}>{user.status_display}</span>
+            {user.status === 'invited' && (
+              <span style={{ fontSize: 12, color: 'var(--muted)', marginLeft: 8 }}>
+                Credentials emailed — waiting for them to set their own password.
+              </span>
+            )}
+          </div>
           {isSelf ? (
-            <p style={{ fontSize: 12, color: 'var(--muted)' }}>You can't deactivate your own account.</p>
+            <p style={{ fontSize: 12, color: 'var(--muted)' }}>
+              You can&apos;t deactivate your own account. Another administrator can do it for you.
+            </p>
           ) : (
             <ToggleSwitch checked={form.is_active} onChange={(checked) => setForm({ ...form, is_active: checked })} />
           )}

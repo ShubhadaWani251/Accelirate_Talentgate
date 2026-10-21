@@ -11,6 +11,18 @@ from api.services.audit import log_action
 from api.services.user_provisioning import create_user_with_credentials
 
 
+# Why an administrator cannot switch their own account off, in the words the screen shows.
+# Named once because both the PATCH toggle and the Deactivate button can reach it, and two
+# wordings for one rule read as two different rules.
+#
+# This is also what guarantees the system can never be left with no administrator at all:
+# deactivating someone else is allowed, deactivating yourself is not, so whoever performs the
+# last such action is still active afterwards.
+SELF_DEACTIVATION_MESSAGE = (
+    "You can't deactivate your own account. Another administrator can do it for you."
+)
+
+
 def _get_user_or_404(user_id):
     try:
         return User.objects.select_related('role').get(user_id=user_id, is_deleted=False)
@@ -49,7 +61,7 @@ class UserDetailView(APIView):
         data = serializer.validated_data
 
         if user.user_id == request.user.user_id and 'is_active' in data and not data['is_active']:
-            return Response({'detail': "You can't deactivate your own account."},
+            return Response({'detail': SELF_DEACTIVATION_MESSAGE},
                              status=status.HTTP_400_BAD_REQUEST)
 
         if 'first_name' in data:
@@ -69,7 +81,7 @@ class UserDetailView(APIView):
         user = _get_user_or_404(user_id)
 
         if user.user_id == request.user.user_id:
-            return Response({'detail': "You can't deactivate your own account."},
+            return Response({'detail': SELF_DEACTIVATION_MESSAGE},
                              status=status.HTTP_400_BAD_REQUEST)
 
         if not user.is_active:

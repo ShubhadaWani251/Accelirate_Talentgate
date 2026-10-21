@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useSelector } from 'react-redux';
 import toast from 'react-hot-toast';
 import * as userApi from '../../api/userApi';
+import { selectUser } from '../../features/auth/authSlice';
 import DeactivateUserModal from '../../features/users/DeactivateUserModal';
 import PaginationControls from '../../components/common/PaginationControls';
 import { ListPageSkeleton, SkeletonTableRows } from '../../components/loading/Skeleton';
@@ -10,7 +12,17 @@ import { ButtonSpinner } from '../../components/loading/Spinner';
 
 const ROLE_PILL = { admin: 'gray', ta: 'blue' };
 
+// Amber for Invited on purpose: it is neither finished nor wrong, it is waiting on someone -
+// the same reading .pill.amber carries everywhere else in this app.
+const STATUS_PILL = { active: 'green', invited: 'amber', inactive: 'gray' };
+
+// Said at the point of the attempt, not after it. The backend enforces this too
+// (views/users.SELF_DEACTIVATION_MESSAGE); this is so nobody has to click to find out.
+const SELF_DEACTIVATE_NOTE =
+  "You can't deactivate your own account. Another administrator can do it for you.";
+
 export default function UserManagement() {
+  const currentUser = useSelector(selectUser);
   const [users, setUsers] = useState([]);
   const [page, setPage] = useState(1);
   const [pageMeta, setPageMeta] = useState({ count: 0, next: null, previous: null });
@@ -122,12 +134,35 @@ export default function UserManagement() {
                   <td>{u.full_name}</td>
                   <td>{u.email}</td>
                   <td><span className={`pill ${ROLE_PILL[u.role_code] || 'gray'}`}>{u.role_name}</span></td>
-                  <td><span className={`pill ${u.is_active ? 'green' : 'gray'}`}>{u.is_active ? 'Active' : 'Inactive'}</span></td>
+                  {/* The derived three-state status, not the raw is_active boolean: a user who
+                      has been emailed credentials but never set their own password reads as
+                      Invited, where this used to claim they were Active. */}
+                  <td>
+                    <span className={`pill ${STATUS_PILL[u.status] || 'gray'}`}>
+                      {u.status_display}
+                    </span>
+                  </td>
                   <td style={{ display: 'flex', gap: 12 }}>
                     <Link to={`/admin/users/${u.user_id}`} className="link-text">Edit access</Link>
-                    <button className="link-text" style={{ color: 'var(--brand-red)' }} onClick={() => setDeactivateTarget(u)}>
-                      Deactivate
-                    </button>
+                    {/* Edit User already refuses to show this for your own account; this list
+                        offered it on every row, which is the one place an administrator could
+                        actually try to switch themselves off. Shown but inert, rather than
+                        removed, so the reason is on screen instead of only in a failed
+                        request. */}
+                    {u.user_id === currentUser?.user_id ? (
+                      <span
+                        className="link-text"
+                        style={{ color: 'var(--muted)', cursor: 'not-allowed' }}
+                        title={SELF_DEACTIVATE_NOTE}
+                        aria-disabled="true"
+                      >
+                        Deactivate
+                      </span>
+                    ) : u.is_active ? (
+                      <button className="link-text" style={{ color: 'var(--brand-red)' }} onClick={() => setDeactivateTarget(u)}>
+                        Deactivate
+                      </button>
+                    ) : null}
                   </td>
                 </tr>
               ))

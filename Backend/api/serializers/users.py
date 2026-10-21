@@ -6,14 +6,55 @@ from api.utils.validation import is_corporate_email
 VALID_ROLE_CODES = ('admin', 'ta')
 
 
+def account_status(user):
+    """(code, label) for the Status column - DERIVED, never stored.
+
+    An account created from Add User is handed a generated password by email and can do
+    nothing at all until it is replaced (must_change_password, enforced in api/permissions.py,
+    not merely by a frontend redirect). It was still rendering as "Active", which claims the
+    person has accepted and set up the account when nobody has touched the invitation yet.
+
+    Three states rather than a second boolean column, for the reason candidate status is
+    derived the same way (serializers/candidates._effective_status): the facts already exist on
+    the row, and a stored copy is a thing that can disagree with them.
+
+      Inactive - deactivated by an administrator; cannot sign in at all.
+      Invited  - credentials issued, own password not yet set.
+      Active   - signed in and chose their own password.
+
+    is_active is checked FIRST: an account deactivated before it was ever activated is
+    Inactive, not Invited. The invitation is moot once the account is switched off.
+    """
+    if not user.is_active:
+        return 'inactive', 'Inactive'
+    if user.must_change_password:
+        return 'invited', 'Invited'
+    return 'active', 'Active'
+
+
 class UserListSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(read_only=True)
     role_name = serializers.CharField(source='role.role_name', read_only=True)
     role_code = serializers.CharField(source='role.role_code', read_only=True)
+    # Declared on each serializer rather than shared through a mixin: DRF's metaclass only
+    # collects fields from bases that are themselves serializers, so a plain mixin's fields
+    # are silently dropped and Meta.fields then names something that doesn't exist. Both
+    # read account_status above, which is the actual single definition.
+    status = serializers.SerializerMethodField()
+    status_display = serializers.SerializerMethodField()
+
+    def get_status(self, user):
+        return account_status(user)[0]
+
+    def get_status_display(self, user):
+        return account_status(user)[1]
 
     class Meta:
         model = User
-        fields = ['user_id', 'full_name', 'email', 'role_name', 'role_code', 'is_active']
+        # is_active stays alongside status: the Edit User toggle is a straight boolean, and
+        # status is the reading of it, not a replacement for it.
+        fields = ['user_id', 'full_name', 'email', 'role_name', 'role_code', 'is_active',
+                  'status', 'status_display']
 
 
 class AssignedBatchSerializer(serializers.Serializer):
@@ -30,14 +71,24 @@ class UserDetailSerializer(serializers.ModelSerializer):
     role_name = serializers.CharField(source='role.role_name', read_only=True)
     role_code = serializers.CharField(source='role.role_code', read_only=True)
     assigned_batches = serializers.SerializerMethodField()
+    status = serializers.SerializerMethodField()        # see UserListSerializer's note
+    status_display = serializers.SerializerMethodField()
+
+    def get_status(self, user):
+        return account_status(user)[0]
+
+    def get_status_display(self, user):
+        return account_status(user)[1]
 
     class Meta:
         model = User
         fields = [
             'user_id', 'first_name', 'last_name', 'full_name', 'email',
             'role', 'role_name', 'role_code', 'is_active', 'assigned_batches',
+            'status', 'status_display',
         ]
-        read_only_fields = ['user_id', 'role_name', 'role_code', 'assigned_batches']
+        read_only_fields = ['user_id', 'role_name', 'role_code', 'assigned_batches',
+                            'status', 'status_display']
 
     def get_assigned_batches(self, user):
         batches = user.primary_batches.filter(is_deleted=False).order_by('-created_at')
