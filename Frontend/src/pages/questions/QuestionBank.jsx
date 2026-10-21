@@ -27,6 +27,11 @@ export default function QuestionBank() {
   const [editing, setEditing] = useState(null); // question object, or 'new'
   const [addingSection, setAddingSection] = useState(false);
   const [statusSection, setStatusSection] = useState(null);
+  // Which half of the section list the cards are showing. Deactivated sections used to sit in
+  // the same grid as the live ones, distinguishable only by a small grey pill, so they both
+  // cluttered the view an admin works in AND were hard to find when one needed restoring -
+  // the two complaints are the same cause seen from either side.
+  const [showingInactiveSections, setShowingInactiveSections] = useState(false);
 
   useEffect(() => {
     questionApi.getSections().then(setSections).catch((err) => toast.error(extractErrorMessage(err)));
@@ -55,6 +60,17 @@ export default function QuestionBank() {
   }, [sectionKey, difficulty, status]);
 
   const selectedSection = sections.find((s) => s.section_key === sectionKey);
+  const activeSections = sections.filter((s) => s.is_active);
+  const inactiveSections = sections.filter((s) => !s.is_active);
+  const shownSections = showingInactiveSections ? inactiveSections : activeSections;
+
+  // Restoring the last inactive section removes the toggle that got you here - without this,
+  // that leaves the page showing an empty Inactive view with no way back to the active one.
+  useEffect(() => {
+    if (showingInactiveSections && inactiveSections.length === 0) {
+      setShowingInactiveSections(false);
+    }
+  }, [showingInactiveSections, inactiveSections.length]);
 
   if (firstLoad && loading) {
     return (
@@ -78,8 +94,45 @@ export default function QuestionBank() {
           the browser only ever holds one page and could not total a section itself. Clicking a
           card filters the table to that section - the cards double as the section picker the
           sidebar provides, which is what makes them worth the vertical space. */}
+      {/* The way back to the deactivated ones, and the only thing on screen that mentions them
+          while the main view is showing. Hidden entirely when none exist - an empty
+          "Inactive Sections (0)" button is a dead control advertising a state that cannot be
+          reached. */}
+      {inactiveSections.length > 0 && (
+        <div className="btn-row" style={{ display: 'flex', gap: 8, margin: '12px 0' }}>
+          <button
+            type="button"
+            className={`btn small ${showingInactiveSections ? '' : 'primary'}`}
+            onClick={() => setShowingInactiveSections(false)}
+          >
+            Active Sections ({activeSections.length})
+          </button>
+          <button
+            type="button"
+            className={`btn small ${showingInactiveSections ? 'primary' : ''}`}
+            onClick={() => setShowingInactiveSections(true)}
+          >
+            Inactive Sections ({inactiveSections.length})
+          </button>
+        </div>
+      )}
+
+      {showingInactiveSections && (
+        <div className="alert" style={{ marginBottom: 12 }}>
+          These sections are deactivated. They run in no new batch and offer no questions to
+          one, but everything they hold is kept — restore a section to put it back into use.
+        </div>
+      )}
+
       <div className="grid-4" style={{ marginBottom: 16 }}>
-        {sections.map((sec) => (
+        {shownSections.length === 0 && (
+          <p style={{ color: 'var(--muted)', fontSize: 12.5 }}>
+            {showingInactiveSections
+              ? 'No deactivated sections.'
+              : 'No active sections yet — add one to start building the question bank.'}
+          </p>
+        )}
+        {shownSections.map((sec) => (
           // A div wrapping two buttons, not one big <button>: a delete control nested inside a
           // button is invalid HTML and browsers handle the nested click inconsistently.
           <div
@@ -95,11 +148,10 @@ export default function QuestionBank() {
                 background: 'none', padding: 0, font: 'inherit', color: 'inherit',
               }}
             >
+              {/* No "Inactive" pill any more: these cards only appear under the Inactive
+                  Sections filter, which has already said so once. */}
               <div className="stat-lbl" style={{ fontWeight: 600, paddingRight: 24 }}>
                 {sec.section_name}
-                {!sec.is_active && (
-                  <span className="pill gray" style={{ marginLeft: 6 }}>Inactive</span>
-                )}
               </div>
               <div className="stat-num" style={{ fontSize: 26 }}>{sec.total_questions ?? '—'}</div>
               <div className="stat-lbl">Total questions</div>
@@ -112,28 +164,34 @@ export default function QuestionBank() {
                 </span>
               </div>
             </button>
-            {/* The control follows the section's state, rather than always reading "delete"
-                and quietly offering a restore once you open it. An inactive section's only
-                useful action is putting it back, and a bin icon is the wrong promise for that -
-                it looked like the way to delete something that was already gone. */}
-            <button
-              type="button"
-              title={sec.is_active
-                ? `Deactivate ${sec.section_name}`
-                : `Restore ${sec.section_name}`}
-              aria-label={sec.is_active
-                ? `Deactivate ${sec.section_name}`
-                : `Restore ${sec.section_name}`}
-              onClick={() => setStatusSection(sec)}
-              style={{
-                position: 'absolute', top: 8, right: 8, border: 'none', background: 'none',
-                cursor: 'pointer', fontSize: 14, lineHeight: 1,
-                color: sec.is_active ? 'var(--muted)' : 'var(--brand-green, #1a7f37)',
-                padding: 4,
-              }}
-            >
-              {sec.is_active ? '🗑' : '↩'}
-            </button>
+            {/* Deactivating is a quiet corner action on a card you came to read; restoring is
+                the whole reason you opened the Inactive view, so it gets a named button rather
+                than an icon. A bin glyph was the wrong promise for it either way - it looked
+                like the way to delete something that was already gone. */}
+            {sec.is_active ? (
+              <button
+                type="button"
+                title={`Deactivate ${sec.section_name}`}
+                aria-label={`Deactivate ${sec.section_name}`}
+                onClick={() => setStatusSection(sec)}
+                style={{
+                  position: 'absolute', top: 8, right: 8, border: 'none', background: 'none',
+                  cursor: 'pointer', fontSize: 14, lineHeight: 1, color: 'var(--muted)',
+                  padding: 4,
+                }}
+              >
+                🗑
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn small"
+                onClick={() => setStatusSection(sec)}
+                style={{ marginTop: 10, width: '100%' }}
+              >
+                ↩ Restore {sec.section_name}
+              </button>
+            )}
           </div>
         ))}
       </div>
