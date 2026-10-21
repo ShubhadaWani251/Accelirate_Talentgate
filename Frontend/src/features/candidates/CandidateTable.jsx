@@ -93,7 +93,10 @@ export default function CandidateTable({
         </button>
       </div>
 
-      <div className="table-scroll" aria-busy={loading}>
+      {/* freeze-panes holds the header row and the checkbox/Name columns in place - see
+          theme.css. This table carries ~23 columns, so without it you scroll to a section
+          score and can no longer see whose it is or which section you are looking at. */}
+      <div className="table-scroll freeze-panes" aria-busy={loading}>
         <table className="data-table">
           <thead>
             <tr>
