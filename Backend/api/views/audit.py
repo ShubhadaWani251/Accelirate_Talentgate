@@ -8,7 +8,9 @@ here, and there shouldn't be - a log an administrator can edit is not evidence o
 """
 
 from datetime import timedelta
+from zoneinfo import ZoneInfo
 
+from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework.response import Response
@@ -65,8 +67,8 @@ class AuditLogListView(APIView):
       action    - action_type, exact
       entity    - entity_type, exact
       search    - substring across the acting user's name/email and the raw codes
-      date_from - ISO date (inclusive), server timezone
-      date_to   - ISO date (inclusive - the whole day, not midnight)
+      date_from - ISO date (inclusive), read in DISPLAY_TIME_ZONE - see _parse_date
+      date_to   - ISO date (inclusive - the whole day, not midnight), same zone
     """
     permission_classes = [IsAdmin]
 
@@ -92,7 +94,8 @@ class AuditLogListView(APIView):
         date_to = _parse_date(request.query_params.get('date_to'))
         if date_to:
             # Inclusive of the whole end day: a filter of 20-Aug..20-Aug should return that
-            # day's rows, not nothing because everything happened after 00:00.
+            # day's rows, not nothing because everything happened after 00:00. The day being
+            # extended is the one in DISPLAY_TIME_ZONE, since that is the day the reader picked.
             qs = qs.filter(created_at__lt=date_to + timedelta(days=1))
 
         search = request.query_params.get('search', '').strip()
@@ -160,6 +163,13 @@ class AuditLogFilterOptionsView(APIView):
 def _parse_date(raw):
     """Parse an ISO date into an aware datetime at the start of that day, or None.
 
+    Interpreted in DISPLAY_TIME_ZONE - the zone the screen's own Date/Time column is rendered
+    in - NOT in the server's UTC. Those differ by 5.5 hours for Asia/Kolkata, and the gap was
+    load-bearing: rows between 00:00 and 05:30 IST carry the PREVIOUS day's UTC date, so a
+    filter of From = today dropped them while the table beside it still labelled them today.
+    Reported as "today's login activity is not visible in Audit Log history" - the rows were
+    always there, the filter just disagreed with the column about which day they fell on.
+
     Returns None for anything unparseable rather than raising: a malformed date in a query
     string should narrow nothing, not 400 the whole screen.
     """
@@ -171,5 +181,6 @@ def _parse_date(raw):
     except ValueError:
         return None
     if timezone.is_naive(parsed):
-        parsed = timezone.make_aware(parsed)
+        # An explicit zone rather than make_aware(), which would use the active timezone (UTC).
+        parsed = parsed.replace(tzinfo=ZoneInfo(settings.DISPLAY_TIME_ZONE))
     return parsed

@@ -35,6 +35,7 @@ _PAGE_BY_ENTITY = {
 _PAGE_BY_ACTION = {
     'login': 'Sign In',
     'login_failed': 'Sign In',
+    'login_blocked': 'Sign In',
     'logout': 'Sign In',
     'password_change': 'Profile',
     'password_reset': 'Forgot Password',
@@ -75,6 +76,7 @@ _DESCRIPTIONS = {
     ('delete', 'user'): 'Deleted a user account',
     ('login', 'user'): 'Signed in',
     ('login_failed', 'user'): 'Failed sign-in attempt',
+    ('login_blocked', 'user'): 'Sign-in attempt on a deactivated account',
     ('logout', 'user'): 'Signed out',
     ('password_change', 'user'): 'Changed their own password',
     ('password_reset', 'user'): 'Reset their password via OTP',

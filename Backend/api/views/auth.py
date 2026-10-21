@@ -120,8 +120,13 @@ class LoginView(APIView):
 
         if not user.is_active or not user.check_password(password):
             register_failed_attempt(email)
-            if user.is_active:  # only log against a real, active account
-                _log(request, user, 'login_failed')
+            # Both halves are logged, against the real account either way. A deactivated
+            # account being signed into used to record NOTHING - the one attempt an
+            # administrator would most want to see after the fact was the only one the log
+            # left out. Kept as its own action type because the two mean different things:
+            # a wrong password is usually a typo, a blocked one is someone using an account
+            # that was taken away from them.
+            _log(request, user, 'login_failed' if user.is_active else 'login_blocked')
             return Response(generic_error, status=status.HTTP_401_UNAUTHORIZED)
 
         clear_failed_attempts(email)
