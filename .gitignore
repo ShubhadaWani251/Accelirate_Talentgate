@@ -6,6 +6,12 @@ Backend/db.sqlite3
 Backend/.env
 Backend/.admin_credentials.txt
 Backend/.gmail_test_admin_credentials.txt
+# Throwaway local review stack - a SQLite copy with invented candidates, the settings module
+# that points at it, and the logins for it. None of it is a production path, and the passwords
+# are real passwords even though the data behind them is not.
+Backend/.local_demo_credentials.txt
+Backend/local_demo.sqlite3
+Backend/settings_localdemo.py
 Backend/media/
 Backend/logs/
 Backend/staticfiles/

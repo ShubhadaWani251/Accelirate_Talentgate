@@ -14,6 +14,12 @@
       "port": 8000
     },
     {
+      "name": "backend-localdemo",
+      "runtimeExecutable": "Backend/venv/Scripts/python.exe",
+      "runtimeArgs": ["Backend/manage.py", "runserver", "8000", "--settings=settings_localdemo"],
+      "port": 8000
+    },
+    {
       "name": "ai-sandbox",
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "5500", "--directory", "../Accelirate_TalentGate_AI_Sandbox"],
