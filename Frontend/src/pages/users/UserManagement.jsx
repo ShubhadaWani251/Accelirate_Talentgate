@@ -14,7 +14,16 @@ const ROLE_PILL = { admin: 'gray', ta: 'blue' };
 
 // Amber for Invited on purpose: it is neither finished nor wrong, it is waiting on someone -
 // the same reading .pill.amber carries everywhere else in this app.
-const STATUS_PILL = { active: 'green', invited: 'amber', inactive: 'gray' };
+const STATUS_PILL = { active: 'green', invited: 'amber', deactivated: 'gray' };
+
+// The filter's options. "All" is deliberately first and the default: this list is short, and
+// landing on a filtered view would hide accounts an administrator came here to find.
+const STATUS_OPTIONS = [
+  { value: '', label: 'All statuses' },
+  { value: 'invited', label: 'Invited' },
+  { value: 'active', label: 'Active' },
+  { value: 'deactivated', label: 'Deactivated' },
+];
 
 // Said at the point of the attempt, not after it. The backend enforces this too
 // (views/users.SELF_DEACTIVATION_MESSAGE); this is so nobody has to click to find out.
@@ -32,11 +41,12 @@ export default function UserManagement() {
   const [form, setForm] = useState({ first_name: '', last_name: '', email: '', role: 'ta' });
   const [creating, setCreating] = useState(false);
   const [deactivateTarget, setDeactivateTarget] = useState(null);
+  const [statusFilter, setStatusFilter] = useState('');
 
-  async function refresh(p = page) {
+  async function refresh(p = page, status = statusFilter) {
     setLoading(true);
     try {
-      const data = await userApi.listUsers({ page: p });
+      const data = await userApi.listUsers({ page: p, status });
       setUsers(data.results);
       setPageMeta({ count: data.count, next: data.next, previous: data.previous });
       setPage(p);
@@ -86,23 +96,26 @@ export default function UserManagement() {
 
       <div className="card">
         <div className="box-label">Add User</div>
-        <div className="grid-2">
+        {/* First and Last Name together on one row. They used to be split across two rows with
+            Corporate Email between them, so the two halves of one person's name were read and
+            typed as if they were unrelated fields. */}
+        <div className="grid-2-compact">
           <div className="field">
             <label>First Name</label>
             <input placeholder="First name" value={form.first_name}
                    onChange={(e) => set('first_name', e.target.value)} />
           </div>
           <div className="field">
-            <label>Corporate Email</label>
-            <input placeholder="name@company.com" value={form.email}
-                   onChange={(e) => set('email', e.target.value)} />
+            <label>Last Name</label>
+            <input placeholder="Last name" value={form.last_name}
+                   onChange={(e) => set('last_name', e.target.value)} />
           </div>
         </div>
         <div className="grid-2">
           <div className="field">
-            <label>Last Name</label>
-            <input placeholder="Last name" value={form.last_name}
-                   onChange={(e) => set('last_name', e.target.value)} />
+            <label>Corporate Email</label>
+            <input placeholder="name@company.com" value={form.email}
+                   onChange={(e) => set('email', e.target.value)} />
           </div>
           <div className="field">
             <label>Role</label>
@@ -118,6 +131,27 @@ export default function UserManagement() {
         </button>
       </div>
 
+      {/* Filtering happens server-side, so it narrows every page rather than only the rows
+          currently loaded - see views/users.STATUS_FILTERS. Resets to page 1, since page 4 of
+          an unfiltered list is usually past the end of a filtered one. */}
+      <div className="panel-head" style={{ marginBottom: 12 }}>
+        <div className="panel-head-text">
+          <div className="box-label" style={{ marginBottom: 0 }}>Users</div>
+        </div>
+        <div className="field" style={{ margin: 0, minWidth: 180 }}>
+          <label htmlFor="user-status-filter">Status</label>
+          <select
+            id="user-status-filter"
+            value={statusFilter}
+            onChange={(e) => { setStatusFilter(e.target.value); refresh(1, e.target.value); }}
+          >
+            {STATUS_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
       <div className="table-scroll" aria-busy={loading}>
         <table className="data-table">
           <thead>
@@ -127,7 +161,13 @@ export default function UserManagement() {
             {loading ? (
               <SkeletonTableRows rows={5} columns={5} />
             ) : users.length === 0 ? (
-              <tr><td colSpan={5}>No users yet.</td></tr>
+              // Two different nothings: no users at all, versus none in the chosen status.
+              // The first reading would make a working filter look like a broken list.
+              <tr><td colSpan={5}>
+                {statusFilter
+                  ? `No ${STATUS_OPTIONS.find((o) => o.value === statusFilter)?.label.toLowerCase()} users.`
+                  : 'No users yet.'}
+              </td></tr>
             ) : (
               users.map((u) => (
                 <tr key={u.user_id}>

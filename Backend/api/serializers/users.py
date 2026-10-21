@@ -18,18 +18,32 @@ def account_status(user):
     derived the same way (serializers/candidates._effective_status): the facts already exist on
     the row, and a stored copy is a thing that can disagree with them.
 
-      Inactive - deactivated by an administrator; cannot sign in at all.
-      Invited  - credentials issued, own password not yet set.
-      Active   - signed in and chose their own password.
+      Deactivated - switched off by an administrator; cannot sign in at all.
+      Invited     - credentials issued, own password not yet set.
+      Active      - signed in and chose their own password.
 
     is_active is checked FIRST: an account deactivated before it was ever activated is
-    Inactive, not Invited. The invitation is moot once the account is switched off.
+    Deactivated, not Invited. The invitation is moot once the account is switched off.
+
+    "Deactivated" rather than "Inactive" so the status matches the action that produces it -
+    the button says Deactivate and the confirmation says "has been deactivated", and a third
+    word for the same state was one word too many.
     """
     if not user.is_active:
-        return 'inactive', 'Inactive'
+        return 'deactivated', 'Deactivated'
     if user.must_change_password:
         return 'invited', 'Invited'
     return 'active', 'Active'
+
+
+# The filter dropdown's options, and the single definition of what each one selects. Expressed
+# as queryset filters rather than by calling account_status per row, so filtering happens in the
+# database and survives pagination - a Python-side filter would narrow only the current page.
+STATUS_FILTERS = {
+    'active': {'is_active': True, 'must_change_password': False},
+    'invited': {'is_active': True, 'must_change_password': True},
+    'deactivated': {'is_active': False},
+}
 
 
 class UserListSerializer(serializers.ModelSerializer):

@@ -6,7 +6,10 @@ from rest_framework.views import APIView
 from api.models import Batch, User
 from api.pagination import StandardResultsPagination
 from api.permissions import IsAdmin
-from api.serializers.users import UserCreateSerializer, UserDetailSerializer, UserListSerializer, UserUpdateSerializer
+from api.serializers.users import (
+    STATUS_FILTERS, UserCreateSerializer, UserDetailSerializer, UserListSerializer,
+    UserUpdateSerializer,
+)
 from api.services.audit import log_action
 from api.services.user_provisioning import create_user_with_credentials
 
@@ -35,6 +38,15 @@ class UserListCreateView(APIView):
 
     def get(self, request):
         users = User.objects.select_related('role').filter(is_deleted=False).order_by('first_name', 'last_name')
+
+        # ?status=invited|active|deactivated - the same three states the Status column shows,
+        # resolved through STATUS_FILTERS so the filter and the label can't disagree about what
+        # "Invited" means. An unknown or missing value filters nothing rather than 400ing: a
+        # stale bookmark should show every user, not an error page.
+        status_filter = STATUS_FILTERS.get(request.query_params.get('status', '').strip().lower())
+        if status_filter:
+            users = users.filter(**status_filter)
+
         paginator = StandardResultsPagination()
         page = paginator.paginate_queryset(users, request, view=self)
         return paginator.get_paginated_response(UserListSerializer(page, many=True).data)

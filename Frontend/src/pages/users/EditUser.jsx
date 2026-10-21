@@ -15,7 +15,7 @@ import { ButtonSpinner } from '../../components/loading/Spinner';
 
 const BATCH_STATUS_PILL = { draft: 'gray', in_progress: 'blue', completed: 'green', cancelled: 'red' };
 // Same three states and the same tones as the User Management list - see its own copy.
-const STATUS_PILL = { active: 'green', invited: 'amber', inactive: 'gray' };
+const STATUS_PILL = { active: 'green', invited: 'amber', deactivated: 'gray' };
 
 export default function EditUser() {
   const { id } = useParams();
@@ -163,7 +163,7 @@ export default function EditUser() {
         {!isSelf && (
           <button className="btn danger" style={{ marginLeft: 'auto' }}
                   onClick={() => setDeactivateOpen(true)} disabled={!user.is_active}>
-            {user.is_active ? 'Deactivate User' : 'Already Inactive'}
+            {user.is_active ? 'Deactivate User' : 'Already Deactivated'}
           </button>
         )}
       </div>

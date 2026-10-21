@@ -39,12 +39,12 @@ class TestDerivedAccountStatus:
         assert account_status(user) == ('active', 'Active')
 
     def test_deactivated_beats_invited(self, make_user):
-        """An account switched off before it was ever set up is Inactive, not Invited -
+        """An account switched off before it was ever set up is Deactivated, not Invited -
         the invitation stopped mattering the moment the account was disabled."""
         user = make_user(must_change_password=True)
         user.is_active = False
 
-        assert account_status(user) == ('inactive', 'Inactive')
+        assert account_status(user) == ('deactivated', 'Deactivated')
 
     def test_the_list_carries_the_same_status_as_the_detail_view(self, admin_user, make_user,
                                                                  client_for):
@@ -139,3 +139,52 @@ class TestSignInOnADeactivatedAccountIsLogged:
 
         assert AuditLog.objects.filter(user=user, action_type='login_failed').exists()
         assert not AuditLog.objects.filter(user=user, action_type='login_blocked').exists()
+
+
+class TestStatusFilter:
+    """?status=invited|active|deactivated, backing the Status dropdown on User Management.
+
+    Filtered in the DATABASE (views/users.STATUS_FILTERS) rather than by calling
+    account_status row by row, so it narrows the whole list and not just the page in hand -
+    a Python-side filter on a paginated endpoint silently answers a different question.
+    """
+
+    @pytest.fixture
+    def three_accounts(self, admin_user, make_user):
+        invited = make_user(email='invited@accelirate.com', must_change_password=True)
+        deactivated = make_user(email='gone@accelirate.com')
+        deactivated.is_active = False
+        deactivated.save(update_fields=['is_active'])
+        # admin_user is the Active one - created with neither flag set.
+        return {'invited': invited, 'deactivated': deactivated, 'active': admin_user}
+
+    def _emails(self, client, status=None):
+        response = client.get('/api/users/', {'status': status} if status else {})
+        assert response.status_code == 200
+        return {row['email'] for row in response.data['results']}
+
+    @pytest.mark.parametrize('status', ['invited', 'active', 'deactivated'])
+    def test_each_status_returns_only_its_own(self, admin_user, client_for, three_accounts,
+                                              status):
+        listed = self._emails(client_for(admin_user), status)
+
+        assert listed == {three_accounts[status].email}
+
+    def test_no_status_returns_everyone(self, admin_user, client_for, three_accounts):
+        listed = self._emails(client_for(admin_user))
+
+        assert listed == {u.email for u in three_accounts.values()}
+
+    def test_an_unknown_status_narrows_nothing(self, admin_user, client_for, three_accounts):
+        """A stale bookmark should show every user, not an error page."""
+        listed = self._emails(client_for(admin_user), 'archived')
+
+        assert listed == {u.email for u in three_accounts.values()}
+
+    def test_the_filter_agrees_with_the_column(self, admin_user, client_for, three_accounts):
+        """The filter and the Status pill must mean the same thing by each word."""
+        client = client_for(admin_user)
+
+        for status in ('invited', 'active', 'deactivated'):
+            response = client.get('/api/users/', {'status': status})
+            assert [row['status'] for row in response.data['results']] == [status]

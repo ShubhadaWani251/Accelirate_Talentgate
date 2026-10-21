@@ -2,9 +2,12 @@ import axiosClient from './axiosClient';
 
 // Returns the paginated envelope {count, next, previous, results} - pass `page` to move
 // between pages.
-export const listUsers = ({ page } = {}) => {
+// `status` is one of invited | active | deactivated - the same three the Status column shows.
+// Omitted or blank means every user (see views/users.STATUS_FILTERS).
+export const listUsers = ({ page, status } = {}) => {
   const params = {};
   if (page) params.page = page;
+  if (status) params.status = status;
   return axiosClient.get('/users/', { params }).then((r) => r.data);
 };
 

@@ -610,6 +610,13 @@ table.data-table tbody tr:hover td { background: var(--accent-soft); }
 .wizard-steps .wstep:disabled { cursor: not-allowed; opacity: 0.55; }
 
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+/* Two SHORT inputs that belong together - First Name beside Last Name. Separate from .grid-2
+   because that one also carries full tables and therefore stacks at tablet width (see the
+   1023px query below); a pair of name fields has no such problem and reads worse apart, which
+   is what put first and last name on separate lines in the first place. */
+.grid-2-compact { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.grid-2-compact > * { min-width: 0; }
+@media (max-width: 560px) { .grid-2-compact { grid-template-columns: 1fr; } }
 .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
 /* A grid item's automatic minimum size is its CONTENT, so a wide table inside a column widens
