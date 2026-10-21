@@ -36,7 +36,10 @@ const STATUS_PILL = { draft: 'gray', in_progress: 'blue', completed: 'green', ca
 const STAT_CARDS = [
   { key: 'active_batches', label: 'Active Batches', to: '/batches', Icon: LuLayers, tone: 'blue' },
   { key: 'total_candidates', label: 'Total Candidates', to: '/candidates?batch_status=in_progress', Icon: LuUsers, tone: 'indigo' },
-  { key: 'completed', label: 'Completed', to: '/candidates?batch_status=in_progress&status=completed', Icon: LuCircleCheckBig, tone: 'violet' },
+  // "Completed" was read as "completed candidates" - a finished PERSON rather than a finished
+  // exam - which sat badly beside Passed, since a completed candidate who failed is in both.
+  // This card has only ever counted submitted attempts, so it now says so.
+  { key: 'completed', label: 'Finished the Test', to: '/candidates?batch_status=in_progress&status=completed', Icon: LuCircleCheckBig, tone: 'violet' },
   { key: 'total_pass', label: 'Passed', to: '/candidates?batch_status=in_progress&result=pass', Icon: LuTrophy, tone: 'green' },
 ];
 
