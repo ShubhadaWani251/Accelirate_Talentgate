@@ -183,13 +183,16 @@ export default function QuestionBank() {
                 🗑
               </button>
             ) : (
+              // The section's name is the first line of the card directly above, so repeating
+              // it in the button only made the label long enough to wrap. Kept on aria-label,
+              // where a screen reader reaching the button out of context still needs it.
               <button
                 type="button"
                 className="btn small"
+                aria-label={`Restore ${sec.section_name}`}
                 onClick={() => setStatusSection(sec)}
-                style={{ marginTop: 10, width: '100%' }}
               >
-                ↩ Restore {sec.section_name}
+                ↩ Restore
               </button>
             )}
           </div>

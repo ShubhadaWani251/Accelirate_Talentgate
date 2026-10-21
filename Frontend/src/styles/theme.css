@@ -1038,6 +1038,12 @@ a.stat-card:hover { box-shadow: 0 6px 18px rgba(16,24,40,.10); transform: transl
   color: inherit;
   background: var(--card, #fff);
   transition: box-shadow 120ms ease, border-color 120ms ease;
+  /* .stat-card is a flex ROW, built for the dashboard's icon-beside-figure cards. These have
+     no icon, and they carry a Restore button under the figure - which as a row item sat
+     BESIDE the card's text and overflowed the card's right edge, its label wrapping three
+     ways to fit. Column, stretched, so anything added below the figure is simply below it. */
+  flex-direction: column;
+  align-items: stretch;
 }
 .qb-stat-card:hover { box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08); }
 .qb-stat-card.active {
