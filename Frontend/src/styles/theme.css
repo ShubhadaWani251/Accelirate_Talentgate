@@ -89,11 +89,6 @@ h1, h2, h3, h4, .brand, .btn, .box-label {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .header-account-role { font-size: 10px; color: #b9c6e6; }
-.btn.header-logout {
-  display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; padding: 6px 13px;
-  background: rgba(255,255,255,.1); color: #fff; border: 1px solid rgba(255,255,255,.3);
-}
-.btn.header-logout:hover { background: rgba(255,255,255,.2); color: #fff; }
 
 @media (max-width: 860px) {
   /* The avatar still identifies the account, and the name is the first thing worth giving up for
@@ -243,13 +238,6 @@ h1, h2, h3, h4, .brand, .btn, .box-label {
   border: 1px solid var(--line-soft); border-radius: 10px; box-shadow: 0 10px 28px rgba(0,0,0,.4);
   padding: 5px; z-index: 40;
 }
-.btn.sidebar-logout {
-  display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%;
-  margin-top: 7px; font-size: 11.5px;
-  background: rgba(255,255,255,.1); color: #fff; border: 1px solid rgba(255,255,255,.3);
-}
-.btn.sidebar-logout:hover { background: rgba(255,255,255,.2); color: #fff; }
-
 .page-topbar { display: flex; align-items: center; gap: 8px; padding: 12px 24px 0; }
 .page-topbar:empty { display: none; }
 .btn.small { display: inline-flex; align-items: center; gap: 6px; }
@@ -697,6 +685,13 @@ a.stat-card:hover { box-shadow: 0 6px 18px rgba(16,24,40,.10); transform: transl
 }
 .modal-box h4 { margin: 0 0 8px; font-size: 15px; color: var(--brand-navy); }
 .modal-box p { font-size: 12.5px; color: var(--muted); margin: 0 0 18px; line-height: 1.5; }
+/* Which rows the export will actually contain, when the list it was opened from is filtered.
+   Tinted rather than muted like the paragraph above it: this one changes what you get. */
+.modal-box p.export-scope {
+  background: var(--accent-soft); color: var(--brand-navy);
+  border-radius: 8px; padding: 9px 11px; margin-bottom: 16px;
+}
+.modal-box p.export-scope strong { font-weight: 600; }
 
 /* "No history found" state inside the candidate History modal, per the wireframe. */
 .hist-empty { text-align: center; padding: 22px 6px; color: var(--muted); font-size: 12.5px; }
@@ -942,6 +937,13 @@ a.stat-card:hover { box-shadow: 0 6px 18px rgba(16,24,40,.10); transform: transl
 }
 
 /* Very narrow phones. */
+/* The portal badge is the widest thing in the header and the most repeated: the footer names
+   the portal on every page, and the sidebar's account card names the role. On a phone it was
+   pushing the avatar past the right edge, where it rendered half-clipped. */
+@media (max-width: 479px) {
+  .brand-header .brand-role-badge { display: none; }
+}
+
 @media (max-width: 419px) {
   .grid-4 { grid-template-columns: 1fr; }
   .brand-header .brand-tagline { display: none; }

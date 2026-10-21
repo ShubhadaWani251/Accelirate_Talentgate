@@ -1,22 +1,19 @@
 import { useSelector } from 'react-redux';
-import { LuLogOut } from 'react-icons/lu';
 import { selectUser } from '../../features/auth/authSlice';
-import useLogout from '../../features/auth/useLogout';
 import { initials } from './initials';
 
 const ROLE_LABELS = { admin: 'Administrator', ta: 'Staffing User' };
 
-// Who is signed in, and the way out, in the top bar - the two places a reader looks for either.
+// Who is signed in, in the top bar - the first place a reader looks for it.
 // Rendered only by ProtectedLayout, as BrandHeader's optional right-hand slot: the same header
 // is used by the candidate exam portal and by the login and legal pages, none of which have an
-// account to show or a session to end.
+// account to show.
 //
-// Deliberately not a dropdown. The sidebar's account card already owns Profile and Reset
-// Password; repeating that menu here would give two controls the same job, and the thing worth
-// having twice is the signed-in name and Logout, not a second copy of the menu behind them.
+// Deliberately not a dropdown, and deliberately no Logout button. The sidebar's account card
+// owns Profile, Reset Password and Logout; a second control for any of them here would be two
+// controls with one job. This is a label, not a menu.
 export default function HeaderAccount() {
   const user = useSelector(selectUser);
-  const logout = useLogout();
 
   if (!user) return null;
 
@@ -31,9 +28,6 @@ export default function HeaderAccount() {
           </span>
         </span>
       </span>
-      <button type="button" className="btn header-logout" onClick={() => logout()}>
-        <LuLogOut aria-hidden="true" /> Logout
-      </button>
     </div>
   );
 }

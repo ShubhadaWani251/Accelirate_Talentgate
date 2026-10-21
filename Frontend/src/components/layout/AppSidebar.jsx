@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useSelector } from 'react-redux';
 import {
-  LuArrowLeft, LuBookOpen, LuChevronRight, LuDownload, LuLayoutDashboard, LuLogOut,
+  LuArrowLeft, LuBookOpen, LuChevronRight, LuDownload, LuLayoutDashboard,
   LuPlus, LuScrollText, LuSettings, LuUserCog, LuUsers,
 } from 'react-icons/lu';
 import { selectUser } from '../../features/auth/authSlice';
@@ -182,11 +182,10 @@ export default function AppSidebar({ children, navOpen = true, onCloseNav }) {
             </span>
             <LuChevronRight className="sidebar-user-chevron" aria-hidden="true" />
           </button>
-          {/* Kept as its own control beside the menu, not only inside it: logging out should
-              never require opening a menu first. */}
-          <button className="btn sidebar-logout" onClick={() => logout()}>
-            <LuLogOut aria-hidden="true" /> Logout
-          </button>
+          {/* Logout lives in the menu above and nowhere else. It used to also be its own
+              button here, and a third time in the header, on the reasoning that logging out
+              should never require opening a menu first - three controls doing one job, which
+              testers read as the app not knowing where its own logout was. */}
         </div>
       </aside>
 
