@@ -38,10 +38,20 @@ export default function AddSectionModal({ onClose, onCreated }) {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-box" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
         <h4>Add Section</h4>
+        <p style={{ marginBottom: 10 }}>
+          New batches can use this section right away. It will also get its own column in the
+          candidate tables and the Excel export.
+        </p>
+        {/* "Existing" covers Drafts here, which is NOT how the rest of this screen behaves and
+            is worth being exact about: deactivating or restoring a section resyncs every Draft
+            (views/questions), and so does saving Configure Default Batch - but CREATING one
+            deliberately does not. Pushing a brand-new, empty section into a Draft would block
+            that Draft from being finalized until somebody uploaded questions for it, which is
+            the opposite of a safe default for a batch that was ready to send. */}
         <p>
-          A new section becomes available to <b>new</b> batches straight away, and gets its own
-          column in the candidate tables and the Excel export. Batches that already exist keep
-          the sections they were created with.
+          Existing batches won&apos;t change, Draft batches included. They keep the sections
+          they were created with. A Draft picks this section up the next time the default batch
+          settings are saved.
         </p>
 
         <div className="field">
@@ -56,8 +66,8 @@ export default function AddSectionModal({ onClose, onCreated }) {
         </div>
 
         <div className="alert amber" style={{ textAlign: 'left', marginTop: 4 }}>
-          You will need to add questions to this section before a batch can use it — a batch
-          cannot start an exam for a section with too few active questions.
+          Add questions to this section before using it in a batch. A batch can&apos;t start an
+          exam if a section doesn&apos;t have enough active questions.
         </div>
 
         <div className="btn-row" style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 12 }}>

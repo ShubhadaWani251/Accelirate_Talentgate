@@ -73,16 +73,21 @@ export default function SectionStatusModal({ section, onClose, onChanged }) {
       <div className="modal-box" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
         <h4>Deactivate &quot;{section.section_name}&quot;?</h4>
         <p>
-          It will stop appearing in <b>new batches</b>, and will be removed from any draft batch
-          that currently includes it.
+          This section will no longer be used in new batches. It will also be removed from any
+          Draft batches.
         </p>
+        {/* What is KEPT, as a list rather than a paragraph: these are three separate
+            reassurances, and run together they read as one hedge nobody finishes. */}
         <div className="alert" style={{ textAlign: 'left' }}>
-          Nothing is deleted. Batches that already ran this section keep it, every candidate
-          score recorded under it stays as it is, and its questions remain in the bank — so
-          results still describe the exam each candidate actually sat.
+          <b>Nothing will be deleted.</b>
+          <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+            <li>Batches that are no longer in Draft keep this section.</li>
+            <li>Candidate scores for this section stay the same.</li>
+            <li>Its questions stay in the question bank.</li>
+          </ul>
         </div>
         <p style={{ fontSize: 12, color: 'var(--muted)' }}>
-          You can restore it at any time from this same screen.
+          You can turn this section back on anytime from <b>Inactive Sections</b>.
         </p>
         <div className="btn-row" style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 12 }}>
           <button className="btn" onClick={onClose} disabled={working}>Cancel</button>

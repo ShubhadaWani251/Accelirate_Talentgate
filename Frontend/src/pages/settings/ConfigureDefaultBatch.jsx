@@ -116,11 +116,11 @@ export default function ConfigureDefaultBatch() {
       <div className="card">
         <div className="box-label">Exam Configuration</div>
         <div className="alert" style={{ marginBottom: 14 }}>
-          This is the schedule, sections, question counts and pass cutoffs every new batch is
-          created with. <b>Draft batches are updated to match</b> — nothing has been sent to
-          their candidates yet. Batches that have left Draft keep whatever was configured here
-          at the moment they were created, so an exam already underway is never reshaped. To
-          revise a single finalized batch's cutoffs, open that batch's own Details page instead.
+          These are the default settings for every new batch: the schedule, sections, number of
+          questions, and pass marks. Changes here apply to new batches and to Draft batches,
+          since their candidates haven&apos;t received anything yet. Batches that are no longer
+          in Draft keep their original settings, so exams already in progress won&apos;t change.
+          To edit pass marks for one finalized batch, open that batch&apos;s Details page.
         </div>
 
         {loading ? (
