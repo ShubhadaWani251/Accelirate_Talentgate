@@ -51,9 +51,9 @@ class Command(BaseCommand):
                  'shorter limits how long a compromised key stays useful.',
         )
         parser.add_argument(
-            '--common-name', default='talentgate-graph-mail',
+            '--common-name', default='acceliassess-graph-mail',
             help='Certificate subject/issuer common name - cosmetic only, Azure AD does not '
-                 'check it (default: talentgate-graph-mail).',
+                 'check it (default: acceliassess-graph-mail).',
         )
 
     def handle(self, *args, **options):

@@ -68,7 +68,7 @@ FONT = 'Segoe UI,Helvetica,Arial,sans-serif'
 # cannot drift apart - an email naming a file that arrives under a different name is worse than
 # one that names no file at all. invites.py imports this module already, so this direction of
 # the dependency is the one that does not create a cycle.
-SOP_ATTACHMENT_NAME = 'TalentGate-Assessment-Setup-SOP.pdf'
+SOP_ATTACHMENT_NAME = 'AcceliAssess-Assessment-Setup-SOP.pdf'
 
 
 def _esc(value):

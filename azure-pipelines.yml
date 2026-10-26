@@ -1,4 +1,4 @@
-# CI/CD for TalentGate.
+# CI/CD for AcceliAssess.
 #
 # The app deploys as ONE App Service: gunicorn serves the Django API and, via WhiteNoise, the
 # built React bundle from the same origin. That is not a packaging convenience - the refresh
@@ -166,14 +166,14 @@ stages:
               rootFolderOrFile: '$(Build.ArtifactStagingDirectory)/app'
               includeRootFolder: false
               archiveType: zip
-              archiveFile: '$(Build.ArtifactStagingDirectory)/talentgate.zip'
+              archiveFile: '$(Build.ArtifactStagingDirectory)/acceliassess.zip'
               replaceExistingArchive: true
 
           - task: PublishPipelineArtifact@1
             displayName: Publish package artifact
             inputs:
-              targetPath: '$(Build.ArtifactStagingDirectory)/talentgate.zip'
-              artifact: talentgate
+              targetPath: '$(Build.ArtifactStagingDirectory)/acceliassess.zip'
+              artifact: acceliassess
 
   - stage: DeployStaging
     displayName: Deploy to staging
@@ -186,13 +186,17 @@ stages:
         displayName: Deploy App Service
         pool:
           vmImage: ubuntu-latest
+        # Still the old product name, deliberately: this names an Azure DevOps Environment that
+        # exists under that name and carries the required-approver check. Renaming it here
+        # creates a SECOND, unapproved environment rather than renaming the first, so the
+        # deployment gate would silently stop applying. Rename it in Azure DevOps first.
         environment: talentgate-staging
         strategy:
           runOnce:
             deploy:
               steps:
                 - download: current
-                  artifact: talentgate
+                  artifact: acceliassess
 
                 - task: AzureWebApp@1
                   displayName: Deploy to $(webAppName)
@@ -201,7 +205,7 @@ stages:
                     appType: webAppLinux
                     appName: '$(webAppName)'
                     resourceGroupName: '$(resourceGroupName)'
-                    package: '$(Pipeline.Workspace)/talentgate/talentgate.zip'
+                    package: '$(Pipeline.Workspace)/acceliassess/acceliassess.zip'
                     # Runs migrations and collectstatic before handing off to gunicorn. App Service
                     # never runs docker-entrypoint.sh on a code deployment, so this script is the
                     # only thing that applies migrations - see Backend/startup.sh.

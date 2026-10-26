@@ -142,7 +142,7 @@ def build_config_zip(invitation):
     """
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr('talentgate-assessment.seb', build_config(invitation))
+        archive.writestr('acceliassess-assessment.seb', build_config(invitation))
     return buffer.getvalue()
 
 

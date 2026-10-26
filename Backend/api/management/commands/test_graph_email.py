@@ -42,8 +42,8 @@ class Command(BaseCommand):
         self.stdout.write(f'\nStep 2 - sending a test message to {options["to"]}...')
         try:
             sent = send_mail(
-                subject='Accelirate TalentGate - Graph email test',
-                message='If you are reading this, TalentGate can send mail through '
+                subject='AcceliAssess - Graph email test',
+                message='If you are reading this, AcceliAssess can send mail through '
                         'Microsoft Graph. No action needed.',
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=[options['to']],

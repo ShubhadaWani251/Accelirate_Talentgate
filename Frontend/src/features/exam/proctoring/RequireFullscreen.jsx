@@ -19,7 +19,7 @@ export default function RequireFullscreen({ children }) {
       // A native OS dialog (the Aadhaar upload's file picker) also drops full-screen, same as a
       // permission prompt - but that one IS expected and temporary, not a real exit, so showing
       // this gate for it would unmount the very <input> the dialog is about to hand a file back
-      // to. See nativeDialogGuard.js for the full story. talentgate:nativedialogclose (below)
+      // to. See nativeDialogGuard.js for the full story. acceliassess:nativedialogclose (below)
       // re-runs this once the suppression lifts, so the real state still gets picked up.
       if (isNativeDialogOpen()) return;
       setActive(isFullscreen());
@@ -30,10 +30,10 @@ export default function RequireFullscreen({ children }) {
     // would otherwise never be observed - leaving the gate hidden while full-screen is off.
     sync();
     document.addEventListener('fullscreenchange', sync);
-    window.addEventListener('talentgate:nativedialogclose', sync);
+    window.addEventListener('acceliassess:nativedialogclose', sync);
     return () => {
       document.removeEventListener('fullscreenchange', sync);
-      window.removeEventListener('talentgate:nativedialogclose', sync);
+      window.removeEventListener('acceliassess:nativedialogclose', sync);
     };
   }, []);
 

@@ -16,11 +16,11 @@
 
 SHELL=/bin/sh
 # Adjust to the deployment's paths.
-APP=/srv/talentgate/Backend
-PY=/srv/talentgate/Backend/venv/bin/python
+APP=/srv/acceliassess/Backend
+PY=/srv/acceliassess/Backend/venv/bin/python
 
 # Finalize exam attempts past their deadline.
-*/10 * * * * cd $APP && $PY manage.py finalize_expired_attempts >> /var/log/talentgate/scheduler.log 2>&1
+*/10 * * * * cd $APP && $PY manage.py finalize_expired_attempts >> /var/log/acceliassess/scheduler.log 2>&1
 
 # Send every queued invitation email. Every minute, not less often - a candidate is waiting on
 # this for their assessment link, not just cleanup. flock guards against a run that is still
@@ -29,16 +29,16 @@ PY=/srv/talentgate/Backend/venv/bin/python
 # without it, cron would overlap two runs and risk sending the same invitation twice. -n makes a
 # tick that finds the lock held simply skip rather than queue up behind it - the next tick a
 # minute later is a better use of that time than a growing backlog of waiting cron processes.
-* * * * * flock -n /tmp/talentgate-process-email-queue.lock $PY $APP/manage.py process_email_queue >> /var/log/talentgate/scheduler.log 2>&1
+* * * * * flock -n /tmp/acceliassess-process-email-queue.lock $PY $APP/manage.py process_email_queue >> /var/log/acceliassess/scheduler.log 2>&1
 
 # Catch a browser/Safe Exam Browser closing mid-exam. Every 30 seconds (cron's own finest grain
 # is one minute, so this uses the same sleep-loop shape as startup.sh rather than a second crontab
 # line) - the whole point of this command is noticing soon after it happens, not on some later
 # housekeeping sweep. Safe to run concurrently with itself if a run is still going when the next
 # would start - see the command's own module docstring on why no flock is needed here.
-* * * * * cd $APP && for i in 0 30; do (sleep $i; $PY manage.py terminate_stale_attempts >> /var/log/talentgate/scheduler.log 2>&1) & done; wait
+* * * * * cd $APP && for i in 0 30; do (sleep $i; $PY manage.py terminate_stale_attempts >> /var/log/acceliassess/scheduler.log 2>&1) & done; wait
 
 # Convert finished attempts' session recordings to MP4. No candidate or TA is waiting on this in
 # real time the way they are for the jobs above - it just bounds how long after an exam ends
 # before its MP4 copy shows up on Candidate Details.
-*/10 * * * * cd $APP && $PY manage.py transcode_recordings >> /var/log/talentgate/scheduler.log 2>&1
+*/10 * * * * cd $APP && $PY manage.py transcode_recordings >> /var/log/acceliassess/scheduler.log 2>&1

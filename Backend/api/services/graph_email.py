@@ -16,7 +16,7 @@ prove the app's identity differently:
 
     GRAPH_TENANT_ID           directory (tenant) ID of the Azure AD app registration
     GRAPH_CLIENT_ID           application (client) ID
-    GRAPH_SENDER              mailbox to send as, e.g. talentgate@accelirate.com
+    GRAPH_SENDER              mailbox to send as, e.g. acceliassess@accelirate.com
 
     GRAPH_CLIENT_SECRET       a shared secret value - simplest to set up, the default
     -- or --

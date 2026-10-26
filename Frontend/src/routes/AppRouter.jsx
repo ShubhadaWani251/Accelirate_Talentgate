@@ -97,7 +97,7 @@ export default function AppRouter() {
   // App boot: the session refresh decides which routes even exist for this user, so nothing
   // page-shaped can be skeletoned yet. A centred spinner is the honest indicator.
   if (status === 'idle' || status === 'loading') {
-    return <FullPageSpinner label="Starting TalentGate" />;
+    return <FullPageSpinner label="Starting AcceliAssess" />;
   }
 
   return (

@@ -583,7 +583,7 @@ class CandidateNotifyView(APIView):
             subject = request.data.get('subject') or template['subject']
             body_for = (lambda c: message) if message else (lambda c: render_template(template_key, c)[1])
         else:
-            subject = request.data.get('subject') or 'Accelirate TalentGate - Update'
+            subject = request.data.get('subject') or 'AcceliAssess - Update'
             body_for = lambda c: message  # noqa: E731 - trivial constant-body case
 
         sendable, skipped = partition_by_deliverable(candidates)

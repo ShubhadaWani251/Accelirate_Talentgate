@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Registers TalentGate's housekeeping jobs with Windows Task Scheduler.
+    Registers AcceliAssess's housekeeping jobs with Windows Task Scheduler.
 
 .DESCRIPTION
     The same four jobs as deploy/crontab.example, for a Windows host running the app directly
@@ -41,7 +41,7 @@
     survives the interactive user logging out. It must be able to read Backend\.env.
 
 .EXAMPLE
-    .\register-scheduled-tasks.ps1 -BackendPath C:\apps\talentgate\Backend
+    .\register-scheduled-tasks.ps1 -BackendPath C:\apps\acceliassess\Backend
 #>
 [CmdletBinding()]
 param(
@@ -66,18 +66,23 @@ if (-not (Test-Path $python)) {
 # Interval is in minutes. Every command is idempotent and returns immediately when there is
 # nothing to process, so running more often than strictly needed is safe.
 $tasks = @(
-    @{ Name = 'TalentGate-FinalizeExpiredAttempts'; Command = 'finalize_expired_attempts'; Minutes = 10 },
-    @{ Name = 'TalentGate-ProcessEmailQueue'; Command = 'process_email_queue'; Minutes = 1 },
-    @{ Name = 'TalentGate-TerminateStaleAttempts'; Command = 'terminate_stale_attempts'; Minutes = 1 },
-    @{ Name = 'TalentGate-TranscodeRecordings'; Command = 'transcode_recordings'; Minutes = 10 }
+    @{ Name = 'AcceliAssess-FinalizeExpiredAttempts'; Command = 'finalize_expired_attempts'; Minutes = 10 },
+    @{ Name = 'AcceliAssess-ProcessEmailQueue'; Command = 'process_email_queue'; Minutes = 1 },
+    @{ Name = 'AcceliAssess-TerminateStaleAttempts'; Command = 'terminate_stale_attempts'; Minutes = 1 },
+    @{ Name = 'AcceliAssess-TranscodeRecordings'; Command = 'transcode_recordings'; Minutes = 10 }
 )
 
-# Removes the task a previous run of this script may have registered for the now-removed
-# draft-batch auto-expiry job, so it doesn't keep running (and logging failures) forever.
-$staleTask = Get-ScheduledTask -TaskName 'TalentGate-DeleteExpiredDraftBatches' -ErrorAction SilentlyContinue
-if ($staleTask) {
-    Write-Host 'Removing stale task TalentGate-DeleteExpiredDraftBatches (auto-expiry was removed)...'
-    Unregister-ScheduledTask -TaskName 'TalentGate-DeleteExpiredDraftBatches' -Confirm:$false
+# Tasks a previous run of this script registered that must not keep running.
+#
+# Every TalentGate-* name: the product was renamed to AcceliAssess on 2026-10-26 and these are
+# registered under the OLD names on any machine this script has already been run on. Renaming
+# the entries above without this would leave both sets registered and every job running twice.
+#
+# TalentGate-DeleteExpiredDraftBatches has no replacement at all - draft auto-expiry was
+# removed - so it is caught by the same sweep rather than named separately.
+foreach ($stale in Get-ScheduledTask -TaskName 'TalentGate-*' -ErrorAction SilentlyContinue) {
+    Write-Host "Removing task registered under the old name: $($stale.TaskName)..."
+    Unregister-ScheduledTask -TaskName $stale.TaskName -Confirm:$false
 }
 
 foreach ($task in $tasks) {
@@ -109,6 +114,6 @@ foreach ($task in $tasks) {
 
 Write-Host ''
 Write-Host 'Registered. Verify with:'
-Write-Host '  Get-ScheduledTask -TaskName "TalentGate-*" | Format-Table TaskName, State'
+Write-Host '  Get-ScheduledTask -TaskName "AcceliAssess-*" | Format-Table TaskName, State'
 Write-Host 'Check last run results with:'
-Write-Host '  Get-ScheduledTaskInfo -TaskName "TalentGate-FinalizeExpiredAttempts"'
+Write-Host '  Get-ScheduledTaskInfo -TaskName "AcceliAssess-FinalizeExpiredAttempts"'

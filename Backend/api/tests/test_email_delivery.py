@@ -825,5 +825,5 @@ class TestTheSetupGuideIsAttached:
         invites.send_invite_and_record(invitation, 'https://exam.example.test')
 
         html = mail.outbox[0].alternatives[0][0]
-        assert 'TalentGate-Assessment-Setup-SOP.pdf' in html
-        assert 'TalentGate-Assessment-Setup-SOP.pdf' in mail.outbox[0].body
+        assert 'AcceliAssess-Assessment-Setup-SOP.pdf' in html
+        assert 'AcceliAssess-Assessment-Setup-SOP.pdf' in mail.outbox[0].body

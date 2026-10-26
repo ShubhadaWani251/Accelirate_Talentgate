@@ -39,7 +39,7 @@ def transcode_to_mp4(attempt_id):
     in one run, and one candidate's corrupt or unusual recording must not stop every other
     attempt's video from being converted.
     """
-    with tempfile.TemporaryDirectory(prefix=f'talentgate-transcode-{attempt_id}-') as tmp:
+    with tempfile.TemporaryDirectory(prefix=f'acceliassess-transcode-{attempt_id}-') as tmp:
         webm_path = Path(tmp) / 'source.webm'
         mp4_path = Path(tmp) / 'output.mp4'
 

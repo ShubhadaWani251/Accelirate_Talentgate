@@ -112,25 +112,25 @@ class TestBuildConfigZip:
     way.
     """
 
-    def test_the_zip_contains_one_file_named_talentgate_assessment_seb(self, invitation, settings):
+    def test_the_zip_contains_one_file_named_acceliassess_assessment_seb(self, invitation, settings):
         settings.SEB_BROWSER_EXAM_KEY_SECRET = 'test-secret'
 
         archive = zipfile.ZipFile(io.BytesIO(seb.build_config_zip(invitation)))
 
-        assert archive.namelist() == ['talentgate-assessment.seb']
+        assert archive.namelist() == ['acceliassess-assessment.seb']
 
     def test_the_zipped_file_is_byte_for_byte_the_same_as_build_config(self, invitation, settings):
         settings.SEB_BROWSER_EXAM_KEY_SECRET = 'test-secret'
 
         archive = zipfile.ZipFile(io.BytesIO(seb.build_config_zip(invitation)))
 
-        assert archive.read('talentgate-assessment.seb') == seb.build_config(invitation)
+        assert archive.read('acceliassess-assessment.seb') == seb.build_config(invitation)
 
     def test_the_zipped_file_still_parses_as_a_valid_seb_config(self, invitation, settings):
         settings.SEB_BROWSER_EXAM_KEY_SECRET = 'test-secret'
 
         archive = zipfile.ZipFile(io.BytesIO(seb.build_config_zip(invitation)))
-        parsed = plistlib.loads(archive.read('talentgate-assessment.seb'))
+        parsed = plistlib.loads(archive.read('acceliassess-assessment.seb'))
 
         assert parsed['startURL'] == f"{settings.FRONTEND_ORIGIN}/t/{invitation.unique_link_token}/"
 
@@ -249,7 +249,7 @@ class TestExamSebConfigView:
 
         assert response.status_code == 200
         assert response['Content-Type'] == 'application/octet-stream'
-        assert response['Content-Disposition'] == 'attachment; filename="talentgate-assessment.seb"'
+        assert response['Content-Disposition'] == 'attachment; filename="acceliassess-assessment.seb"'
         parsed = plistlib.loads(response.content)
         assert parsed['startURL'] == (
             f"{settings.FRONTEND_ORIGIN}/t/{invitation.unique_link_token}/"
@@ -296,9 +296,9 @@ class TestExamSebConfigZipView:
 
         assert response.status_code == 200
         assert response['Content-Type'] == 'application/zip'
-        assert response['Content-Disposition'] == 'attachment; filename="talentgate-assessment.zip"'
+        assert response['Content-Disposition'] == 'attachment; filename="acceliassess-assessment.zip"'
         archive = zipfile.ZipFile(io.BytesIO(response.content))
-        parsed = plistlib.loads(archive.read('talentgate-assessment.seb'))
+        parsed = plistlib.loads(archive.read('acceliassess-assessment.seb'))
         assert parsed['startURL'] == f"{settings.FRONTEND_ORIGIN}/t/{invitation.unique_link_token}/"
 
     def test_an_unknown_token_is_a_400_not_a_404_or_500(self, api_client, db):

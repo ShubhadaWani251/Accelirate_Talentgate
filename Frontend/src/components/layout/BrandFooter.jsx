@@ -7,7 +7,7 @@ const ROLE_LABELS = {
 export default function BrandFooter({ roleCode }) {
   return (
     <footer className="brand-footer">
-      <span>&copy; 2026 Accelirate Inc. &middot; Accelirate TalentGate {ROLE_LABELS[roleCode] ? `— ${ROLE_LABELS[roleCode]} Portal` : ''}</span>
+      <span>&copy; 2026 Accelirate Inc. &middot; AcceliAssess {ROLE_LABELS[roleCode] ? `— ${ROLE_LABELS[roleCode]} Portal` : ''}</span>
       <div className="foot-links">
         {/* Plain <a> tags, not react-router's <Link>, and deliberately so: this footer also
             renders inside ErrorPage, which is ErrorBoundary's fallback - and ErrorBoundary sits

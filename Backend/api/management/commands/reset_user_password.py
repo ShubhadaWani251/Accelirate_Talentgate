@@ -13,7 +13,7 @@ class Command(BaseCommand):
     The password is read via getpass rather than taken as an argument, so it never lands in
     shell history, process listings, or CI logs the way `--password` on create_admin_user does.
     """
-    help = "Reset a TalentGate account's password (prompts for the new password)."
+    help = "Reset an AcceliAssess account's password (prompts for the new password)."
 
     def add_arguments(self, parser):
         parser.add_argument('--email', required=True)

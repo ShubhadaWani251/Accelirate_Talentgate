@@ -22,7 +22,7 @@ export default function PrivacyPolicy() {
       <div className="auth-shell">
         <div className="auth-card" style={{ maxWidth: 680 }}>
           <h3>Privacy Notice</h3>
-          <div className="auth-sub">Accelirate TalentGate - Candidate Evaluation Platform</div>
+          <div className="auth-sub">AcceliAssess - Candidate Evaluation Platform</div>
 
           <div className="card" style={{ borderColor: 'var(--amber, #b58900)' }}>
             <div className="box-label">Draft</div>

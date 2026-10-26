@@ -1,6 +1,6 @@
-# TalentGate Frontend
+# AcceliAssess Frontend
 
-React + Vite single-page app for the TalentGate candidate evaluation platform. See the
+React + Vite single-page app for the AcceliAssess candidate evaluation platform. See the
 [repo-root README](../README.md) for the full project overview, architecture, and setup
 instructions covering both this app and the Django backend it talks to.
 

@@ -6,7 +6,7 @@ from api.models import Role, User
 
 
 class Command(BaseCommand):
-    help = 'Bootstrap an initial Administrator account for TalentGate.'
+    help = 'Bootstrap an initial Administrator account for AcceliAssess.'
 
     def add_arguments(self, parser):
         parser.add_argument('--first-name', required=True)

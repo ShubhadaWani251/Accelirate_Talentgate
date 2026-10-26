@@ -11,7 +11,7 @@ import { createSlice } from '@reduxjs/toolkit';
 // session's just gone now" (show "Session expired. Please log in again.") - a distinction the
 // backend deliberately no longer makes either (see api/views/auth.RefreshView), since a missing
 // cookie and an invalid one are the same lived experience from there.
-const HAD_SESSION_KEY = 'talentgate_had_session';
+const HAD_SESSION_KEY = 'acceliassess_had_session';
 
 export function hadSessionBefore() {
   try {

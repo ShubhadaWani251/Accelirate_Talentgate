@@ -28,7 +28,7 @@ export default function DeactivateUserModal({ user, onClose, onDeactivated }) {
         <h4>Deactivate User?</h4>
         <p>
           Are you sure you want to deactivate <b>{user.full_name}</b>? The user will no longer
-          be able to access TalentGate.
+          be able to access AcceliAssess.
         </p>
         <p style={{ marginTop: -8 }}>
           Their account and history are kept — you can reactivate them later from Edit User.

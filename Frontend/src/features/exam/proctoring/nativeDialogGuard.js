@@ -36,7 +36,7 @@ export function beginNativeDialog() {
       // fullscreenchange doesn't necessarily fire again just because the dialog closed (the
       // browser may have silently restored fullscreen, or may not have) - RequireFullscreen
       // listens for this to re-check the real state now that suppression has lifted.
-      window.dispatchEvent(new Event('talentgate:nativedialogclose'));
+      window.dispatchEvent(new Event('acceliassess:nativedialogclose'));
     }
   };
 }

@@ -537,7 +537,7 @@ class ExamSebConfigView(APIView):
         # A fixed, generic filename rather than anything derived from the candidate/batch - the
         # file's contents are what matters, and there's no benefit to personalizing a name that
         # would need sanitizing.
-        response['Content-Disposition'] = 'attachment; filename="talentgate-assessment.seb"'
+        response['Content-Disposition'] = 'attachment; filename="acceliassess-assessment.seb"'
         return response
 
 
@@ -563,7 +563,7 @@ class ExamSebConfigZipView(APIView):
                              status=status.HTTP_400_BAD_REQUEST)
 
         response = HttpResponse(seb.build_config_zip(invitation), content_type='application/zip')
-        response['Content-Disposition'] = 'attachment; filename="talentgate-assessment.zip"'
+        response['Content-Disposition'] = 'attachment; filename="acceliassess-assessment.zip"'
         return response
 
 
