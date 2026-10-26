@@ -416,55 +416,48 @@ h1, h2, h3, h4, .brand, .btn, .box-label {
 }
 
 /* ---------- Tables, pills, wizard steps (batches, candidates) ---------- */
-.table-scroll { overflow-x: auto; border: 1px solid var(--line-soft); border-radius: 12px; box-shadow: 0 1px 3px rgba(16,24,40,.04); }
+/* --- Every table in the app keeps its header row in view ---
 
-/* --- Frozen header row and name column, opt-in per table (.freeze-panes) ---
-   Only the candidate tables ask for this. They are the ones wide enough to need it: ~23
-   columns, so by the time you have scrolled to a section score you can no longer see whose
-   score it is, or which column you are reading.
+   Three things make a sticky header work here, and all three are load-bearing:
 
-   Three things make it work, and all three are load-bearing:
-
-   1. A bounded height. position:sticky sticks to the nearest SCROLL container, and because
-      overflow-x:auto above forces overflow-y to compute to auto as well, that container is
-      this div - which without a height never scrolls vertically, so a sticky header would
-      have nothing to stick within and simply never move.
-   2. border-collapse: separate. Collapsed borders belong to the table, not the cell, so they
-      do not travel with a sticky cell and the frozen column loses its gridlines as soon as it
-      detaches. Scoped to this variant rather than changed globally, which would restyle every
-      table in the app.
-   3. Opaque backgrounds on the sticky cells. They are painted over the scrolling cells
-      beneath, and the default transparent cell would let both show through at once. */
-.table-scroll.freeze-panes {
+   1. A bounded height. position:sticky sticks to the nearest SCROLL container, and a container
+      with no height limit never scrolls vertically - so the header would have nothing to stick
+      within and would simply never move. The cap below is what makes this div that container.
+      A table shorter than the cap still takes its own height and never scrolls at all, so a
+      four-row panel is untouched by this.
+   2. border-collapse: separate, on .data-table below. Collapsed borders belong to the TABLE
+      rather than to the cell, so they do not travel with a sticky cell: a stuck header row
+      leaves its gridlines behind and floats over the body without them.
+   3. Opaque backgrounds on the sticky cells, also below. They are painted over the scrolling
+      cells beneath, and a transparent cell shows both at once. */
+.table-scroll {
   overflow: auto;
-  /* Enough rows to be worth scrolling, while leaving the filters above and the pager below in
-     view. Capped against the viewport rather than a fixed pixel height so a short list still
-     collapses to its own size. */
+  /* Enough rows to be worth scrolling while leaving the filters above and the pager below in
+     view. Capped against the viewport rather than at fixed pixels so a short table collapses
+     to its own size instead of reserving space it does not need. */
   max-height: min(68vh, 720px);
+  border: 1px solid var(--line-soft); border-radius: 12px; box-shadow: 0 1px 3px rgba(16,24,40,.04);
 }
-.table-scroll.freeze-panes table.data-table { border-collapse: separate; border-spacing: 0; }
-.table-scroll.freeze-panes table.data-table th,
-.table-scroll.freeze-panes table.data-table td {
-  /* Separate borders double up between neighbours; drop two of the four sides and let the
-     table's own outer edge supply the rest. */
-  border: 0; border-right: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft);
-}
-.table-scroll.freeze-panes table.data-table thead th {
-  position: sticky; top: 0; z-index: 2;
-  /* The gradient the shared rule uses is a background-image, which does not make a cell
-     opaque on its own - an explicit colour underneath it does. */
-  background-color: #eef1f6;
-}
-/* The checkbox and the name, pinned together: freezing the checkbox alone would hold the one
-   column that says nothing about who the row is. */
+
+/* --- ...and the widest ones also hold their first columns still (.freeze-panes) ---
+   Opt-in, because it only pays for itself on a table too wide to read across: on a narrow one
+   it spends horizontal room holding a column that never left the screen anyway.
+
+   Two columns, not one: every table that asks for this leads with a checkbox or a row number,
+   and freezing that alone would hold the one column that says nothing about whose row it is.
+   --freeze-col1 is the first column's width, which the second column's offset has to match
+   exactly - a sticky column is positioned against the container edge, not against its
+   neighbour - so a table whose first column is wider than a checkbox overrides the one value
+   and both rules follow. */
+.table-scroll.freeze-panes { --freeze-col1: 42px; }
 .table-scroll.freeze-panes table.data-table tr > :nth-child(1),
 .table-scroll.freeze-panes table.data-table tr > :nth-child(2) {
   position: sticky; z-index: 1; background-color: #fff;
 }
-.table-scroll.freeze-panes table.data-table tr > :nth-child(1) { left: 0; width: 42px; }
-/* Must match the width above: a sticky column is offset from the container edge, not from the
-   column before it. */
-.table-scroll.freeze-panes table.data-table tr > :nth-child(2) { left: 42px; }
+.table-scroll.freeze-panes table.data-table tr > :nth-child(1) {
+  left: 0; width: var(--freeze-col1);
+}
+.table-scroll.freeze-panes table.data-table tr > :nth-child(2) { left: var(--freeze-col1); }
 /* The corner is sticky on both axes, so it has to outrank both - and it has to restate the
    header colour, because the white column rule above is a more specific selector than the
    thead one and would otherwise leave two white cells in a grey header row. */
@@ -487,12 +480,24 @@ h1, h2, h3, h4, .brand, .btn, .box-label {
 .table-scroll.freeze-panes table.data-table tr > :nth-child(2) {
   box-shadow: 1px 0 0 var(--line-soft);
 }
-table.data-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+/* separate, not collapse - see point 2 on .table-scroll above. The cost is that borders would
+   double up between neighbours, so each cell draws only its right and bottom edge and the
+   container's own border supplies the top and left of the grid. */
+table.data-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
 table.data-table th {
-  text-align: left; background: linear-gradient(180deg, #f1f4f8, #e9edf3); border: 1px solid var(--line-soft);
+  text-align: left; background: linear-gradient(180deg, #f1f4f8, #e9edf3);
+  /* After the shorthand, never before it: `background` resets background-color. The gradient
+     is a background-IMAGE and does not make the cell opaque on its own, which a header
+     scrolling over body rows has to be. */
+  background-color: #eef1f6;
+  border: 0; border-right: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft);
   padding: 9px 12px; font-size: 11px; text-transform: uppercase; color: #5a6272; white-space: nowrap;
+  position: sticky; top: 0; z-index: 2;
 }
-table.data-table td { border: 1px solid var(--line-soft); padding: 9px 12px; vertical-align: middle; white-space: nowrap; }
+table.data-table td {
+  border: 0; border-right: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft);
+  padding: 9px 12px; vertical-align: middle; white-space: nowrap;
+}
 table.data-table tbody tr:nth-child(even) td { background: #fafbfd; }
 table.data-table tbody tr:hover td { background: var(--accent-soft); }
 

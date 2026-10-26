@@ -138,7 +138,11 @@ export default function FixErrorsStep({ batch, onDone }) {
       )}
 
       {!clean && (
-        <div className="table-scroll">
+        // freeze-panes: 15 columns of a spreadsheet being corrected cell by cell, so Row and
+        // Name stay put while you scroll out to the column the error is actually in. The
+        // override widens the first column from the checkbox default - this one holds a row
+        // number, and the second column's offset has to match it exactly (see theme.css).
+        <div className="table-scroll freeze-panes" style={{ '--freeze-col1': '58px' }}>
           <table className="data-table">
             <thead>
               <tr>
