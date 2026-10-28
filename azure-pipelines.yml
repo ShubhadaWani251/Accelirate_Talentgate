@@ -219,7 +219,56 @@ stages:
   # feature/*, with nothing in the runs list to open and no useful notification.
   #
   # A DeployProduction stage naming Aptitude-Production was added in d5b2cd0 on 2026-10-05 and
-  # removed here, because naming that connection stopped runs from being created at all. An
-  # Owner granted id-aptitude-deploy-prod-eastus Website Contributor on app-aptitude-prod-eastus
-  # later that day. Restore the stage only once the connection resolves at queue time. The
-  # README section it belongs to is still there.
+  # removed in 32ca91d, because naming that connection stopped runs from being created at all.
+  # It is restored below, now that the connection has been confirmed to resolve - validated
+  # against the pipeline preview API before this was pushed, precisely so that confirming it
+  # did not mean finding out the expensive way.
+
+  # Manual on purpose. Depending on staging and waiting for its approval would raise a
+  # production approval on every push to main. This stage stays idle until someone opens a main
+  # run whose staging deploy succeeded and starts it, which deploys that run's artifact again.
+  # App settings on the production app supply its own database, storage and secrets; nothing in
+  # the artifact is environment-specific.
+  - stage: DeployProduction
+    displayName: Deploy to production
+    # No dependsOn, deliberately. Azure DevOps rejects the whole file if a `trigger: manual`
+    # stage declares one - "Manually triggered stages cannot have dependencies" - and it
+    # rejects it at trigger time, before a run record exists. The symptom is therefore not a
+    # failed build but pushes to main and feature/* that silently build nothing at all, with
+    # no run to open and no notification worth the name. Do not add it back to express
+    # ordering: the comment above IS the ordering, and a person applies it by choosing which
+    # run to start this from. This is what fd1ea7c had to fix once already.
+    #
+    # succeeded() consequently has no upstream stage to report on and does not gate this on
+    # staging. The manual trigger and the branch check beside it are the real guards.
+    trigger: manual
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    variables:
+      azureServiceConnection: 'Aptitude-Production'
+      webAppName: 'app-aptitude-prod-eastus'
+    jobs:
+      - deployment: DeployProdWebApp
+        displayName: Deploy App Service
+        pool:
+          vmImage: ubuntu-latest
+        environment: talentgate-production
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                # The artifact this run already built and already deployed to staging - not a
+                # rebuild. Renamed from `talentgate` in 66a267c, so a straight revert of the
+                # old stage would have failed here looking for an artifact that no longer
+                # exists under that name.
+                - download: current
+                  artifact: acceliassess
+
+                - task: AzureWebApp@1
+                  displayName: Deploy to $(webAppName)
+                  inputs:
+                    azureSubscription: '$(azureServiceConnection)'
+                    appType: webAppLinux
+                    appName: '$(webAppName)'
+                    resourceGroupName: '$(resourceGroupName)'
+                    package: '$(Pipeline.Workspace)/acceliassess/acceliassess.zip'
+                    startUpCommand: 'sh startup.sh'
