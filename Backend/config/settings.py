@@ -372,6 +372,21 @@ CORPORATE_EMAIL_DOMAINS = [
 OTP_EXPIRY_MINUTES = int(os.environ.get('OTP_EXPIRY_MINUTES', 10))
 OTP_RESEND_COOLDOWN_SECONDS = int(os.environ.get('OTP_RESEND_COOLDOWN_SECONDS', 60))
 
+# Single sign-on with a Microsoft work account (services/sso.py, views/auth.SsoLoginView).
+#
+# OFF unless all three are set, and the password form is never removed - a deployment with no
+# Entra app registration, or one whose registration breaks, still has a way in. SSO_CLIENT_ID
+# is the audience every incoming ID token must carry and SSO_TENANT_ID the only directory
+# accepted, so leaving either blank disables sign-in rather than widening it.
+#
+# Deliberately SEPARATE from GRAPH_CLIENT_ID/GRAPH_TENANT_ID below. That registration is
+# app-only and sends mail as a service; this one signs users in interactively and needs a
+# redirect URI per environment. They can point at the same registration if an administrator
+# would rather maintain one, but nothing here assumes it.
+SSO_ENABLED = os.environ.get('SSO_ENABLED', 'False') == 'True'
+SSO_CLIENT_ID = os.environ.get('SSO_CLIENT_ID', '')
+SSO_TENANT_ID = os.environ.get('SSO_TENANT_ID', '')
+
 # Refresh token cookie
 REFRESH_COOKIE_NAME = 'refresh_token'
 REFRESH_COOKIE_PATH = '/api/auth/'

@@ -34,6 +34,7 @@ _PAGE_BY_ENTITY = {
 # them under User & Access Management would wrongly imply an admin did something to an account.
 _PAGE_BY_ACTION = {
     'login': 'Sign In',
+    'login_sso': 'Sign In',
     'login_failed': 'Sign In',
     'login_blocked': 'Sign In',
     'logout': 'Sign In',
@@ -75,6 +76,7 @@ _DESCRIPTIONS = {
     ('deactivate', 'user'): 'Deactivated a user account',
     ('delete', 'user'): 'Deleted a user account',
     ('login', 'user'): 'Signed in',
+    ('login_sso', 'user'): 'Signed in with a Microsoft account',
     ('login_failed', 'user'): 'Failed sign-in attempt',
     ('login_blocked', 'user'): 'Sign-in attempt on a deactivated account',
     ('logout', 'user'): 'Signed out',

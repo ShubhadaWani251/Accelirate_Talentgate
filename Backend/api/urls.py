@@ -14,6 +14,9 @@ urlpatterns = [
     path('diagnostics/', views.DiagnosticsView.as_view(), name='diagnostics'),
 
     path('auth/login/', views.LoginView.as_view(), name='auth-login'),
+    # Microsoft work-account sign-in. Alongside the password form above, never instead of it
+    # - see config/settings.SSO_ENABLED.
+    path('auth/sso/', views.SsoLoginView.as_view(), name='auth-sso'),
     path('auth/logout/', views.LogoutView.as_view(), name='auth-logout'),
     path('auth/refresh/', views.RefreshView.as_view(), name='auth-refresh'),
     path('auth/forgot-password/', views.ForgotPasswordView.as_view(), name='auth-forgot-password'),

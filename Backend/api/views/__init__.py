@@ -2,6 +2,7 @@ from .health import health_check, readiness_check
 from .diagnostics import DiagnosticsView
 from .auth import (
     LoginView,
+    SsoLoginView,
     LogoutView,
     RefreshView,
     ForgotPasswordView,
@@ -75,7 +76,7 @@ __all__ = [
     'health_check',
     'readiness_check',
     'DiagnosticsView',
-    'LoginView', 'LogoutView', 'RefreshView',
+    'LoginView', 'SsoLoginView', 'LogoutView', 'RefreshView',
     'ForgotPasswordView', 'ResendOtpView', 'VerifyOtpResetView',
     'ChangePasswordView', 'MeView',
     'BatchListCreateView', 'BatchDetailView', 'BatchDeactivateView', 'BatchCompleteView',

@@ -3,6 +3,12 @@ import axiosClient from './axiosClient';
 export const login = (email, password) =>
   axiosClient.post('/auth/login/', { email, password }).then((r) => r.data);
 
+// Exchanges an Entra ID token (from features/auth/msal.signInWithMicrosoft) for one of OUR
+// sessions. Returns the same {access_token, user} a password login does and sets the same
+// refresh cookie, so every caller downstream is identical - see views/auth.SsoLoginView.
+export const ssoLogin = (idToken) =>
+  axiosClient.post('/auth/sso/', { id_token: idToken }).then((r) => r.data);
+
 export const logout = () => axiosClient.post('/auth/logout/').then((r) => r.data);
 
 // Deduped so that React 18 StrictMode's double-invoke of the boot effect (mount -> unmount ->

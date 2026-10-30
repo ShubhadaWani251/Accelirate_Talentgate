@@ -18,6 +18,7 @@ from api.serializers.auth import (
     UserProfileSerializer,
     VerifyOtpResetSerializer,
 )
+from api.services import sso
 from api.services.lockout import clear_failed_attempts, is_locked_out, register_failed_attempt
 from api.services.otp import OtpCooldownError, issue_otp
 from api.services.passwords import is_password_reused, record_password_history
@@ -134,6 +135,85 @@ class LoginView(APIView):
         user.last_login_at = timezone.now()
         user.save(update_fields=['last_login_at'])
         _log(request, user, 'login')
+
+        response = Response({
+            'access_token': access_token,
+            'user': UserProfileSerializer(user).data,
+        })
+        _set_refresh_cookie(response, refresh_token)
+        return response
+
+
+@method_decorator(ratelimit(key=ratelimit_ip_key, rate='10/m', method='POST', block=False), name='post')
+class SsoLoginView(APIView):
+    """POST /api/auth/sso/ - sign in with a Microsoft work account.
+
+    Takes an Entra ID token the SPA obtained through MSAL, and on success returns exactly what
+    LoginView returns: an access token, the user, and the refresh cookie. The browser cannot
+    tell the two apart afterwards, which is the point - SSO replaces how identity is PROVEN,
+    not what a session is.
+
+    This endpoint never creates an account (see services/sso's own note). An address with no
+    account is refused by name, because "ask an administrator for access" is something the
+    person can act on, while the generic failure a password login gives would leave them
+    retrying a password they do not have.
+
+    Rate-limited like the password form. Validating a token is cheap but fetching the JWKS is
+    not free, and an unauthenticated endpoint that reaches out to Entra per request is worth a
+    ceiling.
+    """
+    authentication_classes = []   # see LoginView - a stale access token must not pre-empt this
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        if getattr(request, 'limited', False):
+            return Response({'detail': 'Too many sign-in attempts. Please try again shortly.'},
+                             status=status.HTTP_429_TOO_MANY_REQUESTS)
+
+        if not sso.is_configured():
+            return Response({'detail': 'Single sign-on is not enabled.'},
+                             status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            identity = sso.validate_id_token(request.data.get('id_token'))
+        except sso.SsoError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_401_UNAUTHORIZED)
+
+        email = identity['email']
+        try:
+            user = User.objects.select_related('role').get(email__iexact=email, is_deleted=False)
+        except User.DoesNotExist:
+            # Nothing is logged: there is no account to log it against, and AuditLog.user would
+            # have to be null, which renders as "Deleted user" on a screen about a person who
+            # never existed here.
+            return Response(
+                {'detail': f'No AcceliAssess account exists for {email}. '
+                           f'Ask an administrator to create one.'},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        if not user.is_active:
+            # Same reasoning as the password path above: a deactivated account being signed
+            # into is the attempt an administrator would most want to find afterwards.
+            _log(request, user, 'login_blocked')
+            return Response({'detail': 'This account has been deactivated.'},
+                             status=status.HTTP_401_UNAUTHORIZED)
+
+        # A password login's lockout counter is keyed on the email, and a successful SSO
+        # sign-in is as good a proof of identity as the password it would have cleared.
+        clear_failed_attempts(email)
+
+        # must_change_password is deliberately left ALONE rather than cleared. It means "the
+        # current password was chosen by somebody else", which is still true - signing in
+        # around that password does not make it the holder's. It also stays harmless: the flag
+        # gates the staff endpoints, and someone who only ever uses SSO is sent to the
+        # change-password screen once and is then done with it.
+        refresh_token, access_token = issue_tokens_for_user(user)
+        user.last_login_at = timezone.now()
+        user.save(update_fields=['last_login_at'])
+        # Its own action type, not 'login'. The audit screen's whole job is answering how
+        # somebody got in, and a password sign-in and a federated one are different answers.
+        _log(request, user, 'login_sso')
 
         response = Response({
             'access_token': access_token,

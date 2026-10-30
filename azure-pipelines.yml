@@ -31,6 +31,16 @@ variables:
   azureServiceConnection: 'Aptitude-Staging'
   resourceGroupName: 'AccelirateInternalProjects'
   webAppName: 'app-aptitude-stg-eastus'
+  # Microsoft sign-in. Both are the Entra app registration's public identifiers - an
+  # application id and a directory id, neither secret and neither usable on its own, which is
+  # why they sit here in plain sight next to the app name rather than in a variable group.
+  #
+  # Blank disables the feature rather than half-enabling it (see the build step below). Fill
+  # them in once the registration exists; the BACKEND half is separate and lives in each App
+  # Service's own settings as SSO_ENABLED / SSO_CLIENT_ID / SSO_TENANT_ID, because that half
+  # is read at runtime and must be able to differ per environment.
+  ssoClientId: ''
+  ssoTenantId: ''
 
 stages:
   - stage: CI
@@ -132,6 +142,20 @@ stages:
               # Relative, not absolute: the API is same-origin now, so the bundle must not bake in
               # a hostname. This is also what Frontend/Dockerfile passes for the nginx stack.
               VITE_API_BASE_URL: /api
+              # Microsoft sign-in, and it has to be HERE rather than in App Service settings:
+              # Vite inlines import.meta.env at BUILD time, so a value set on the web app arrives
+              # long after the bundle that needed it was written.
+              #
+              # One pair of values covers both environments. The client id is per app
+              # REGISTRATION, not per deployment, and staging and production promote the same
+              # artifact - what differs between them is window.location.origin at runtime, which
+              # is why the registration carries a redirect URI for each.
+              #
+              # Empty until the registration exists, which is the safe state rather than a
+              # broken one: src/features/auth/msal.isSsoConfigured() returns false, the login
+              # screen shows the password form alone, and nothing on it is half-wired.
+              VITE_SSO_CLIENT_ID: $(ssoClientId)
+              VITE_SSO_TENANT_ID: $(ssoTenantId)
 
           - script: |
               set -e

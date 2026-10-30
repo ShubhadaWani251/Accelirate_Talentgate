@@ -294,6 +294,29 @@ h1, h2, h3, h4, .brand, .btn, .box-label {
 .auth-card h3 { margin: 0 0 4px; font-size: 18px; color: var(--brand-navy); }
 .auth-card .auth-sub { font-size: 12.5px; color: var(--muted); margin-bottom: 20px; line-height: 1.5; }
 
+/* Microsoft sign-in. Deliberately NOT .primary: there is one primary action per screen, and
+   making both routes blue would leave neither reading as the recommended one. A white button
+   with the real four-colour mark is also what Microsoft's own branding guidance asks for. */
+.btn.sso-btn {
+  background: #fff; color: var(--text); border: 1px solid var(--line-soft);
+  font-weight: 600;
+}
+.btn.sso-btn:hover:not(:disabled) { border-color: var(--brand-blue); color: var(--text); }
+.btn.sso-btn svg { flex-shrink: 0; }
+
+/* "or" sitting on a rule, separating the two sign-in routes. The lines are drawn by the
+   pseudo-elements rather than a border on the container, so the word knocks a gap in the rule
+   instead of sitting on top of it. */
+.auth-divider {
+  display: flex; align-items: center; gap: 10px;
+  margin: 16px 0; color: var(--muted); font-size: 11.5px; text-transform: uppercase;
+  letter-spacing: .4px;
+}
+.auth-divider::before,
+.auth-divider::after {
+  content: ''; flex: 1; height: 1px; background: var(--line-soft);
+}
+
 .field { margin-bottom: 15px; }
 .field label { display: block; font-size: 12.5px; font-weight: 500; color: #4a5160; margin-bottom: 5px; }
 .field input, .field select, .field textarea {
