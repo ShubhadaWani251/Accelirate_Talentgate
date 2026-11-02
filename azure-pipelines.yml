@@ -35,12 +35,15 @@ variables:
   # application id and a directory id, neither secret and neither usable on its own, which is
   # why they sit here in plain sight next to the app name rather than in a variable group.
   #
-  # Blank disables the feature rather than half-enabling it (see the build step below). Fill
-  # them in once the registration exists; the BACKEND half is separate and lives in each App
-  # Service's own settings as SSO_ENABLED / SSO_CLIENT_ID / SSO_TENANT_ID, because that half
-  # is read at runtime and must be able to differ per environment.
-  ssoClientId: ''
-  ssoTenantId: ''
+  # Blanking either one disables the feature rather than half-enabling it (see the build step
+  # below), which is what a deployment without a registration should get.
+  #
+  # The BACKEND half is separate and lives in each App Service's own settings as SSO_ENABLED /
+  # SSO_CLIENT_ID / SSO_TENANT_ID, because that half is read at runtime and must be able to
+  # differ per environment. Setting these two alone shows the button and gets a token; without
+  # the App Service settings the exchange then fails with "Single sign-on is not enabled".
+  ssoClientId: 'a3e331d0-63cc-4db1-a95f-45ff778541e9'
+  ssoTenantId: '9cf9babb-7d7d-4d1c-be6e-2b6d5d928bb6'
 
 stages:
   - stage: CI
@@ -151,8 +154,14 @@ stages:
               # artifact - what differs between them is window.location.origin at runtime, which
               # is why the registration carries a redirect URI for each.
               #
-              # Empty until the registration exists, which is the safe state rather than a
-              # broken one: src/features/auth/msal.isSsoConfigured() returns false, the login
+              # Neither is a secret: both are inlined into the bundle this build produces, which
+              # every deployment then serves publicly. A SPA client id is a public identifier by
+              # design - it names an application, it does not authorise anything, and the
+              # redirect URIs registered against it are what actually constrain where a token
+              # can be returned.
+              #
+              # Blank is the safe state rather than a broken one, and is what a deployment with
+              # no registration should get: msal.isSsoConfigured() returns false, the login
               # screen shows the password form alone, and nothing on it is half-wired.
               VITE_SSO_CLIENT_ID: $(ssoClientId)
               VITE_SSO_TENANT_ID: $(ssoTenantId)
