@@ -383,9 +383,20 @@ OTP_RESEND_COOLDOWN_SECONDS = int(os.environ.get('OTP_RESEND_COOLDOWN_SECONDS', 
 # app-only and sends mail as a service; this one signs users in interactively and needs a
 # redirect URI per environment. They can point at the same registration if an administrator
 # would rather maintain one, but nothing here assumes it.
-SSO_ENABLED = os.environ.get('SSO_ENABLED', 'False') == 'True'
-SSO_CLIENT_ID = os.environ.get('SSO_CLIENT_ID', '')
-SSO_TENANT_ID = os.environ.get('SSO_TENANT_ID', '')
+# Defaulted rather than left blank, so an environment gets single sign-on without anyone
+# having to add three App Service settings to it by hand. The environment still WINS where it
+# is set, which is what lets one deployment switch SSO off (SSO_ENABLED=False) without a code
+# change, or point at a different registration.
+#
+# Hardcoding these two is safe in a way hardcoding a secret never is. A SPA client id and a
+# directory id are public identifiers: both are already inlined into the JavaScript bundle
+# every deployment serves, so anyone can read them from the browser. Neither authorises
+# anything on its own - what decides where a token may be returned is the redirect URIs
+# registered against the application in Entra, which is not in this repository and cannot be
+# changed from it. The thing to protect here is that list, not these strings.
+SSO_ENABLED = os.environ.get('SSO_ENABLED', 'True') == 'True'
+SSO_CLIENT_ID = os.environ.get('SSO_CLIENT_ID', 'a3e331d0-63cc-4db1-a95f-45ff778541e9')
+SSO_TENANT_ID = os.environ.get('SSO_TENANT_ID', '9cf9babb-7d7d-4d1c-be6e-2b6d5d928bb6')
 
 # Refresh token cookie
 REFRESH_COOKIE_NAME = 'refresh_token'
