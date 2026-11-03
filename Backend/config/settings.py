@@ -517,6 +517,25 @@ SECURE_HSTS_SECONDS = 31536000 if SECURE_SSL_REDIRECT else 0
 SECURE_HSTS_INCLUDE_SUBDOMAINS = SECURE_SSL_REDIRECT
 SECURE_HSTS_PRELOAD = SECURE_SSL_REDIRECT
 
+# Django defaults this to 'same-origin', which breaks Microsoft sign-in outright.
+#
+# A popup that navigates to login.microsoftonline.com and back is a CROSS-ORIGIN round trip.
+# Under 'same-origin' the browser puts the returning document in a different browsing-context
+# group and severs the link both ways: window.opener is null inside the popup, and the window
+# that opened it can no longer read it. MSAL's popup flow is built entirely on that link, so
+# the result is a popup left sitting on the app with the sign-in never completing, and nothing
+# in any console to say why. That is not a theory about this setting; it is what staging did.
+#
+# 'same-origin-allow-popups' keeps the half of the protection that matters here - another site
+# opening US still cannot reach into this window - and gives up only the half that forbids
+# popups WE open from referring back. That is the documented value for exactly this case.
+#
+# The alternative is MSAL's redirect flow, which needs no opener and would let this stay
+# 'same-origin'. It is the stronger isolation, at the cost of handling the return leg on every
+# app boot for a button on one screen. Worth revisiting if this app ever needs COOP isolation
+# for its own sake rather than as a default nobody chose.
+SECURE_CROSS_ORIGIN_OPENER_POLICY = 'same-origin-allow-popups'
+
 # Client IP resolution (used for rate-limit keys and audit logs).
 # Only trust X-Forwarded-For if this app sits behind a proxy that YOU control and that
 # overwrites/strips any client-supplied XFF header - otherwise an attacker can spoof this

@@ -300,3 +300,25 @@ class TestTheRoleComesFromThisApp:
         user.save(update_fields=['role'])
 
         assert post_sso(api_client, make_token(signing_key)).data['user']['role_code'] == 'admin'
+
+
+class TestTheOpenerPolicyAllowsThePopup:
+    """Cross-Origin-Opener-Policy has to permit the sign-in popup to talk to its opener.
+
+    Django defaults this to 'same-origin', which severs window.opener when the popup returns
+    from login.microsoftonline.com - a cross-origin round trip. MSAL's popup flow is built on
+    that link, so the default leaves a popup stranded on the app and a sign-in that never
+    finishes, with nothing logged anywhere to explain it. Staging did exactly that.
+
+    Pinned because the failure is invisible from the code: the setting lives in settings.py,
+    the symptom appears in a browser, and nothing connects the two without this test.
+    """
+
+    def test_the_header_permits_popups(self, client):
+        response = client.get('/api/health/')
+
+        assert response.headers.get('Cross-Origin-Opener-Policy') == 'same-origin-allow-popups'
+
+    def test_it_is_not_left_on_djangos_default(self, settings):
+        """'same-origin' is the value that breaks it - name it so the diff is unmissable."""
+        assert settings.SECURE_CROSS_ORIGIN_OPENER_POLICY != 'same-origin'
