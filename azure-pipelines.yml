@@ -42,7 +42,7 @@ variables:
   # SSO_CLIENT_ID / SSO_TENANT_ID, because that half is read at runtime and must be able to
   # differ per environment. Setting these two alone shows the button and gets a token; without
   # the App Service settings the exchange then fails with "Single sign-on is not enabled".
-  ssoClientId: 'a3e331d0-63cc-4db1-a95f-45ff778541e9'
+  ssoClientId: 'd25280b9-2e63-42c0-be9b-7475fbbc67ef'
   ssoTenantId: '9cf9babb-7d7d-4d1c-be6e-2b6d5d928bb6'
 
 stages:

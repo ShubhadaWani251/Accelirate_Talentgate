@@ -379,10 +379,13 @@ OTP_RESEND_COOLDOWN_SECONDS = int(os.environ.get('OTP_RESEND_COOLDOWN_SECONDS', 
 # is the audience every incoming ID token must carry and SSO_TENANT_ID the only directory
 # accepted, so leaving either blank disables sign-in rather than widening it.
 #
-# Deliberately SEPARATE from GRAPH_CLIENT_ID/GRAPH_TENANT_ID below. That registration is
-# app-only and sends mail as a service; this one signs users in interactively and needs a
-# redirect URI per environment. They can point at the same registration if an administrator
-# would rather maintain one, but nothing here assumes it.
+# A SEPARATE registration from GRAPH_CLIENT_ID/GRAPH_TENANT_ID below, and the separation is
+# the point rather than an accident of history. That one is a confidential client: app-only,
+# holding a secret, sending mail as a service. This one is a PUBLIC client - a browser SPA
+# doing PKCE, which can keep no secret at all, and which needs a redirect URI registered per
+# environment. Giving this registration a client secret would be giving it something it has
+# nowhere to put: no code path reads one, and there is no SSO_CLIENT_SECRET setting to hold it.
+# The two were briefly the same registration; they are not, and should not be again.
 # Defaulted rather than left blank, so an environment gets single sign-on without anyone
 # having to add three App Service settings to it by hand. The environment still WINS where it
 # is set, which is what lets one deployment switch SSO off (SSO_ENABLED=False) without a code
@@ -395,7 +398,7 @@ OTP_RESEND_COOLDOWN_SECONDS = int(os.environ.get('OTP_RESEND_COOLDOWN_SECONDS', 
 # registered against the application in Entra, which is not in this repository and cannot be
 # changed from it. The thing to protect here is that list, not these strings.
 SSO_ENABLED = os.environ.get('SSO_ENABLED', 'True') == 'True'
-SSO_CLIENT_ID = os.environ.get('SSO_CLIENT_ID', 'a3e331d0-63cc-4db1-a95f-45ff778541e9')
+SSO_CLIENT_ID = os.environ.get('SSO_CLIENT_ID', 'd25280b9-2e63-42c0-be9b-7475fbbc67ef')
 SSO_TENANT_ID = os.environ.get('SSO_TENANT_ID', '9cf9babb-7d7d-4d1c-be6e-2b6d5d928bb6')
 
 # Refresh token cookie
