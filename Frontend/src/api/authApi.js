@@ -3,7 +3,7 @@ import axiosClient from './axiosClient';
 export const login = (email, password) =>
   axiosClient.post('/auth/login/', { email, password }).then((r) => r.data);
 
-// Exchanges an Entra ID token (from features/auth/msal.signInWithMicrosoft) for one of OUR
+// Exchanges an Entra ID token (from features/auth/msal.completeMicrosoftSignIn) for one of OUR
 // sessions. Returns the same {access_token, user} a password login does and sets the same
 // refresh cookie, so every caller downstream is identical - see views/auth.SsoLoginView.
 export const ssoLogin = (idToken) =>

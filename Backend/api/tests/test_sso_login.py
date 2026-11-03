@@ -322,3 +322,76 @@ class TestTheOpenerPolicyAllowsThePopup:
     def test_it_is_not_left_on_djangos_default(self, settings):
         """'same-origin' is the value that breaks it - name it so the diff is unmissable."""
         assert settings.SECURE_CROSS_ORIGIN_OPENER_POLICY != 'same-origin'
+
+
+class TestAHandoverPasswordDoesNotTrapAnSsoUser:
+    """Every account is created with must_change_password set, so this is the FIRST sign-in of
+    every new user - not an edge case.
+
+    The flag blocks every staff endpoint (api/permissions.py) and the only screen that clears it
+    asks for the current password. Someone who has only ever signed in with Microsoft does not
+    have that password, so leaving the flag set walled them into /profile with no way out and no
+    way back.
+    """
+
+    def test_signing_in_clears_the_flag(self, make_user, api_client, signing_key):
+        user = make_user(email='staff@accelirate.com')
+        user.must_change_password = True
+        user.save(update_fields=['must_change_password'])
+
+        response = post_sso(api_client, make_token(signing_key))
+
+        assert response.status_code == 200
+        assert response.data['user']['must_change_password'] is False
+        user.refresh_from_db()
+        assert user.must_change_password is False
+
+    def test_the_handover_password_stops_working(self, make_user, api_client, signing_key):
+        """Retired, not merely un-flagged. The flag means a second party is holding a live
+        password for this account; making that password unusable settles that more completely
+        than a password change would, and leaves Forgot Password as the way to set a real one.
+        """
+        user = make_user(email='staff@accelirate.com')
+        user.set_password('HandedOver123!')
+        user.must_change_password = True
+        user.save()
+
+        assert post_sso(api_client, make_token(signing_key)).status_code == 200
+
+        user.refresh_from_db()
+        assert user.check_password('HandedOver123!') is False
+        login = api_client.post(
+            '/api/auth/login/',
+            {'email': 'staff@accelirate.com', 'password': 'HandedOver123!'},
+            format='json',
+        )
+        assert login.status_code == 401
+
+    def test_the_session_it_just_issued_is_not_born_stale(self, make_user, api_client,
+                                                          signing_key):
+        """Retiring the password writes password_changed_at, and tokens.is_token_stale compares
+        `iat` against it - so a token minted a second too early would be rejected on its very
+        first use, which is the kind of failure that only shows up in production.
+        """
+        user = make_user(email='staff@accelirate.com')
+        user.must_change_password = True
+        user.save(update_fields=['must_change_password'])
+
+        response = post_sso(api_client, make_token(signing_key))
+        assert response.status_code == 200
+
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {response.data['access_token']}")
+        assert api_client.get('/api/auth/me/').status_code == 200
+
+    def test_an_account_already_on_its_own_password_is_left_alone(self, make_user, api_client,
+                                                                  signing_key):
+        """Nothing to retire here - the password is the holder's, and SSO must not touch it."""
+        user = make_user(email='staff@accelirate.com')
+        user.set_password('TheirOwnPass123!')
+        user.save()
+        assert user.must_change_password is False
+
+        assert post_sso(api_client, make_token(signing_key)).status_code == 200
+
+        user.refresh_from_db()
+        assert user.check_password('TheirOwnPass123!') is True

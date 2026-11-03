@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { sessionCleared, selectUser } from './authSlice';
+import { forgetMicrosoftAccount } from './msal';
 import * as authApi from '../../api/authApi';
 
 /**
@@ -32,6 +33,11 @@ export default function useLogout() {
     } catch {
       // proceed to clear client-side session regardless
     }
+    // Drops MSAL's cached account alongside our own session. Without this the library's
+    // sessionStorage entries outlived the logout they belonged to - this was written when SSO
+    // was added and then never called from anywhere, which is the whole of the bug. Local only:
+    // it does NOT end the person's Microsoft session, for the reason msal.js gives.
+    await forgetMicrosoftAccount();
     // Capture the role before the store is cleared so the Signed Out screen can name the
     // console the user just left, per the wireframe.
     const roleCode = user?.role_code;

@@ -203,14 +203,33 @@ class SsoLoginView(APIView):
         # sign-in is as good a proof of identity as the password it would have cleared.
         clear_failed_attempts(email)
 
-        # must_change_password is deliberately left ALONE rather than cleared. It means "the
-        # current password was chosen by somebody else", which is still true - signing in
-        # around that password does not make it the holder's. It also stays harmless: the flag
-        # gates the staff endpoints, and someone who only ever uses SSO is sent to the
-        # change-password screen once and is then done with it.
+        # A handover password - one that provisioning or `manage.py reset_user_password` chose
+        # and then mailed or read out to somebody - is exactly what must_change_password exists
+        # to retire. Leaving it set here locks an SSO-only account out of the entire app:
+        # permissions.py blocks every staff endpoint while the flag is set, and the only screen
+        # that clears it asks for the CURRENT password, which a person who has only ever signed
+        # in with Microsoft does not have. They would land on /profile with no way forward and
+        # no way back. That is not a theoretical edge: every account starts life this way, so
+        # it is the state of every new user on their first Microsoft sign-in.
+        #
+        # The password is therefore RETIRED rather than replaced. make_password(None) stores an
+        # unusable hash, so nobody - including whoever generated, mailed or typed it - can sign
+        # in with it again. That serves the flag's real purpose (no second party is holding a
+        # live password for this account) more completely than a password change would, and
+        # Forgot Password remains the way to set a real one if this person ever wants the
+        # password form. Written before the tokens are issued on purpose: tokens.is_token_stale
+        # compares `iat` against password_changed_at, and a token minted in the second BEFORE
+        # this timestamp would be born stale.
+        retired_fields = []
+        if user.must_change_password:
+            user.password_hash = make_password(None)
+            user.password_changed_at = timezone.now()
+            user.must_change_password = False
+            retired_fields = ['password_hash', 'password_changed_at', 'must_change_password']
+
         refresh_token, access_token = issue_tokens_for_user(user)
         user.last_login_at = timezone.now()
-        user.save(update_fields=['last_login_at'])
+        user.save(update_fields=['last_login_at', *retired_fields])
         # Its own action type, not 'login'. The audit screen's whole job is answering how
         # somebody got in, and a password sign-in and a federated one are different answers.
         _log(request, user, 'login_sso')

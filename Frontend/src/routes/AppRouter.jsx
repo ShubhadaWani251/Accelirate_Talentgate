@@ -6,6 +6,8 @@ import {
   authCheckStarted, credentialsReceived, sessionCleared, hadSessionBefore,
   selectAuthStatus, selectRoleCode,
 } from '../features/auth/authSlice';
+import { completeMicrosoftSignIn, hasMicrosoftRedirectResponse } from '../features/auth/msal';
+import { describeSsoError, stashSsoError } from '../features/auth/ssoError';
 import * as authApi from '../api/authApi';
 import ProtectedRoute from '../components/common/ProtectedRoute';
 import ProtectedLayout from '../components/layout/ProtectedLayout';
@@ -68,6 +70,24 @@ function ExamPortalLayout() {
   );
 }
 
+// Completing a Microsoft sign-in must happen exactly once per page load, and StrictMode invokes
+// the boot effect twice. Both halves matter: MSAL would redeem a single-use authorization code
+// twice, and our own endpoint would mint two sessions and write two "Signed in with a Microsoft
+// account" rows into the audit log - a screen whose entire value is being an accurate record of
+// who did what. One module-level promise, shared by both invocations, the way authApi.refresh
+// solves the same problem for the silent session check.
+let ssoCompletion = null;
+
+function completeSsoOnce() {
+  if (!ssoCompletion) {
+    ssoCompletion = (async () => {
+      const idToken = await completeMicrosoftSignIn();
+      return idToken ? authApi.ssoLogin(idToken) : null;
+    })();
+  }
+  return ssoCompletion;
+}
+
 function RoleHome() {
   const roleCode = useSelector(selectRoleCode);
   if (roleCode === 'admin') return <Navigate to="/admin/dashboard" replace />;
@@ -81,17 +101,49 @@ export default function AppRouter() {
 
   useEffect(() => {
     dispatch(authCheckStarted());
-    authApi
-      .refresh()
-      .then((data) => dispatch(credentialsReceived(data)))
-      .catch(() => {
+
+    (async () => {
+      // Microsoft sign-in returns to this origin as an ordinary page load carrying its response
+      // in the URL fragment, so the FIRST thing app boot does is ask whether this load is one.
+      // It almost never is: hasMicrosoftRedirectResponse() looks at the URL and nothing else,
+      // so MSAL stays unloaded on every normal boot, including every password login.
+      if (hasMicrosoftRedirectResponse()) {
+        try {
+          const data = await completeSsoOnce();
+          if (data) {
+            // One of OUR sessions - identical to what a password login produces, so everything
+            // downstream (RoleHome, ProtectedRoute, the idle logout) is unchanged. The landing
+            // route is "/", which RoleHome turns into the dashboard for this role.
+            dispatch(credentialsReceived(data));
+            return;
+          }
+        } catch (err) {
+          // Carried across the navigation to /login, which is where it has to be read - see
+          // features/auth/ssoError.js. Not a toast: this is the reason a sign-in failed, and it
+          // belongs next to the button that failed, not in something that disappears.
+          stashSsoError(describeSsoError(err));
+          // MSAL strips its response off the URL when it completes one, but not when it throws
+          // partway through, and a failed response left in the address bar is a trap: reloading
+          // the page - the obvious thing to try next - would replay the same dead sign-in
+          // instead of showing the login screen.
+          window.history.replaceState(null, '', window.location.pathname + window.location.search);
+          dispatch(sessionCleared());
+          return;
+        }
+        // Fell through: the fragment was not ours after all. Carry on with the normal check.
+      }
+
+      try {
+        dispatch(credentialsReceived(await authApi.refresh()));
+      } catch {
         // Read BEFORE dispatching - sessionCleared() clears the marker itself. Only warn when
         // this browser actually had a session to lose; a first-ever visit (nothing logged in,
         // nothing to refresh) hits this exact same failure and must stay silent.
         const shouldWarn = hadSessionBefore();
         dispatch(sessionCleared());
         if (shouldWarn) toast.error('Session expired. Please log in again.');
-      });
+      }
+    })();
   }, [dispatch]);
 
   // App boot: the session refresh decides which routes even exist for this user, so nothing

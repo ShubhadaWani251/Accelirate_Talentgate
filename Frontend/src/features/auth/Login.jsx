@@ -5,7 +5,8 @@ import * as yup from 'yup';
 import { useNavigate, Link } from 'react-router-dom';
 import { useDispatch } from 'react-redux';
 import { credentialsReceived } from './authSlice';
-import { isSsoConfigured, signInWithMicrosoft } from './msal';
+import { isSsoConfigured, startMicrosoftSignIn } from './msal';
+import { describeSsoError, takeSsoError } from './ssoError';
 import * as authApi from '../../api/authApi';
 import BrandHeader from '../../components/layout/BrandHeader';
 import BrandFooter from '../../components/layout/BrandFooter';
@@ -34,7 +35,12 @@ function MicrosoftLogo() {
 export default function Login() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
-  const [serverError, setServerError] = useState('');
+  // Seeded from the handoff, not empty: a Microsoft sign-in that fails does so during the app
+  // boot at the redirect URI, one navigation before this screen exists. takeSsoError() clears
+  // it as it reads, so it shows once and does not come back on a reload. The lazy initialiser
+  // matters - a bare takeSsoError() would run on every render and consume the message during
+  // the first one, before React had committed anything.
+  const [serverError, setServerError] = useState(takeSsoError);
   const [submitting, setSubmitting] = useState(false);
   const [ssoBusy, setSsoBusy] = useState(false);
   const {
@@ -64,27 +70,19 @@ export default function Login() {
     }
   }
 
+  // Sends the browser to Microsoft. Nothing after the await runs on success - the page is gone,
+  // and the response comes back to a fresh app boot, which finishes the job (routes/AppRouter).
+  // ssoBusy is therefore left ON deliberately: the button stays disabled and spinning for the
+  // moment before the navigation takes effect, which is exactly right, and a second click in
+  // that window would start a second sign-in.
   async function onMicrosoftSignIn() {
     setServerError('');
     setSsoBusy(true);
     try {
-      const idToken = await signInWithMicrosoft();
-      onSignedIn(await authApi.ssoLogin(idToken));
+      await startMicrosoftSignIn();
     } catch (err) {
-      // Closing the popup is a decision, not a failure - saying nothing is the right response
-      // to someone changing their mind.
-      if (err?.cancelled) return;
-      if (err?.popupBlocked) {
-        setServerError('Your browser blocked the Microsoft sign-in window. '
-          + 'Allow pop-ups for this site, or sign in with your password below.');
-        return;
-      }
-      // A server rejection (unknown address, deactivated account, wrong directory) already
-      // carries a message written for the person reading it; anything else came from MSAL.
-      setServerError(err.response?.data?.detail
-        || 'Microsoft sign-in could not be completed. Please try again, '
-           + 'or sign in with your password below.');
-    } finally {
+      console.error('Microsoft sign-in failed', err);
+      setServerError(describeSsoError(err));
       setSsoBusy(false);
     }
   }
