@@ -243,3 +243,60 @@ class TestWhenItIsSwitchedOff:
         setattr(settings, missing, '')
 
         assert sso.is_configured() is False
+
+
+class TestTheRoleComesFromThisApp:
+    """Which dashboard somebody lands on is decided HERE, not by Microsoft.
+
+    Entra answers "who is this"; the roles table answers "what may they do". The frontend
+    routes on role_code from this response (features/auth/Login.onSignedIn, shared by both
+    sign-in routes), so these assertions are what stand behind an admin reaching
+    /admin/dashboard and a Staffing User reaching /ta/dashboard.
+    """
+
+    @pytest.mark.parametrize('role_code', ['ta', 'admin'])
+    def test_the_response_carries_the_account_role(self, make_user, api_client, signing_key,
+                                                   role_code):
+        make_user(role=role_code, email='staff@accelirate.com')
+
+        response = post_sso(api_client, make_token(signing_key))
+
+        assert response.status_code == 200
+        assert response.data['user']['role_code'] == role_code
+
+    def test_a_password_login_and_an_sso_login_return_the_same_role(self, make_user, api_client,
+                                                                    signing_key):
+        """The two routes must not be able to disagree about someone's access."""
+        user = make_user(role='ta', email='staff@accelirate.com')
+        user.set_password('SomePassw0rd!')
+        user.save()
+
+        by_password = api_client.post('/api/auth/login/', {
+            'email': 'staff@accelirate.com', 'password': 'SomePassw0rd!',
+        }, format='json')
+        by_sso = post_sso(api_client, make_token(signing_key))
+
+        assert by_password.data['user']['role_code'] == by_sso.data['user']['role_code'] == 'ta'
+
+    def test_the_token_cannot_grant_a_role(self, make_user, api_client, signing_key):
+        """A token claiming to be an admin does not make one. The directory is not allowed to
+        hand out access to this application - otherwise anyone who could influence a claim
+        could promote themselves."""
+        make_user(role='ta', email='staff@accelirate.com')
+
+        response = post_sso(api_client, make_token(
+            signing_key, roles=['admin'], wids=['62e90394-69f5-4237-9190-012177145e10'],
+        ))
+
+        assert response.data['user']['role_code'] == 'ta'
+
+    def test_a_role_changed_here_takes_effect_on_the_next_sign_in(self, make_user, api_client,
+                                                                  signing_key, roles):
+        """Admin -> Users stays the single place access is decided."""
+        user = make_user(role='ta', email='staff@accelirate.com')
+        assert post_sso(api_client, make_token(signing_key)).data['user']['role_code'] == 'ta'
+
+        user.role = roles['admin']
+        user.save(update_fields=['role'])
+
+        assert post_sso(api_client, make_token(signing_key)).data['user']['role_code'] == 'admin'
