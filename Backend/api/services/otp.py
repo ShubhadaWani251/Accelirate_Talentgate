@@ -95,7 +95,7 @@ def _send_otp_email_background(user, code):
 
 def send_otp_email(user, code):
     send_mail(
-        subject='AcceliAssess - Password Reset Code',
+        subject='AcceliEval - Password Reset Code',
         message=(
             f"Hello {user.first_name},\n\n"
             f"Your one-time password reset code is: {code}\n"

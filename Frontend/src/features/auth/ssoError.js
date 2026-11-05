@@ -6,7 +6,7 @@
 //
 // sessionStorage rather than localStorage: a stale error message surfacing in a different tab,
 // or tomorrow, would be worse than no message at all.
-const KEY = 'acceliassess_sso_error';
+const KEY = 'accelieval_sso_error';
 
 export function stashSsoError(message) {
   try {

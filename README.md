@@ -1,4 +1,4 @@
-# AcceliAssess
+# AcceliEval
 
 > Renamed from **TalentGate** on 2026-10-26. The product name changed; the infrastructure
 > did not. Azure resources, databases, login roles, pipeline environments and service
@@ -439,7 +439,7 @@ and production starts without it.
 
 The production stage does not run when `main` is pushed. After a staging deploy has succeeded
 and the build has been used there, open that run and start **Deploy to production**. It
-downloads that run's `acceliassess` artifact and zip-deploys it. The run has to be one whose
+downloads that run's `accelieval` artifact and zip-deploys it. The run has to be one whose
 pipeline file already contains this stage, so the first run that can be promoted is the next
 push to `main` after it landed. `talentgate-production` then waits for one approver, and the
 person who queued the run cannot approve it. Approvers are the same three people as staging.

@@ -187,7 +187,7 @@ class SsoLoginView(APIView):
             # have to be null, which renders as "Deleted user" on a screen about a person who
             # never existed here.
             return Response(
-                {'detail': f'No AcceliAssess account exists for {email}. '
+                {'detail': f'No AcceliEval account exists for {email}. '
                            f'Ask an administrator to create one.'},
                 status=status.HTTP_401_UNAUTHORIZED,
             )

@@ -1,4 +1,4 @@
-# CI/CD for AcceliAssess.
+# CI/CD for AcceliEval.
 #
 # The app deploys as ONE App Service: gunicorn serves the Django API and, via WhiteNoise, the
 # built React bundle from the same origin. That is not a packaging convenience - the refresh
@@ -199,14 +199,14 @@ stages:
               rootFolderOrFile: '$(Build.ArtifactStagingDirectory)/app'
               includeRootFolder: false
               archiveType: zip
-              archiveFile: '$(Build.ArtifactStagingDirectory)/acceliassess.zip'
+              archiveFile: '$(Build.ArtifactStagingDirectory)/accelieval.zip'
               replaceExistingArchive: true
 
           - task: PublishPipelineArtifact@1
             displayName: Publish package artifact
             inputs:
-              targetPath: '$(Build.ArtifactStagingDirectory)/acceliassess.zip'
-              artifact: acceliassess
+              targetPath: '$(Build.ArtifactStagingDirectory)/accelieval.zip'
+              artifact: accelieval
 
   - stage: DeployStaging
     displayName: Deploy to staging
@@ -229,7 +229,7 @@ stages:
             deploy:
               steps:
                 - download: current
-                  artifact: acceliassess
+                  artifact: accelieval
 
                 - task: AzureWebApp@1
                   displayName: Deploy to $(webAppName)
@@ -238,7 +238,7 @@ stages:
                     appType: webAppLinux
                     appName: '$(webAppName)'
                     resourceGroupName: '$(resourceGroupName)'
-                    package: '$(Pipeline.Workspace)/acceliassess/acceliassess.zip'
+                    package: '$(Pipeline.Workspace)/accelieval/accelieval.zip'
                     # Runs migrations and collectstatic before handing off to gunicorn. App Service
                     # never runs docker-entrypoint.sh on a code deployment, so this script is the
                     # only thing that applies migrations - see Backend/startup.sh.
@@ -294,7 +294,7 @@ stages:
                 # old stage would have failed here looking for an artifact that no longer
                 # exists under that name.
                 - download: current
-                  artifact: acceliassess
+                  artifact: accelieval
 
                 - task: AzureWebApp@1
                   displayName: Deploy to $(webAppName)
@@ -303,5 +303,5 @@ stages:
                     appType: webAppLinux
                     appName: '$(webAppName)'
                     resourceGroupName: '$(resourceGroupName)'
-                    package: '$(Pipeline.Workspace)/acceliassess/acceliassess.zip'
+                    package: '$(Pipeline.Workspace)/accelieval/accelieval.zip'
                     startUpCommand: 'sh startup.sh'

@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Registers AcceliAssess's housekeeping jobs with Windows Task Scheduler.
+    Registers AcceliEval's housekeeping jobs with Windows Task Scheduler.
 
 .DESCRIPTION
     The same four jobs as deploy/crontab.example, for a Windows host running the app directly
@@ -41,7 +41,7 @@
     survives the interactive user logging out. It must be able to read Backend\.env.
 
 .EXAMPLE
-    .\register-scheduled-tasks.ps1 -BackendPath C:\apps\acceliassess\Backend
+    .\register-scheduled-tasks.ps1 -BackendPath C:\apps\accelieval\Backend
 #>
 [CmdletBinding()]
 param(
@@ -66,15 +66,15 @@ if (-not (Test-Path $python)) {
 # Interval is in minutes. Every command is idempotent and returns immediately when there is
 # nothing to process, so running more often than strictly needed is safe.
 $tasks = @(
-    @{ Name = 'AcceliAssess-FinalizeExpiredAttempts'; Command = 'finalize_expired_attempts'; Minutes = 10 },
-    @{ Name = 'AcceliAssess-ProcessEmailQueue'; Command = 'process_email_queue'; Minutes = 1 },
-    @{ Name = 'AcceliAssess-TerminateStaleAttempts'; Command = 'terminate_stale_attempts'; Minutes = 1 },
-    @{ Name = 'AcceliAssess-TranscodeRecordings'; Command = 'transcode_recordings'; Minutes = 10 }
+    @{ Name = 'AcceliEval-FinalizeExpiredAttempts'; Command = 'finalize_expired_attempts'; Minutes = 10 },
+    @{ Name = 'AcceliEval-ProcessEmailQueue'; Command = 'process_email_queue'; Minutes = 1 },
+    @{ Name = 'AcceliEval-TerminateStaleAttempts'; Command = 'terminate_stale_attempts'; Minutes = 1 },
+    @{ Name = 'AcceliEval-TranscodeRecordings'; Command = 'transcode_recordings'; Minutes = 10 }
 )
 
 # Tasks a previous run of this script registered that must not keep running.
 #
-# Every TalentGate-* name: the product was renamed to AcceliAssess on 2026-10-26 and these are
+# Every TalentGate-* name: the product was renamed to AcceliEval on 2026-10-26 and these are
 # registered under the OLD names on any machine this script has already been run on. Renaming
 # the entries above without this would leave both sets registered and every job running twice.
 #
@@ -114,6 +114,6 @@ foreach ($task in $tasks) {
 
 Write-Host ''
 Write-Host 'Registered. Verify with:'
-Write-Host '  Get-ScheduledTask -TaskName "AcceliAssess-*" | Format-Table TaskName, State'
+Write-Host '  Get-ScheduledTask -TaskName "AcceliEval-*" | Format-Table TaskName, State'
 Write-Host 'Check last run results with:'
-Write-Host '  Get-ScheduledTaskInfo -TaskName "AcceliAssess-FinalizeExpiredAttempts"'
+Write-Host '  Get-ScheduledTaskInfo -TaskName "AcceliEval-FinalizeExpiredAttempts"'

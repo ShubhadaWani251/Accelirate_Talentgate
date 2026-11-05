@@ -33,7 +33,7 @@ export default function BrandHeader({ roleCode, children, onToggleNav, navOpen =
         )}
         <img src="/favicon-48.png" alt="" className="brand-logo" />
         <div className="brand-name">
-          AcceliAssess
+          AcceliEval
           <div className="brand-tagline">Candidate Evaluation Platform</div>
         </div>
       </div>

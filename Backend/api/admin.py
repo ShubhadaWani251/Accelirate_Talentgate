@@ -143,5 +143,5 @@ admin.site.register(OTPVerification)
 admin.site.register(RevokedRefreshToken)
 admin.site.register(Setting)
 
-admin.site.site_header = 'AcceliAssess (local dev only)'
-admin.site.site_title = 'AcceliAssess dev admin'
+admin.site.site_header = 'AcceliEval (local dev only)'
+admin.site.site_title = 'AcceliEval dev admin'
