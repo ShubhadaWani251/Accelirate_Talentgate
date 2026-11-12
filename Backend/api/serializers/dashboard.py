@@ -12,9 +12,9 @@ from api.services.batch_status_filter import filter_batches_by_status_group
 
 
 def _batches_qs_for(user):
-    # A TA's dashboard counts and batch table cover only their own batches; an admin sees all
-    # of them (services/access.visible_batches_qs). Routed through that one helper so the
-    # dashboard, the batch list and can_access_batch can never drift apart.
+    # Every live batch, for a Staffing User and an admin alike
+    # (services/access.visible_batches_qs). Routed through that one helper so the dashboard,
+    # the batch list and can_access_batch can never drift apart.
     return visible_batches_qs(user)
 
 
@@ -88,7 +88,7 @@ def _build_stats(batches_qs, candidates_qs):
     return {**batch_stats, **candidate_stats}
 
 
-def _build_batches_overview(batches_qs, is_admin, status_group='active'):
+def _build_batches_overview(batches_qs, status_group='active'):
     # Filtered by the unified Batch Status control - 'active' (In Progress) by default, so a
     # finished drive, an unfinished Draft upload or a deactivated batch don't sit in the normal
     # view alongside the work still being done. All three remain fully visible by switching the
@@ -125,9 +125,13 @@ def _build_batches_overview(batches_qs, is_admin, status_group='active'):
             'pass_count': batch.pass_count,
             'fail_count': batch.fail_count,
             'borderline_count': batch.borderline_count,
+            # Sent to Staffing Users as well as admins, since they now see every batch rather
+            # than only their own (services/access.visible_batches_qs). Whose batch a row is
+            # stops being implicit the moment the list stops being personal - without this the
+            # Owner column the dashboard draws would be a column of blanks. select_related
+            # above keeps it one query rather than one per row.
+            'primary_ta_user_name': batch.primary_ta_user.full_name,
         }
-        if is_admin:
-            row['primary_ta_user_name'] = batch.primary_ta_user.full_name
         rows.append(row)
     return rows
 
@@ -207,7 +211,7 @@ def build_dashboard_summary(user, batch_status='active'):
 
     response = {
         'stats': _build_stats(batches_qs, candidates_qs),
-        'batches_overview': _build_batches_overview(batches_qs, is_admin, batch_status),
+        'batches_overview': _build_batches_overview(batches_qs, batch_status),
         'batch_status_group': (batch_status or 'active').strip().lower(),
     }
     if is_admin:

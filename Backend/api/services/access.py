@@ -3,26 +3,35 @@ from django.db.models import Q
 from api.models import Batch, Candidate
 
 
-# Batch visibility is scoped by creator: a Staffing User sees only the batches they created.
-# Administrators see every batch, since they oversee the whole pipeline.
+# Every batch is visible to every member of staff. A Staffing User sees - and can manage -
+# the same batches an administrator does.
 #
-# This was previously shared across the whole TA team, deliberately, so a TA could cover a
-# colleague's drive. That was reversed on request - each TA now gets their own view. The
-# trade-off is real and worth knowing: if a TA leaves or is away, their batches are visible
-# only to an administrator until the batch is reassigned.
+# This has been both ways before. It was team-wide, then narrowed to each TA's own batches on
+# request, and is now team-wide again because that narrowing had a cost nobody wanted: a TA who
+# was away or had left took their drives with them, and covering for a colleague needed an
+# administrator. Sharing is what a recruitment desk actually does.
 #
-# Scoped on `created_by` rather than `primary_ta_user` because "created by them" is the rule
-# asked for. The two are set to the same user at creation (see BatchListCreateView.post), so
-# today they are interchangeable; they would diverge only if a batch were ever reassigned to a
-# different primary owner, and in that case the creator - not the new owner - keeps the view.
+# What this does NOT do is make a Staffing User an administrator. The difference is no longer
+# about WHICH batches, it is about which controls:
 #
-# These helpers are the single seam for the rule. Callers in batches.py, candidates.py and
+#   section cutoffs     admin-only (views/batches.BatchDetailView.patch, BatchCutoffPreviewView)
+#                       - they decide who passed, so revising one silently re-grades results
+#   default batch config  admin-only (BatchDefaultsView) - org-wide, every FUTURE batch
+#   question bank, user management, audit log   admin-only, gated by IsAdmin
+#
+# Those gates are on the role, not on ownership, so they are unaffected by anything here.
+# Everything else a batch can do - edit, upload, finalize, send invites, deactivate, complete -
+# a Staffing User may now do on any batch, not just their own. The audit log records the actor
+# on every one of them, which is what keeps a shared desk accountable.
+#
+# These helpers remain the single seam for the rule. Callers in batches.py, candidates.py and
 # dashboard.py all route through them, so changing visibility again means changing it here and
 # nowhere else.
 #
-# Note both endpoint groups are still gated to authenticated admin/TA users by IsAdminOrTA;
-# this is the *within-role* narrowing. Admin-only areas (Question Bank, User Management) are
-# unaffected - those are gated separately by IsAdmin.
+# One consequence worth knowing: the TA dashboard's batch counts are now org-wide rather than
+# personal. Its candidate counts always were (see visible_candidates_qs), so this removes an
+# inconsistency rather than creating one - the two halves of that screen now count the same
+# population.
 
 
 def is_admin(user):
@@ -32,26 +41,32 @@ def is_admin(user):
 def can_access_batch(user, batch):
     """Shared visibility rule for batch-scoped resources (batches, candidates, dashboard stats).
 
-    Admins see every batch; a Staffing User sees only batches they created.
+    Admins and Staffing Users alike reach every batch. `batch` is still taken, and the role is
+    still checked, because neither is dead weight: the role check is what keeps a principal
+    that is not staff at all out, and the parameter is what lets this become per-batch again -
+    a reassignment rule, an archive flag - without touching a single caller.
+
+    Read through getattr for the same reason permissions.py does: a candidate's ExamAttempt
+    authenticates through a different class (authentication.CandidateAttemptAuthentication) and
+    has no `role` at all, so a bare attribute read would raise here rather than refuse.
     """
-    if is_admin(user):
-        return True
-    if user.role.role_code != 'ta':
-        return False
-    return batch.created_by_id == user.user_id
+    role = getattr(user, 'role', None)
+    return getattr(role, 'role_code', None) in ('admin', 'ta')
 
 
 def visible_batches_qs(user):
-    """Batch queryset scoped by the same rule as can_access_batch.
+    """Batch queryset scoped by the same rule as can_access_batch: every live batch, for staff.
 
-    Expressed as a filter so the list, dashboard and any future batch-scoped screen narrow
-    identically rather than each re-deriving it - the bug this prevents is a batch that 404s on
-    its detail page while still being counted in a list.
+    Still takes `user`, and every caller still passes it, although nothing reads it today. That
+    is the point of a seam - the day this narrows again (by team, by region, by an archive
+    flag) it narrows here, and the list, the dashboard and every batch-scoped screen follow
+    without being found and edited one at a time. Dropping the parameter now would mean
+    putting it back into every call site then.
+
+    The bug the shared helper prevents, which outlived the per-creator rule: a batch that 404s
+    on its detail page while still being counted in a list.
     """
-    qs = Batch.objects.filter(is_deleted=False)
-    if is_admin(user):
-        return qs
-    return qs.filter(created_by=user)
+    return Batch.objects.filter(is_deleted=False)
 
 
 def visible_candidates_qs(user):

@@ -173,7 +173,7 @@ export default function Dashboard() {
         </div>
         <div className="card" style={{ marginBottom: 20 }}>
           <Skeleton width="42%" height={11} style={{ marginBottom: 14 }} />
-          <SkeletonTable rows={5} columns={isAdmin ? 10 : 9} label="Loading batches…" />
+          <SkeletonTable rows={5} columns={10} label="Loading batches…" />
         </div>
       </SkeletonPage>
     );
@@ -200,7 +200,7 @@ export default function Dashboard() {
           every candidate who has ever been uploaded, so the scope has to be stated once, here,
           where it governs the whole row below. */}
       <div className="page-sub">
-        Overview of your aptitude test batches and candidate performance.
+        Overview of the team's aptitude test batches and candidate performance.
         {' '}Figures below cover batches that are currently In Progress.
       </div>
 
@@ -255,7 +255,7 @@ export default function Dashboard() {
                 The table immediately below has Status, Pass, Fail and Borderline columns, so the
                 sentence was describing something already on screen - and at this width it pushed
                 the search and filters onto a second line. */}
-            <div className="box-sub">View and manage all your aptitude test batches</div>
+            <div className="box-sub">View and manage every aptitude test batch</div>
           </div>
           <div className="batch-controls">
             <div className="search-field">
@@ -279,7 +279,7 @@ export default function Dashboard() {
             <thead>
               <tr>
                 <th>Batch Name</th>
-                {isAdmin && <th>TA Owner</th>}
+                <th>TA Owner</th>
                 <th>Candidates</th>
                 <th>Status</th>
                 <th>Pass</th>
@@ -294,12 +294,12 @@ export default function Dashboard() {
                   previous rows belong to a different filter, so showing them faded reads as if
                   they were the (wrong) result. */}
               {tableLoading ? (
-                <SkeletonTableRows rows={5} columns={isAdmin ? 9 : 8} />
+                <SkeletonTableRows rows={5} columns={9} />
               ) : visibleBatches.length === 0 ? (
                 // Two different nothings: no batches in this status at all, versus batches that
                 // exist but none matching what was typed. Showing the status message for a failed
                 // search reads as if the filter were broken.
-                <tr><td colSpan={isAdmin ? 9 : 8}>
+                <tr><td colSpan={9}>
                   {query
                     ? `No batches match "${batchSearch.trim()}".`
                     : EMPTY_MESSAGE[batchStatus] || 'No batches yet.'}
@@ -308,7 +308,7 @@ export default function Dashboard() {
                 visibleBatches.map((b) => (
                   <tr key={b.batch_id}>
                     <td>{b.batch_name}</td>
-                    {isAdmin && <td>{b.primary_ta_user_name}</td>}
+                    <td>{b.primary_ta_user_name}</td>
                     <td>{b.total_candidates}</td>
                     <td><span className={`pill ${STATUS_PILL[b.status] || 'gray'}`}>{b.status_display}</span></td>
                     <td>{b.pass_count}</td>

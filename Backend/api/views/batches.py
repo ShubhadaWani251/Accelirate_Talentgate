@@ -124,8 +124,8 @@ class BatchListCreateView(APIView):
     permission_classes = [IsAdminOrTA]
 
     def get(self, request):
-        # Scoped to batches this user may see - own batches for a TA, all of them for an
-        # admin (services/access.visible_batches_qs). Routed through the same helper
+        # Scoped to batches this user may see, which is every live one for a Staffing User and
+        # an admin alike (services/access.visible_batches_qs). Routed through the same helper
         # can_access_batch uses, so the list and the detail page can never disagree about
         # which batches exist.
         qs = visible_batches_qs(request.user).select_related('primary_ta_user')
