@@ -31,17 +31,23 @@ variables:
   azureServiceConnection: 'Aptitude-Staging'
   resourceGroupName: 'AccelirateInternalProjects'
   webAppName: 'app-aptitude-stg-eastus'
-  # Microsoft sign-in. Both are the Entra app registration's public identifiers - an
-  # application id and a directory id, neither secret and neither usable on its own, which is
-  # why they sit here in plain sight next to the app name rather than in a variable group.
+  # Microsoft sign-in. These used to be VITE_ variables on the frontend build below, and that
+  # could not survive two environments needing different Entra registrations: this pipeline
+  # builds the frontend ONCE and promotes the one artifact to both staging and production, so
+  # anything compiled into the bundle is necessarily identical in both. Production would have
+  # signed in as staging's application.
   #
-  # Blanking either one disables the feature rather than half-enabling it (see the build step
-  # below), which is what a deployment without a registration should get.
+  # They are now written into each App Service's own settings by its deploy task, read at
+  # runtime, and handed to the browser with index.html by Backend/config/spa.py. That keeps one
+  # artifact - production runs the exact bytes tested on staging - and it leaves ONE value per
+  # environment where there were two that had to agree and nothing checked (see
+  # _runtime_config_tag for what that failure looked like).
   #
-  # The BACKEND half is separate and lives in each App Service's own settings as SSO_ENABLED /
-  # SSO_CLIENT_ID / SSO_TENANT_ID, because that half is read at runtime and must be able to
-  # differ per environment. Setting these two alone shows the button and gets a token; without
-  # the App Service settings the exchange then fails with "Single sign-on is not enabled".
+  # The value below is STAGING's registration; the DeployProduction stage overrides it with its
+  # own. Neither is a secret - an application id and a directory id are public identifiers,
+  # served to every visitor in the page, and neither authorises anything on its own. What
+  # constrains where a token may be returned is the redirect URI list held in Entra, which is
+  # not in this repository and cannot be changed from it.
   ssoClientId: 'd25280b9-2e63-42c0-be9b-7475fbbc67ef'
   ssoTenantId: '9cf9babb-7d7d-4d1c-be6e-2b6d5d928bb6'
 
@@ -145,26 +151,13 @@ stages:
               # Relative, not absolute: the API is same-origin now, so the bundle must not bake in
               # a hostname. This is also what Frontend/Dockerfile passes for the nginx stack.
               VITE_API_BASE_URL: /api
-              # Microsoft sign-in, and it has to be HERE rather than in App Service settings:
-              # Vite inlines import.meta.env at BUILD time, so a value set on the web app arrives
-              # long after the bundle that needed it was written.
+              # No VITE_SSO_* here on purpose. They would be inlined into this one bundle, which
+              # both environments then serve, so production would sign in as staging's Entra
+              # application. The values now reach the browser from whichever server rendered the
+              # page - see Backend/config/spa.py and the variables note at the top of this file.
               #
-              # One pair of values covers both environments. The client id is per app
-              # REGISTRATION, not per deployment, and staging and production promote the same
-              # artifact - what differs between them is window.location.origin at runtime, which
-              # is why the registration carries a redirect URI for each.
-              #
-              # Neither is a secret: both are inlined into the bundle this build produces, which
-              # every deployment then serves publicly. A SPA client id is a public identifier by
-              # design - it names an application, it does not authorise anything, and the
-              # redirect URIs registered against it are what actually constrain where a token
-              # can be returned.
-              #
-              # Blank is the safe state rather than a broken one, and is what a deployment with
-              # no registration should get: msal.isSsoConfigured() returns false, the login
-              # screen shows the password form alone, and nothing on it is half-wired.
-              VITE_SSO_CLIENT_ID: $(ssoClientId)
-              VITE_SSO_TENANT_ID: $(ssoTenantId)
+              # Frontend/.env still carries them for `npm run dev` and the Docker/nginx stack,
+              # where Vite or nginx serves index.html and nothing injects anything.
 
           - script: |
               set -e
@@ -239,6 +232,11 @@ stages:
                     appName: '$(webAppName)'
                     resourceGroupName: '$(resourceGroupName)'
                     package: '$(Pipeline.Workspace)/accelieval/accelieval.zip'
+                    # Which Entra registration THIS environment signs people in to. Set here
+                    # rather than by hand in the portal so it lives in source control beside the
+                    # app it belongs to, and so a new environment cannot quietly inherit another
+                    # one's. Only the settings named here are touched; the rest are left alone.
+                    appSettings: '-SSO_CLIENT_ID $(ssoClientId) -SSO_TENANT_ID $(ssoTenantId)'
                     # Runs migrations and collectstatic before handing off to gunicorn. App Service
                     # never runs docker-entrypoint.sh on a code deployment, so this script is the
                     # only thing that applies migrations - see Backend/startup.sh.
@@ -279,6 +277,21 @@ stages:
     variables:
       azureServiceConnection: 'Aptitude-Production'
       webAppName: 'app-aptitude-prod-eastus'
+      # Production's OWN Entra registration ("Accelirate Recruiter App-Prod"), overriding the
+      # staging one at the top of this file. The whole point of the runtime config channel is
+      # that this can differ: the artifact deployed here is byte-identical to the one on
+      # staging, and only this setting decides which application it signs people in to.
+      #
+      # Its redirect URIs are registered for https://accelieval.accelirate-internal.com, which
+      # is the address production is reached at. $(webAppName) above is the App Service behind
+      # that domain and answers on app-aptitude-prod-eastus.azurewebsites.net as well; that
+      # hostname is deliberately NOT registered, because nothing is published under it.
+      #
+      # Worth knowing if it ever is: msal.js asks Entra to return to window.location.origin, so
+      # sign-in works only at an address on the registration's list. Someone arriving by the
+      # azurewebsites.net name would get AADSTS50011 after the account picker - a failure that
+      # looks like a broken deployment but is only an unregistered hostname.
+      ssoClientId: '698085b2-9118-4f93-b1bc-d81f277f859d'
     jobs:
       - deployment: DeployProdWebApp
         displayName: Deploy App Service
@@ -304,4 +317,7 @@ stages:
                     appName: '$(webAppName)'
                     resourceGroupName: '$(resourceGroupName)'
                     package: '$(Pipeline.Workspace)/accelieval/accelieval.zip'
+                    # See the staging task. $(ssoClientId) resolves to this stage's override,
+                    # which is what makes the same artifact sign in to a different application.
+                    appSettings: '-SSO_CLIENT_ID $(ssoClientId) -SSO_TENANT_ID $(ssoTenantId)'
                     startUpCommand: 'sh startup.sh'

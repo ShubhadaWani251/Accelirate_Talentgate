@@ -71,3 +71,78 @@ def test_shell_rejects_unsafe_methods(client, built_frontend):
     # POST to a mistyped URL would be answered with 200 and the HTML shell.
     response = client.post('/login')
     assert response.status_code == 405
+
+
+class TestTheShellCarriesThisEnvironmentsConfig:
+    """The frontend is built once and promoted to every environment, so anything compiled into
+    the bundle is identical everywhere. Per-environment values therefore have to arrive with the
+    page instead - see config/spa._runtime_config_tag.
+
+    The failure this guards against is silent and late: production signing in as staging's Entra
+    application, which looks fine until the token is rejected at the very end.
+    """
+
+    def _config_from(self, body):
+        """The JSON the shell handed the browser, parsed back out of the script tag."""
+        import json
+        import re
+        match = re.search(r'window\.__APP_CONFIG__=(\{.*?\});', body)
+        assert match, f'no config tag in the shell: {body!r}'
+        return json.loads(match.group(1).replace(r'<\/', '</'))
+
+    @override_settings(SSO_ENABLED=True, SSO_CLIENT_ID='client-abc', SSO_TENANT_ID='tenant-xyz')
+    def test_the_configured_registration_reaches_the_browser(self, client, built_frontend):
+        config = self._config_from(client.get('/login').content.decode())
+        assert config == {'ssoClientId': 'client-abc', 'ssoTenantId': 'tenant-xyz'}
+
+    @override_settings(SSO_ENABLED=False, SSO_CLIENT_ID='client-abc', SSO_TENANT_ID='tenant-xyz')
+    def test_switching_sso_off_blanks_it_rather_than_omitting_it(self, client, built_frontend):
+        """Blank is what msal.isSsoConfigured() reads as "no registration", which hides the
+        button and leaves the password form. Omitting the tag entirely would work too, but
+        only by accident - this keeps the off state explicit.
+        """
+        config = self._config_from(client.get('/login').content.decode())
+        assert config == {'ssoClientId': '', 'ssoTenantId': ''}
+
+    @override_settings(SSO_ENABLED=True, SSO_CLIENT_ID='a</script><script>alert(1)</script>',
+                       SSO_TENANT_ID='t')
+    def test_a_value_cannot_break_out_of_its_script_tag(self, client, built_frontend):
+        """These values come from settings rather than from a request, so this is defence in
+        depth - but a config channel that can be closed by its own payload is one bad settings
+        edit away from being an injection point.
+        """
+        body = client.get('/login').content.decode()
+        assert '</script><script>alert(1)' not in body
+        # Still round-trips to the exact value, escaping and all.
+        assert self._config_from(body)['ssoClientId'] == 'a</script><script>alert(1)</script>'
+
+    @override_settings(SSO_ENABLED=True, SSO_CLIENT_ID='c', SSO_TENANT_ID='t')
+    def test_it_goes_in_the_head_when_there_is_one(self, client, tmp_path):
+        (tmp_path / 'index.html').write_text(
+            '<!doctype html><html><head><title>t</title></head><body></body></html>',
+            encoding='utf-8',
+        )
+        with override_settings(FRONTEND_DIST=tmp_path):
+            body = client.get('/login').content.decode()
+        assert body.index('__APP_CONFIG__') < body.index('</head>')
+
+    @override_settings(SSO_ENABLED=True, SSO_CLIENT_ID='c', SSO_TENANT_ID='t')
+    def test_a_shell_with_no_head_still_gets_it(self, client, built_frontend):
+        """The fixture above has no </head>, so the </body> fallback is what runs here. Both
+        positions are parsed before the deferred module bundle, so either works.
+        """
+        body = client.get('/login').content.decode()
+        assert body.index('__APP_CONFIG__') < body.index('</body>')
+
+    @override_settings(SSO_ENABLED=True, SSO_CLIENT_ID='c', SSO_TENANT_ID='t')
+    def test_an_unrecognisable_shell_is_served_intact(self, client, tmp_path):
+        """Not something Vite produces. Serving it whole - with sign-in simply off - beats
+        corrupting it, and beats prepending a script ahead of the doctype, which would drop the
+        whole page into quirks mode.
+        """
+        original = '<!doctype html><html><div id="root"></div></html>'
+        (tmp_path / 'index.html').write_text(original, encoding='utf-8')
+        with override_settings(FRONTEND_DIST=tmp_path):
+            response = client.get('/login')
+        assert response.status_code == 200
+        assert response.content.decode() == original

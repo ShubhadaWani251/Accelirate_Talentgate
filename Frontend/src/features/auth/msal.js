@@ -3,12 +3,24 @@
 // Backend/api/services/sso.py). Nothing here is a security boundary - a token this file
 // obtains is worth exactly what the server's signature, audience and tenant checks say it is.
 //
-// Configured per environment through Vite env vars rather than fetched from the API, because
-// MSAL needs the client id before any request is made. Both unset is the normal state for a
-// deployment that has not been given a registration: isSsoConfigured() returns false, Login
-// hides the button, and the password form carries on as the only way in.
-const clientId = import.meta.env.VITE_SSO_CLIENT_ID || '';
-const tenantId = import.meta.env.VITE_SSO_TENANT_ID || '';
+// Handed over by whichever server served this page (Backend/config/spa.py injects it into
+// index.html), NOT built in. One bundle is built and promoted to every environment, so a value
+// compiled into it would be the same everywhere - staging and production need different Entra
+// registrations, and only the server knows which one it is.
+//
+// The import.meta.env fallback covers the cases where Django is not the thing serving
+// index.html and so no injection happened: `npm run dev`, where Vite serves it, and the local
+// Docker/nginx stack. Both read Frontend/.env exactly as they always did.
+//
+// Both unset is the normal state for a deployment that has not been given a registration:
+// isSsoConfigured() returns false, Login hides the button, and the password form carries on as
+// the only way in.
+//
+// Read once at module scope, which is safe: the injected tag is a plain inline <script> and
+// this bundle is a deferred module, so the tag has already run by the time this line does.
+const runtimeConfig = window.__APP_CONFIG__ || {};
+const clientId = runtimeConfig.ssoClientId || import.meta.env.VITE_SSO_CLIENT_ID || '';
+const tenantId = runtimeConfig.ssoTenantId || import.meta.env.VITE_SSO_TENANT_ID || '';
 
 // openid/profile/email only. This app asks Entra who someone is and nothing else - it holds
 // no delegated Graph permission and reads nothing from the directory, so a wider scope would
