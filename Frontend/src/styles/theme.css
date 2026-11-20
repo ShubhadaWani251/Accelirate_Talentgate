@@ -477,8 +477,18 @@ h1, h2, h3, h4, .brand, .btn, .box-label {
 .table-scroll.freeze-panes table.data-table tr > :nth-child(2) {
   position: sticky; z-index: 1; background-color: #fff;
 }
+/* min/max as well as width, and all three the same: in an auto-layout table `width` is only a
+   suggestion, so the browser sized this column from its content instead - 45px with rows in it,
+   but 25px on an EMPTY table, where the only thing left to measure is an empty <th>. Column 2
+   is pinned at --freeze-col1 whatever happens, so any disagreement is an overlap: the second
+   frozen column sat 17px inside the first, and every scrolled column slid under the pair at the
+   wrong offset. It showed up as a header row of half-cut labels, and only on a deployment with
+   no candidates yet - which is why staging looked fine and a fresh production did not. */
 .table-scroll.freeze-panes table.data-table tr > :nth-child(1) {
-  left: 0; width: var(--freeze-col1);
+  left: 0;
+  width: var(--freeze-col1);
+  min-width: var(--freeze-col1);
+  max-width: var(--freeze-col1);
 }
 .table-scroll.freeze-panes table.data-table tr > :nth-child(2) { left: var(--freeze-col1); }
 /* The corner is sticky on both axes, so it has to outrank both - and it has to restate the
